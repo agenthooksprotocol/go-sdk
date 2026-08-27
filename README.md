@@ -57,12 +57,6 @@ The package exports:
 
 Generated structs preserve unknown object members in `AdditionalProperties`. Open enums retain unknown string values, and discriminated unions preserve unknown variants. Parsing does not coerce values, insert defaults, or discard extension data.
 
-## Parsing and validation
-
-Structural parsing is designed for typed access and lossless forward compatibility. It does not apply every JSON Schema constraint.
-
-Before classifying a response or making an authorization decision, validate the payload against the canonical AHP Draft 2020-12 schema and applicable protocol requirements. A successful `ParseInterceptDenyResponse` call alone does not prove that a response is an authorized denial.
-
 ## Development
 
 ```sh
