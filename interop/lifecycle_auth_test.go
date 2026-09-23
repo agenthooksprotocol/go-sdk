@@ -15,6 +15,7 @@ import (
 
 func TestLifecycleAuthParity(t *testing.T) {
 	t.Setenv("AHP_GO_LIFE_UPLOAD", "independent-upload-test-token")
+	t.Setenv("AHP_INTEROP_UNAUTHORIZED_UPLOAD_TOKEN", "unauthorized-upload-test-token")
 	var all Object
 	if e := Load("../../agent-hooks-protocol/interop/lifecycle-scenarios.json", &all); e != nil {
 		t.Fatal(e)
@@ -116,6 +117,15 @@ func TestLifecycleAuthParity(t *testing.T) {
 					t.Fatal("event credential accepted by upload", status)
 				}
 			}
+			// Exclude the explicit credential rejection probes above from fixture receipts.
+			receiptOffset := 0
+			if transport == "http" {
+				prior, err := lifecycleControl(ctx, client.ControlEndpoint, "/receipts", nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				receiptOffset = len(array(obj(prior)["entries"]))
+			}
 			if e := LifecycleClient(ctx, client); e != nil {
 				t.Fatal(e)
 			}
@@ -153,10 +163,37 @@ func TestLifecycleAuthParity(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			for _, raw := range array(obj(report["receipts"])["entries"]) {
+			uploadSteps := []Object{}
+			for _, raw := range scenarios {
+				for _, rawStep := range array(obj(raw)["steps"]) {
+					if step := obj(rawStep); step["op"] == "upload" {
+						uploadSteps = append(uploadSteps, step)
+					}
+				}
+			}
+			uploadIndex := 0
+			aliases := map[string]string{}
+			for _, raw := range array(obj(report["receipts"])["entries"])[receiptOffset:] {
 				r := obj(raw)
 				m := obj(r["message"])
 				switch r["kind"] {
+				case "upload":
+					if uploadIndex >= len(uploadSteps) {
+						t.Fatal("unexpected upload receipt")
+					}
+					step := uploadSteps[uploadIndex]
+					uploadIndex++
+					if r["size"] != step["size"] || r["sha256"] != step["sha256"] {
+						t.Fatal("upload integrity receipt mismatch", r)
+					}
+					key := contentKey(str(step["subscription"]), str(step["ref"]))
+					delete(aliases, key)
+					if r["status"] == float64(201) {
+						if str(r["ref"]) == "" || r["ref"] == step["ref"] {
+							t.Fatal("missing receiver-allocated reference", r)
+						}
+						aliases[key] = str(r["ref"])
+					}
 				case "view":
 					t.Fatal("semantic oracle receipt")
 				case "received":
@@ -170,6 +207,9 @@ func TestLifecycleAuthParity(t *testing.T) {
 						want = chain[n]
 						chainReceived[lifecycleID(m)] = n + 1
 					}
+					// Only fixture aliases change on the wire, using earlier upload receipts.
+					want = obj(clone(want))
+					resolveUploadAliases(want, "body", aliases)
 					if m == nil || !reflect.DeepEqual(m, want) {
 						t.Fatal("not exact received message", r)
 					}
@@ -179,6 +219,9 @@ func TestLifecycleAuthParity(t *testing.T) {
 						t.Fatal(e)
 					}
 				}
+			}
+			if uploadIndex != len(uploadSteps) {
+				t.Fatal("missing upload receipts")
 			}
 			if received == 0 || observed == 0 {
 				t.Fatal("missing actual message receipts")

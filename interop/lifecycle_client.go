@@ -238,6 +238,12 @@ func LifecycleClient(ctx context.Context, c LifecycleConfig) error {
 						sub = scope
 					}
 				}
+				// Shared fixtures omit the body subscription on intercept sends.
+				// Only the single default policy supplies that implicit scope; never
+				// search confirmed references across explicitly configured scopes.
+				if sub == "" && len(c.Uploads) == 0 && c.Upload.Endpoint != "" {
+					sub = "body"
+				}
 				_, allowed := c.Uploads[sub]
 				projected, err := ProjectContent(obj(params["event"]), c.ContentSelections[sub], allowed)
 				if err != nil {
@@ -381,6 +387,23 @@ func LifecycleClient(ctx context.Context, c LifecycleConfig) error {
 				if !ok && c.Upload.Endpoint != "" {
 					binding = c.Upload
 					ok = true
+				}
+				if override, present := step["upload"]; present {
+					// Overrides replace credentials, never inherit them. The discovered
+					// endpoint remains the fallback for process-trusted stdio fixtures.
+					endpoint := binding.Endpoint
+					raw, err := json.Marshal(override)
+					if err != nil {
+						return err
+					}
+					binding = UploadBinding{}
+					if err = json.Unmarshal(raw, &binding); err != nil {
+						return err
+					}
+					if binding.Endpoint == "" {
+						binding.Endpoint = endpoint
+					}
+					ok = binding.Endpoint != ""
 				}
 				if !ok {
 					return fmt.Errorf("no upload binding for subscription %s", sub)

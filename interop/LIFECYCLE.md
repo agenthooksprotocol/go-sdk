@@ -64,7 +64,12 @@ only the actual HTTP response counts as rejection evidence.
 The per-subscription `uploads` map and optional `contentSelections` map remain
 available for local explicit policies. Upload map entries without auth explicitly
 permit anonymous access. Missing policy does not grant access. These optional
-maps are not required by the matrix configuration.
+maps are not required by the matrix configuration. A fixture step's `upload`
+policy overrides the configured binding without inheriting its credentials; an
+omitted endpoint falls back to the configured/discovered upload endpoint. With
+only the default `upload` policy, intercept steps without a subscription use the
+fixture's `body` alias scope. Explicit scopes remain isolated, and ambiguous
+per-subscription policies never search other scopes for a matching reference.
 
 Fixture upload steps require `bodyBase64`, decoded once to bytes before calling
 the binary API. This is fixture encoding, not HTTP framing. The client tracks
