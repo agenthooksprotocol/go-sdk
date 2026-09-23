@@ -10,11 +10,35 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go-sdk
     steps:
       - uses: actions/checkout@v5
+        with:
+          path: go-sdk
+      - name: Check out canonical interoperability fixtures
+        uses: actions/checkout@v5
+        with:
+          repository: agenthooksprotocol/agent-hooks-protocol
+          ref: 548f1e857ba3f4d803fc40b04f848236b7316704
+          path: agent-hooks-protocol
+      - name: Use the SDK schema snapshot
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          lock = json.loads(Path('ahp-codegen.lock.json').read_text())
+          schemas = json.loads(Path('schemas.json').read_text())
+          assert len(lock['documents']) == len(schemas)
+          for document, schema in zip(lock['documents'], schemas):
+              path = Path('../agent-hooks-protocol') / document['path']
+              path.write_text(json.dumps(schema))
+          PY
       - uses: actions/setup-go@v6
         with:
           go-version: "1.24.x"
+          cache-dependency-path: go-sdk/go.sum
       - name: Check formatting
         run: test -z "$(gofmt -l .)"
       - run: go vet ./...
