@@ -1,5 +1,10 @@
 # Agent Hooks Protocol SDK for Go
 
+The active draft also provides MCP-aligned elicitation, automatic short-circuit
+observation delivery, and before/after compaction controls. See the shared
+[boundary API guide](https://github.com/agenthooksprotocol/agent-hooks-protocol/blob/main/docs/accepted-boundary-apis.md)
+for entrypoints, upload binding, trusted-host obligations, and test scope.
+
 Typed Go models and JSON codecs for the [Agent Hooks Protocol (AHP)](https://github.com/agenthooksprotocol/agent-hooks-protocol).
 
 The SDK follows the current AHP `draft` schema snapshot and supports Go 1.22 or newer.
@@ -60,12 +65,19 @@ Generated structs preserve unknown object members in `AdditionalProperties`. Ope
 ## Development
 
 ```sh
+git clone https://github.com/agenthooksprotocol/agent-hooks-protocol.git
 git clone https://github.com/agenthooksprotocol/go-sdk.git
 cd go-sdk
 gofmt -w .
 go vet ./...
 go test ./...
 ```
+
+The interoperability adapters and tests use the sibling protocol checkout's
+canonical schemas, shared scenarios, and public test certificates. CI pins the
+fixture revision and validates against this SDK's bundled schema snapshot. See
+[the adapter guide](interop/README.md) and [lifecycle guide](interop/LIFECYCLE.md)
+for transport, authentication, upload, and synthetic-host boundaries.
 
 Generated code lives in `generated.go`. Its provenance is recorded in `ahp-codegen.lock.json`; schema changes are made in the [protocol repository](https://github.com/agenthooksprotocol/agent-hooks-protocol), not by editing the generated file.
 
