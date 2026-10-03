@@ -1,0 +1,1 @@
+{"language":"go","server":["go","run","./cmd/interop","server"],"client":["go","run","./cmd/interop","client"],"lifecycleClient":["go","run","./cmd/lifecycle-client"],"lifecycleServer":["go","run","./cmd/lifecycle-server"]}
