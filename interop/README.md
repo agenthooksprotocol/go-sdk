@@ -56,6 +56,9 @@ Auth checks precede receipt recording and also protect discovery. Reports never
 contain auth configuration; receipts may retain canonical messages, never
 transport credentials.
 
+This adapter does not implement OAuth protected-resource or authorization-server
+discovery.
+
 Stdio uses process trust; combining HTTP auth with it reports `inapplicable`.
 Unknown HTTP auth reports `unsupported`, never passed. Failed transport/discovery
 or invalid request cannot satisfy a negative-response scenario. Validated normal

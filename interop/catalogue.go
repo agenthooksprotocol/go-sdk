@@ -19,7 +19,7 @@ func catalogueManifest() Object {
 		}
 		events = append(events, entry)
 	}
-	return Object{"events": events, "gaps": []any{Object{"path": "events.hook.failure", "reason": "not supported by synthetic catalogue host"}}, "transports": []any{"http", "stdio"}, "authentication": []any{"bearer", "oauth", "workload", "mtls"}, "toolPaths": []any{"native"}, "contentCategories": []any{"text", "reasoning", "images", "audio", "video", "files"}, "limits": Object{"maxUploadBytes": 16 << 20, "maxContinuations": 4}, "managedPolicy": Object{"scopes": []any{"user", "project"}, "disableable": true}, "correlationIdentityFields": []any{"event.id", "call.id", "task.id", "parentEventId"}}
+	return Object{"events": events, "gaps": []any{Object{"path": "events.hook.failure", "reason": "not supported by synthetic catalogue host"}}, "transports": []any{"http", "stdio"}, "authentication": []any{"bearer", "oauth"}, "toolPaths": []any{"native"}, "contentCategories": []any{"text", "reasoning", "images", "audio", "video", "files"}, "limits": Object{"maxUploadBytes": 16 << 20, "maxContinuations": 4}, "managedPolicy": Object{"scopes": []any{"user", "project"}, "disableable": true}, "correlationIdentityFields": []any{"event.id", "call.id", "task.id", "parentEventId"}}
 }
 
 type catalogueRejection struct{ kind string }
