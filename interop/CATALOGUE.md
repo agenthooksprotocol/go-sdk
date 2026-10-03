@@ -51,9 +51,7 @@ Registration content selection must satisfy the current canonical requirement
 for explicit `content.default`; the evaluator never silently inserts a default.
 The test context's environment can resolve configured bearer `tokenEnv` values.
 Unresolved credential references or unprovisioned OAuth backend configuration
-are rejected, even if the event connection independently succeeded. Portable
-registration and capability authentication use bearer/OAuth only; workload and
-mTLS remain deployment-specific transports, not portable registration methods.
+are rejected, even if the event connection independently succeeded.
 The environment is trusted local host input, not a remote principal assertion.
 No credential values appear in reports or diagnostics.
 
