@@ -7,7 +7,11 @@ func TestCatalogueManifest(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	response := Object{"jsonrpc": "2.0", "id": "discovery", "result": Object{"protocolVersion": "draft", "manifest": catalogueManifest()}}
+	manifest := catalogueManifest()
+	if got := string(wire(manifest["authentication"])); got != `["bearer","oauth"]` {
+		t.Fatalf("portable authentication = %s", got)
+	}
+	response := Object{"jsonrpc": "2.0", "id": "discovery", "result": Object{"protocolVersion": "draft", "manifest": manifest}}
 	if e = v.schemas["capabilities-response"].Validate(clone(response)); e != nil {
 		t.Fatal(e)
 	}
@@ -52,7 +56,7 @@ func TestCatalogueRegistrationEnforcement(t *testing.T) {
 	if e := validateRegistration(v, registration, manifest, []any{requirement}, context); e != nil {
 		t.Fatal(e)
 	}
-	for _, tc := range []string{"duplicate", "event", "mode", "modify", "ask", "auth", "scope", "failurePolicy", "content", "contentDefault"} {
+	for _, tc := range []string{"duplicate", "event", "mode", "modify", "ask", "auth", "workload", "mtls", "scope", "failurePolicy", "content", "contentDefault"} {
 		t.Run(tc, func(t *testing.T) {
 			doc := obj(clone(registration))
 			ctx := obj(clone(context))
@@ -71,6 +75,10 @@ func TestCatalogueRegistrationEnforcement(t *testing.T) {
 			case "ask":
 				req["effects"] = []any{"ask"}
 				ctx["interactive"] = false
+			case "workload":
+				backend["authentication"] = Object{"type": "workload", "credentialRef": "local", "issuer": "issuer", "audience": "audience"}
+			case "mtls":
+				backend["authentication"] = Object{"type": "mtls", "certificateRef": "cert", "privateKeyRef": "key", "trustRootsRef": "ca"}
 			case "auth":
 				backend["authentication"] = Object{"type": "bearer", "tokenEnv": "MISSING_CREDENTIAL"}
 			case "scope":

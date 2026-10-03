@@ -219,7 +219,7 @@ func Server(ctx context.Context, c Config) error {
 					response := Object{"jsonrpc": "2.0", "id": req["id"], "result": Object{"protocolVersion": "draft", "manifest": Object{
 						"events":     []any{Object{"event": "tool.before", "modes": []any{"intercept"}, "capabilities": ToolCapabilities()}, Object{"event": "turn.finish.before", "modes": []any{"intercept"}, "capabilities": Object{"effects": []any{"flow", "message"}, "flow": obj(Capabilities()["flow"])}}},
 						"gaps":       []any{Object{"path": "events.other", "reason": "Synthetic tool.before and turn.finish.before application only"}},
-						"transports": []any{"http", "stdio"}, "authentication": []any{"bearer", "oauth", "workload", "mtls"},
+						"transports": []any{"http", "stdio"}, "authentication": []any{"bearer", "oauth"},
 						"toolPaths": []any{"native"}, "contentCategories": []any{}, "limits": Object{"maxContinuations": 4},
 						"managedPolicy": Object{"scopes": []any{"user"}, "disableable": true}, "correlationIdentityFields": []any{"event.id", "call.id"},
 					}}}
