@@ -31,8 +31,8 @@ func TestLifecycleObserveValidationAndAuthorization(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if e = v.validate("intercept-response", r); e != nil {
-		t.Fatalf("malicious response must be canonical: %v", e)
+	if r != nil {
+		t.Fatal("ordinary notification must not return a protocol response")
 	}
 	s.eventScopes = []string{"metadata"}
 	if _, e = s.dispatch(context.Background(), notification); e == nil {

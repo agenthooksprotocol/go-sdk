@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -23,9 +24,11 @@ type lifecycleAttempt struct {
 }
 type lifecycleBoundary struct {
 	staged              Object
+	protocolError       error
 	accepted, cancelled bool
 }
 type lifecyclePipe struct {
+	ordinary  chan struct{} // one ordinary outstanding stdio intercept per connection
 	mu        sync.Mutex
 	writer    io.Writer
 	pending   map[string][]chan lifecycleResult
@@ -179,25 +182,16 @@ func LifecycleClient(ctx context.Context, c LifecycleConfig) error {
 		if sc.Chain != nil {
 			result, err := runObservationChain(sc, func(request Object) (<-chan lifecycleResult, error) {
 				done := make(chan lifecycleResult, 1)
-				if pipe != nil {
-					if err := pipe.send(request, done); err != nil {
-						return nil, err
-					}
-				} else {
-					go func() {
-						response, _, err := lifecycleCallWith(ctx, eventHTTP, eventToken, c.Endpoint+"/intercept", request)
-						done <- lifecycleResult{response: response, err: err}
-					}()
-				}
+				go func() {
+					response, err := lifecyclePublicCall(ctx, request, pipe, eventHTTP, eventToken, c.Endpoint)
+					done <- lifecycleResult{response: response, err: err}
+				}()
 				return done, nil
 			}, func(path string, value Object) error {
 				_, err := lifecycleControl(ctx, c.ControlEndpoint, path, value)
 				return err
 			}, func(note Object) error {
-				if pipe != nil {
-					return pipe.send(note, nil)
-				}
-				_, _, err := lifecycleCallWith(ctx, eventHTTP, eventToken, c.Endpoint+"/observe", note)
+				_, err := lifecyclePublicCall(ctx, note, pipe, eventHTTP, eventToken, c.Endpoint)
 				return err
 			}, v.validate)
 			if err != nil {
@@ -208,6 +202,7 @@ func LifecycleClient(ctx context.Context, c LifecycleConfig) error {
 		}
 
 		actual := Object{"published": []any{}, "cancelled": []any{}, "ignored": []any{}, "states": Object{}, "observations": []any{}, "uploadStatuses": []any{}}
+		observationDiagnostics := []any{}
 		boundaries := map[string]*lifecycleBoundary{}
 		attempts := map[string]*lifecycleAttempt{}
 		appendActual := func(k string, x any) { actual[k] = append(array(actual[k]), x) }
@@ -263,19 +258,11 @@ func LifecycleClient(ctx context.Context, c LifecycleConfig) error {
 				}
 				a := &lifecycleAttempt{request: request, done: make(chan lifecycleResult, 1)}
 				attempts[slot] = a
-				if pipe != nil {
-					if e = pipe.send(request, a.done); e != nil {
-						return e
-					}
-				} else {
-					go func() {
-						m, status, e := lifecycleCallWith(ctx, eventHTTP, eventToken, c.Endpoint+"/intercept", a.request)
-						if e == nil && status != 200 {
-							e = fmt.Errorf("intercept HTTP %d", status)
-						}
-						a.done <- lifecycleResult{m, e}
-					}()
-				}
+				options := lifecycleContentOptions(c, sub, confirmed, obj(params["event"]))
+				go func() {
+					response, err := lifecyclePublicCall(ctx, a.request, pipe, eventHTTP, eventToken, c.Endpoint, options)
+					a.done <- lifecycleResult{response: response, err: err}
+				}()
 			case "wait", "release":
 				if request == nil {
 					return fmt.Errorf("unknown request")
@@ -299,18 +286,17 @@ func LifecycleClient(ctx context.Context, c LifecycleConfig) error {
 				case <-ctx.Done():
 					return ctx.Err()
 				}
-				if reply.err != nil {
-					return reply.err
-				}
-				if e = v.validate("intercept-response", reply.response); e != nil {
-					return e
-				}
+
 				bid := lifecycleID(a.request)
 				boundary := boundaries[bid]
-				if lifecycleID(reply.response) != bid || boundary.cancelled || boundary.accepted || boundary.staged != nil {
+				if (reply.response != nil && lifecycleID(reply.response) != bid) || boundary.cancelled || boundary.accepted || boundary.staged != nil {
 					appendActual("ignored", slot)
 				} else {
 					boundary.staged = reply.response
+					boundary.protocolError = reply.err
+					if boundary.staged == nil {
+						boundary.staged = Object{"id": a.request["id"]}
+					}
 					if e = mark("acquired", a.request["id"]); e != nil {
 						return e
 					}
@@ -347,6 +333,9 @@ func LifecycleClient(ctx context.Context, c LifecycleConfig) error {
 				}
 				if response == nil {
 					continue
+				}
+				if op != "failOpen" && b.protocolError != nil {
+					return fmt.Errorf("scenario %s: %w", sc.ID, b.protocolError)
 				}
 				state, e := Apply(request, response)
 				if e != nil {
@@ -453,18 +442,14 @@ func LifecycleClient(ctx context.Context, c LifecycleConfig) error {
 				if e = v.validate("observe", notification); e != nil {
 					return e
 				}
-				if pipe != nil {
-					if e = pipe.send(notification, nil); e != nil {
+				if _, e = lifecyclePublicCall(ctx, notification, pipe, eventHTTP, eventToken, c.Endpoint, lifecycleContentOptions(c, sub, confirmed, event)); e != nil {
+					var acknowledgement *lifecycleObservationAcknowledgementError
+					if !errors.As(e, &acknowledgement) {
 						return e
 					}
-				} else {
-					_, status, e := lifecycleCallWith(ctx, eventHTTP, eventToken, c.Endpoint+"/observe", notification)
-					if e != nil {
-						return e
-					}
-					if status != 200 && status != 204 {
-						return fmt.Errorf("observe HTTP %d", status)
-					}
+					// The public client rejected this acknowledgement. Settlement
+					// is already final; report delivery evidence separately.
+					observationDiagnostics = append(observationDiagnostics, Object{"eventId": event["id"], "subscription": sub, "kind": "invalid-observation-acknowledgement", "status": acknowledgement.Status, "response": clone(acknowledgement.Response)})
 				}
 				eventID := str(event["id"])
 				observed[eventID]++
@@ -476,7 +461,11 @@ func LifecycleClient(ctx context.Context, c LifecycleConfig) error {
 				return fmt.Errorf("unknown lifecycle operation %s", op)
 			}
 		}
-		results = append(results, Object{"id": sc.ID, "actual": actual})
+		result := Object{"id": sc.ID, "actual": actual}
+		if len(observationDiagnostics) > 0 {
+			result["observationDiagnostics"] = observationDiagnostics
+		}
+		results = append(results, result)
 	}
 	receipts, e := lifecycleControl(ctx, c.ControlEndpoint, "/receipts", nil)
 	if e != nil {

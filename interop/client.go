@@ -44,7 +44,7 @@ func connection(ctx context.Context, c Config) (exchange, func(), error) {
 				return nil, fmt.Errorf("HTTP exchange failed")
 			}
 			defer res.Body.Close()
-			if res.StatusCode != 200 {
+			if res.StatusCode != 200 && !(method == "hooks/observe" && (res.StatusCode == 202 || res.StatusCode == 204)) {
 				return nil, fmt.Errorf("HTTP status %d", res.StatusCode)
 			}
 			out, e := io.ReadAll(io.LimitReader(res.Body, (4<<20)+1))
@@ -82,13 +82,16 @@ func connection(ctx context.Context, c Config) (exchange, func(), error) {
 		}
 		cmd.Wait()
 	}
-	return func(ctx context.Context, _ string, b []byte) ([]byte, error) {
+	return func(ctx context.Context, method string, b []byte) ([]byte, error) {
 		frame, err := ndjson(b)
 		if err != nil {
 			return nil, err
 		}
 		if _, e := in.Write(frame); e != nil {
 			return nil, fmt.Errorf("stdio write failed")
+		}
+		if method == "hooks/observe" {
+			return nil, nil
 		}
 		type answer struct {
 			b []byte
@@ -115,10 +118,13 @@ func connection(ctx context.Context, c Config) (exchange, func(), error) {
 }
 
 type Result struct {
-	ID     string `json:"id"`
-	Status string `json:"status"`
-	Actual Object `json:"actual"`
-	Error  string `json:"error,omitempty"`
+	ID             string `json:"id"`
+	Status         string `json:"status"`
+	Actual         Object `json:"actual"`
+	Error          string `json:"error,omitempty"`
+	SDKAccepted    *bool  `json:"sdkAccepted,omitempty"`
+	HostAccepted   *bool  `json:"hostAccepted,omitempty"`
+	RejectionLayer string `json:"rejectionLayer,omitempty"`
 }
 
 func Client(ctx context.Context, c Config) error {
@@ -209,26 +215,27 @@ func Client(ctx context.Context, c Config) error {
 			}
 			if err == nil {
 				call, cancel := context.WithTimeout(ctx, 20*time.Second)
-				delete(obj(req["params"]), "subscriptionId")
-				wire, marshalErr := json.Marshal(req)
-				if marshalErr != nil {
-					cancel()
-					return marshalErr
+				// Settled-state fixtures intentionally test receiver validation of
+				// a raw interception. Ordinary SDK delivery would downgrade to observe.
+				state := obj(obj(req["params"])["state"])
+				if state["permission"] == "deny" || state["flow"] == "stop" {
+					r.Actual, responseRejected, err = rawSettledFixtureIntercept(call, req, s.Request, conn, v)
+				} else {
+					r.Actual, responseRejected, err = publicIntercept(call, req, conn)
 				}
-				b, ce := conn(call, "hooks/intercept", wire)
 				cancel()
-				err = ce
-				if err == nil {
-					res, ve := v.Validate("intercept-response", b)
-					err = ve
-					if err == nil {
-						r.Actual, err = Apply(req, res)
-					}
-					responseRejected = err != nil
-				}
 			}
 		}
-		if s.ExpectError && responseRejected {
+		if err == nil && s.ExpectError && s.HostExpected != nil && containsTag(s.Tags, "application-invalid") && r.Actual["hostInputRejected"] == true {
+			accepted, refused := true, false
+			r.SDKAccepted, r.HostAccepted, r.RejectionLayer = &accepted, &refused, "host-input-schema"
+			delete(r.Actual, "hostInputRejected")
+			if reflect.DeepEqual(r.Actual, s.HostExpected) {
+				r.Status = "passed"
+			} else {
+				r.Error = "expected host refusal result mismatch"
+			}
+		} else if s.ExpectError && responseRejected {
 			r.Status = "passed"
 			r.Actual = Object{"rejected": true}
 		} else if err != nil {
@@ -251,4 +258,28 @@ func Client(ctx context.Context, c Config) error {
 		results = append(results, r)
 	}
 	return finish()
+}
+
+// rawSettledFixtureIntercept is deliberately not an ordinary SDK boundary call.
+// It preserves the fixture's request verbatim to exercise a remote receiver with
+// already-settled state, including responses a normal SDK would never solicit.
+func rawSettledFixtureIntercept(ctx context.Context, request Object, body []byte, conn exchange, v *Validator) (Object, bool, error) {
+	reply, err := conn(ctx, "hooks/intercept", body)
+	if err != nil {
+		return nil, false, err
+	}
+	response, err := v.Validate("intercept-response", reply)
+	if err != nil {
+		return nil, true, err
+	}
+	actual, err := Apply(request, response)
+	return actual, err != nil, err
+}
+func containsTag(tags []string, want string) bool {
+	for _, tag := range tags {
+		if tag == want {
+			return true
+		}
+	}
+	return false
 }

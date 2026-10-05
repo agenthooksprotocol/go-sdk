@@ -5,6 +5,25 @@ Run from `go-sdk`:
 - `go run ./cmd/lifecycle-server --config ABS_PATH`
 - `go run ./cmd/lifecycle-client --config ABS_PATH`
 
+## Public runtime and host scheduling
+
+Ordinary requests and notifications dispatch through `client.New` and the named
+public boundaries. HTTP mounts `server.NewHandler`; the bounded stdio scheduling
+bridge delegates each exact frame to `server.ServeStdio` with that same handler.
+Ordinary stdio intercepts share one outstanding-request slot. Explicit `/emit`
+and post-settlement native-prefix probes retain their deliberate raw paths.
+
+Release, cancellation, publication, native permission, and actual execution are
+host controls. A response's public protocol error is staged with its completion;
+cancelling or discarding that completion cannot publish effects. Accepting it
+surfaces the rejection instead of invoking the host evaluator.
+
+Lifecycle upload steps remain separate authenticated operations. Immutable
+confirmations are cached per receiver subscription for later public projection:
+the cache can return only previously confirmed references for identical bytes,
+never mint references or authorize a different scope. Public runtime resolution,
+size/hash checks, and confirmation validation still run.
+
 ## Observations
 
 Observers receive the permission-filtered effective event with the same logical
@@ -21,8 +40,8 @@ The receiver validates the complete notification and retains it unchanged as
 `message` in its observed receipt, alongside event ID and event.
 There is no `/view` endpoint or semantic oracle. `/mark`, `/wait`, `/release`,
 `/wait-observed`, receipts and adversarial `/emit` are test rendezvous only.
-Observers cannot change settlement; the deliberately malicious observer reply
-in this test adapter is ignored by the client.
+Observers cannot change settlement. Ordinary notifications are silent; explicit
+malicious observer output is emitted only through the raw test control path.
 
 ## Raw binary upload binding
 

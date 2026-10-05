@@ -276,7 +276,7 @@ func TestCanonicalEvaluatorScenarios(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	for _, s := range ss {
+	for _, s := range withHostRefusalExpectations(t, ss) {
 		t.Run(s.ID, func(t *testing.T) {
 			var req, res Object
 			if e := json.Unmarshal(s.Request, &req); e != nil {
@@ -292,6 +292,10 @@ func TestCanonicalEvaluatorScenarios(t *testing.T) {
 			var result Object
 			if e == nil {
 				result, e = Apply(req, res)
+			}
+			if s.HostExpected != nil {
+				assertHostRefusal(t, s, result, e)
+				return
 			}
 			if s.ExpectError {
 				if e == nil {

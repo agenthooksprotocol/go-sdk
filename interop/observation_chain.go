@@ -1,6 +1,9 @@
 package interop
 
-import "fmt"
+import (
+	"fmt"
+	"reflect"
+)
 
 // runObservationChain runs actual serial wire interception; subscriptions after
 // settlement are automatically observed, never expanded into fixture decisions.
@@ -8,6 +11,7 @@ func runObservationChain(sc lifecycleScenario, send func(Object) (<-chan lifecyc
 	original := sc.Requests["a"]
 	id := original["id"]
 	event := obj(clone(obj(original["params"])["event"]))
+	pendingState := obj(clone(obj(original["params"])["state"]))
 	called, failures, remaining := []any{}, []any{}, []Object{}
 	halted := false
 	var pending <-chan lifecycleResult
@@ -20,6 +24,7 @@ func runObservationChain(sc lifecycleScenario, send func(Object) (<-chan lifecyc
 		request := obj(clone(original))
 		params := obj(request["params"])
 		params["event"] = clone(event)
+		params["state"] = clone(pendingState)
 		delete(params, "subscriptionId") // legacy fixture metadata is not wire identity
 		if sub["content"] == "omit" {
 			obj(params["event"])["items"] = []any{}
@@ -57,6 +62,33 @@ func runObservationChain(sc lifecycleScenario, send func(Object) (<-chan lifecyc
 			failures = append(failures, sub["id"])
 			halted = sub["failurePolicy"] == "fail-closed"
 		} else {
+			// Carry the accepted protocol prefix, not the template state or
+			// Apply's final host decision (which may reflect native policy).
+			permission := str(pendingState["permission"])
+			if !reflect.DeepEqual(obj(event["tool"])["input"], state["input"]) {
+				pendingState["candidate"] = nil
+				if permission == "allow" {
+					permission = "none"
+				}
+			}
+			for _, raw := range array(obj(result.response["result"])["effects"]) {
+				effect := obj(raw)
+				switch effect["type"] {
+				case "deny":
+					permission = "deny"
+				case "ask":
+					if permission != "deny" {
+						permission = "ask"
+					}
+				case "allow":
+					if permission == "none" {
+						permission = "allow"
+					}
+				case "return":
+					pendingState["candidate"] = Object{"value": clone(effect["value"])}
+				}
+			}
+			pendingState["permission"] = permission
 			obj(event["tool"])["input"] = clone(state["input"])
 			halted = state["decision"] == "deny" || state["flow"] == "stop"
 		}

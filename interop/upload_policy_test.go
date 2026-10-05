@@ -60,7 +60,7 @@ func TestCredentialOnlyUploadReceiverPolicy(t *testing.T) {
 				t.Fatal(err)
 			}
 			res.Body.Close()
-			if res.StatusCode != http.StatusOK {
+			if res.StatusCode != http.StatusNoContent {
 				t.Fatalf("independently authenticated event failed: %d", res.StatusCode)
 			}
 		})

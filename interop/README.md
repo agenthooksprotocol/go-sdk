@@ -19,6 +19,19 @@ capabilities object. No legacy method aliases are accepted. Stdio requests and
 responses are compacted into exactly one physical JSON line, including when
 source fixtures use multiline pretty-printed JSON.
 
+## Public SDK path and deliberate bypasses
+
+Ordinary client fixtures use named public client boundaries with fixture-owned
+connections injected through `http.RoundTripper`. Ordinary server callbacks mount
+`server.NewHandler` directly for HTTP and use `server.ServeStdio` for stdio.
+Explicit negative-response fixtures bypass output validation, preserving their
+wire envelopes (including intentionally wrong IDs). Ordinary lifecycle sends and
+notifications also use the public client; lifecycle HTTP and scheduled stdio
+frames use the public server handler. Only explicit raw emission and sending
+against an already-stopped native prefix bypass ordinary client dispatch. The synthetic
+`Apply` evaluator still owns native permission and actual execution policy; the
+public SDK composes protocol effects but does not execute tools.
+
 ## Validation and application
 
 - Generated Go codecs plus **live canonical JSON Schema draft 2020-12** validation
@@ -30,7 +43,9 @@ source fixtures use multiline pretty-printed JSON.
   unadvertised injection delivery reject the **whole response**.
 - Synthetic tool input supports `modify(input)` replace and shallow merge, with
   literal null and whole nested value replacement. `task`, when initially
-  present, must remain a positive integer after each mutation.
+  present, must be a positive integer before execution. A host-schema refusal
+  retains accepted input/messages and reports `executed: false` and
+  `hostInputRejected: true`; it is not an invalid-response rejection.
 - Input modifications precede result binding. Changed input invalidates previous
   candidates and stale allow decisions. Deny wins over ask and allow; ask remains
   pending; return does not bypass either. Messages and injections accumulate only

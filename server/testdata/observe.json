@@ -1,0 +1,37 @@
+{
+  "jsonrpc": "2.0",
+  "method": "hooks/observe",
+  "params": {
+    "protocolVersion": "draft",
+    "event": {
+      "id": "evt_observe_error_001",
+      "source": "https://harness.example/runtime/42",
+      "type": "tool.after",
+      "time": "2026-08-24T08:51:16Z",
+      "session": {
+        "id": "sess_observe_123"
+      },
+      "tool": {
+        "name": "read_file",
+        "kind": "file_read",
+        "input": {
+          "path": "missing.txt"
+        },
+        "origin": "native"
+      },
+      "outcome": "error",
+      "execution": {
+        "status": "executed"
+      },
+      "call": {
+        "id": "call_observe_789"
+      },
+      "error": {
+        "class": "operation",
+        "message": "Operation failed"
+      },
+      "path": "example",
+      "items": []
+    }
+  }
+}

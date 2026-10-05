@@ -7,7 +7,7 @@ for entrypoints, upload binding, trusted-host obligations, and test scope.
 
 Typed Go models and JSON codecs for the [Agent Hooks Protocol (AHP)](https://github.com/agenthooksprotocol/agent-hooks-protocol).
 
-The SDK follows the current AHP `draft` schema snapshot and supports Go 1.22 or newer.
+The SDK follows the current AHP `draft` schema snapshot and supports Go 1.27 or newer.
 
 ## Installation
 
@@ -62,6 +62,148 @@ The package exports:
 
 Generated structs preserve unknown object members in `AdditionalProperties`. Open enums retain unknown string values, and discriminated unions preserve unknown variants. Parsing does not coerce values, insert defaults, or discard extension data.
 
+## Public runtime
+
+The `client` package composes protocol decisions; it does **not** run tools,
+validate application argument schemas, grant native permissions, or commit
+compaction changes. The host remains responsible for those operations.
+
+- Configure a client with a registration, stable host `Source`, and an explicit
+  capability manifest. Registration order, selectors, deadlines, and failure
+  policies govern delivery. Construction performs no network or process I/O.
+- Call the context-first named boundary methods with generated `event` input
+  projections. `ToolBefore` preserves the application argument type through its
+  result. Use `json.RawMessage` as the type for dynamic tool registries.
+- `WithInitialState` carries a native decision already accumulated for this
+  occurrence. `WithCapabilities` can only narrow the manifest. Neither option
+  proves execution or grants authority.
+- A protocol denial is a result, not a Go error. Operational failures appear in
+  `Result.Errors`; fail-closed failures are distinguishable from backend effects.
+  Cancellation returns the accepted prefix with `Interrupted` set and a context
+  error. Never execute interrupted work, including under fail-open policy.
+- A `DecodeError` means protocol acceptance succeeded but the effective input
+  cannot be represented by the application's type. The non-nil result retains
+  accepted effects and raw `EffectiveInput`; `InputAvailable` is false. Do not
+  treat this as a rejected backend response or use the typed zero value.
+- Observations are bounded best-effort background work. Their completion handle
+  supports `Wait`, `Cancel`, and `Done`. `Wait` only bounds the caller's wait;
+  it does not cancel delivery. Close the client to stop owned background work
+  and subprocesses, without closing borrowed HTTP transports.
+
+Generated semantic packages (`registration`, `transport`, `subscription`,
+`effect`, `content`, `capability`, `event`, and `tool`) construct the existing
+wire types. Constructors fill schema literals and annotated defaults; parsers
+continue to preserve presence and never invent omitted required fields. The
+API targets the draft wire protocol and may evolve with it.
+
+For example, with host-defined `opts client.Options` and a standard `ctx`:
+
+```go
+reg := registration.New(registration.NewBackend(
+    "dev.example.guard",
+    transport.NewStdio("guard", ahp.StdioTransportLifecyclePersistent),
+    subscription.NewIntercept(
+        []string{"tool.before"}, time.Second,
+        ahp.InterceptSubscriptionFailurePolicyFailClosed,
+        content.NewSelection(ahp.ContentSelectionDefaultMetadata),
+    ),
+))
+hooks, err := client.New(reg, opts)
+// Handle err, then defer hooks.Close().
+
+type Arguments struct { Path string `json:"path"` }
+result, err := hooks.ToolBefore(ctx, event.ToolBeforeInput[Arguments]{
+    Call: ahp.ToolBeforeEventCall{ID: "call-1"},
+    Path: "execute",
+    Tool: tool.NewInput(
+        "read_file", ahp.ExecutionEventToolOriginNative,
+        Arguments{Path: "notes.txt"},
+    ),
+})
+// Check err, result.Interrupted, protocol state, and host policy before execution.
+// result.Input has type Arguments when result.InputAvailable is true.
+```
+
+The host's content projection policy in `opts` must explicitly permit the tool
+input disclosure; the example does not grant it implicitly. See the compiled
+[constructor examples](facade_generated_test.go),
+[generic method examples](client/facade_generated_test.go), and
+[public HTTP tests](client/public_http_test.go).
+
+Duration constructors preserve exact decimal milliseconds. Canonical admission
+rejects fractional milliseconds and nonpositive deadlines. Use the generated
+`NewInterceptDuration` helper for an eager checked constructor, or
+`NewInterceptMilliseconds` for explicit wire values. No timeout or stdio
+lifecycle default is invented.
+
+### Current composition coverage
+
+The client composes input and resolved non-input modifications, protocol
+permission/candidate decisions, messages, injections, and bounded flow effects.
+Invalid capability grants and missing target bindings fail before delivery.
+
+Descriptor-backed modifications use verified, occurrence-owned bytes. Each
+receiver gets its own uploaded reference; logical item identity is preserved.
+`Result.EffectiveValues` exposes accepted target values, and
+`Result.Content("/canonical/item/path")` returns detached effective body bytes.
+Compaction instructions and summaries have fixed canonical bindings. When
+instructions are absent, `WithCompactionInstructions` supplies a host-owned
+descriptor template; the SDK does not invent one. A returned compaction summary
+is only a pending candidate, not installed context.
+
+Ambiguous native targets require `WithModificationTarget(target, binding)`.
+`ModificationTarget.Path` selects an allowed canonical descriptor, collection,
+or model-request `/params`. Collection effects always contain an array, even
+for zero or one item; additions require host-owned `Templates`. These bindings
+are an SDK mapping contract, not additional protocol wire fields.
+
+Elicitation request results retain an immutable `Snapshot` of the original
+exchange. Pass it with `WithElicitationRequest(result.Snapshot)` for the
+corresponding result boundary. Answer validation uses the pinned MCP schemas
+and original requested form schema, without network schema loading. Correlation
+is checked before body resolution. URL acceptance is consent, not evidence of
+completion. AHP mode support is independent of effect support: `return`, `deny`,
+and result `modify` require the matching explicit `capabilities.elicitation.form`
+or `.url` grant. An absent mode or empty AHP elicitation object grants nothing;
+MCP's legacy empty-object form fallback does not apply. Passive delivery and
+informational `message` effects do not decide or alter the interaction and do not
+require this decision-mode grant. Application schemas for ordinary tools remain
+the host's concern.
+
+### Receiving hooks
+
+`server.NewHandler` returns an ordinary `http.Handler` with intercept, observe,
+and capabilities callbacks. Mount it in an application-owned mux and use normal
+HTTP authentication middleware. `server.ServeStdio` adapts owned input/output
+streams to the **same handler**; it is not a second protocol engine or backend
+registry. The application still owns listener startup, admission policy, and
+shutdown. Callback errors are redacted; notifications never receive JSON-RPC
+replies.
+
+### Content and authentication
+
+Event and upload HTTP clients are separate dependencies. The `auth` package
+provides separately scoped event/upload transports, with exact endpoint matching
+and no credential forwarding across redirects. Custom TLS, proxy, and credential
+acquisition remain standard-library/application responsibilities.
+
+Content selection does not grant access. `client.ContentOptions` supplies
+receiver-scoped disclosure decisions and host-owned content resolution. The
+zero value does not disclose bodies or opaque application payloads; provide an
+explicit projection policy for tool inputs and other opaque fields. Resolver
+references are opaque handles, not URLs the SDK automatically fetches. Selected
+uploads complete before delivery and hash the original bytes. Metadata-only
+delivery does not itself read bodies; preparing advertised descriptor-backed
+modifications or validating an elicitation exchange can require verified host
+bodies regardless of receiver selection. Upload credentials are never inferred
+from event credentials.
+
+On the receiver, upload parsing verifies declared size and digest only at
+successful EOF. Early close or a failed read cannot yield a verified reference.
+The application authorizes scope, stages and commits immutable storage, allocates
+the receiver reference, and only then writes the upload response. The SDK does
+not provide a content store or infer publication from verification.
+
 ## Development
 
 ```sh
@@ -75,11 +217,18 @@ go test ./...
 
 The interoperability adapters and tests use the sibling protocol checkout's
 canonical schemas, shared scenarios, and public test certificates. CI pins the
-fixture revision and validates against this SDK's bundled schema snapshot. See
+generator and fixture revision and checks this SDK's bundled schema snapshot. See
 [the adapter guide](interop/README.md) and [lifecycle guide](interop/LIFECYCLE.md)
 for transport, authentication, upload, and synthetic-host boundaries.
 
-Generated code lives in `generated.go`. Its provenance is recorded in `ahp-codegen.lock.json`; schema changes are made in the [protocol repository](https://github.com/agenthooksprotocol/agent-hooks-protocol), not by editing the generated file.
+Generated code lives in `generated.go`, semantic-package `generated.go` files, and `client/boundaries_generated.go`. Its provenance is recorded in `ahp-codegen.lock.json`; schema changes are made in the [protocol repository](https://github.com/agenthooksprotocol/agent-hooks-protocol), not by editing the generated file.
+
+The generator source is protocol commit `7544872e5beff69f29b04ae61686cc8ac25c3654`. From a protocol checkout at that commit, regenerate and verify with:
+
+```sh
+python3 tools/generate_sdk.py --go-sdk ../go-sdk
+python3 tools/generate_sdk.py --go-sdk ../go-sdk --check
+```
 
 ## License
 

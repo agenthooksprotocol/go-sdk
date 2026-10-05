@@ -57,7 +57,7 @@ func testScenarios() []Scenario {
 	return []Scenario{
 		{ID: "atomic", Request: wire(request("atomic")), Response: wire(response("atomic", Object{"type": "return", "value": false}, Object{"type": "modify", "target": "input", "operation": "merge", "value": Object{"task": 2}}, Object{"type": "message", "text": "accepted"})), Expected: Object{"decision": "allow", "executed": false, "input": Object{"task": float64(2)}, "messages": []any{"accepted"}, "result": false}},
 		{ID: "flow", Request: wire(flowRequest), Response: wire(response("flow", Object{"type": "flow", "operation": "stop", "reason": "stop"}, Object{"type": "flow", "operation": "continue", "instruction": "next"})), Expected: Object{"decision": "allow", "executed": false, "flow": "stop"}},
-		{ID: "invalid", Request: wire(request("invalid")), Response: wire(response("invalid", Object{"type": "message", "text": "must not commit"}, Object{"type": "modify", "target": "input", "operation": "merge", "value": Object{"task": 0}})), ExpectError: true},
+		{ID: "host-schema-refusal", Request: wire(request("host-schema-refusal")), Response: wire(response("host-schema-refusal", Object{"type": "message", "text": "accepted before host refusal"}, Object{"type": "modify", "target": "input", "operation": "merge", "value": Object{"task": 0}})), Expected: Object{"executed": false, "hostInputRejected": true, "input": Object{"task": float64(0)}, "messages": []any{"accepted before host refusal"}}},
 	}
 }
 func TestValidationAndAtomic(t *testing.T) {
@@ -118,7 +118,7 @@ func TestSharedScenarios(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	for _, s := range ss {
+	for _, s := range withHostRefusalExpectations(t, ss) {
 		t.Run(s.ID, func(t *testing.T) {
 			req, e := v.Validate("intercept-request", s.Request)
 			if e != nil {
@@ -128,6 +128,10 @@ func TestSharedScenarios(t *testing.T) {
 			var actual Object
 			if e == nil {
 				actual, e = Apply(req, res)
+			}
+			if s.HostExpected != nil {
+				assertHostRefusal(t, s, actual, e)
+				return
 			}
 			if s.ExpectError {
 				if e == nil {
@@ -198,7 +202,7 @@ func transportScenarios(t *testing.T) []Scenario {
 		if err != nil {
 			t.Fatal(err)
 		}
-		all = append(all, central...)
+		all = append(all, withHostRefusalExpectations(t, central)...)
 	}
 	return all
 }

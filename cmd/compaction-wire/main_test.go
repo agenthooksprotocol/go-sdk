@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	ahp "github.com/agenthooksprotocol/go-sdk/interop"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -45,7 +46,7 @@ func TestUploadFailureSuppressesEvent(t *testing.T) {
 			}))
 			defer server.Close()
 			trace := []any{}
-			_, err := exchange(O{"endpoint": server.URL, "transport": "http", "credentials": O{"scope": O{"token": "event-secret", "uploadToken": "upload-secret"}}}, "scope", "case", O{"boundary": "before"}, nil, &trace)
+			_, err := exchange(O{"endpoint": server.URL, "transport": "http", "credentials": O{"scope": O{"token": "event-secret", "uploadToken": "upload-secret"}}}, "scope", "case", O{"boundary": "before", "instructions": "base", "capabilities": compactionTestCaps()}, nil, &trace)
 			if err == nil || calls != 1 || len(trace) != 0 {
 				t.Fatalf("err=%v calls=%d trace=%v", err, calls, trace)
 			}
@@ -58,3 +59,5 @@ func TestStorageScopeIsIndependentOfReference(t *testing.T) {
 		t.Fatal("cross-principal storage collision")
 	}
 }
+
+func compactionTestCaps() O { caps, _ := ahp.CompactionCapabilities("before", false); return caps }

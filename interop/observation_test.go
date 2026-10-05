@@ -40,3 +40,35 @@ func TestDowngradedObservationsDoNotWait(t *testing.T) {
 		t.Fatal(seen, event)
 	}
 }
+
+func TestObservationChainCarriesAcceptedPermission(t *testing.T) {
+	for _, reject := range []bool{false, true} {
+		req := request("permission-prefix")
+		scenario := lifecycleScenario{ID: "permission-prefix", Requests: map[string]Object{"a": req}, Chain: Object{"subscriptions": []any{Object{"id": "first", "mode": "intercept", "failurePolicy": "fail-open", "content": "metadata"}, Object{"id": "second", "mode": "intercept", "failurePolicy": "fail-open", "content": "metadata"}}}}
+		calls := 0
+		_, err := runObservationChain(scenario, func(sent Object) (<-chan lifecycleResult, error) {
+			permission := obj(obj(sent["params"])["state"])["permission"]
+			expected := "none"
+			if calls > 0 && !reject {
+				expected = "allow"
+			}
+			if permission != expected {
+				t.Fatalf("call %d permission=%v want=%s", calls, permission, expected)
+			}
+			effects := []any{Object{"type": "allow"}}
+			if reject && calls == 0 {
+				effects = append(effects, Object{"type": "unknown"})
+			}
+			calls++
+			done := make(chan lifecycleResult, 1)
+			done <- lifecycleResult{response: response("permission-prefix", effects...)}
+			return done, nil
+		}, func(string, Object) error { return nil }, func(Object) error { return nil }, func(string, Object) error { return nil })
+		if err != nil || calls != 2 {
+			t.Fatalf("chain result: calls=%d err=%v", calls, err)
+		}
+		if obj(obj(req["params"])["state"])["permission"] != "none" {
+			t.Fatal("mutated fixture state")
+		}
+	}
+}

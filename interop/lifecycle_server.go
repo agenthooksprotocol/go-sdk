@@ -1,7 +1,6 @@
 package interop
 
 import (
-	"bufio"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -51,20 +50,17 @@ func (s *lifecycleReceiver) wait(ctx context.Context, predicate func() bool) err
 		}
 	}
 }
-func (s *lifecycleReceiver) dispatch(ctx context.Context, m Object) (Object, error) {
-	if s.suite == "catalogue" {
-		return s.catalogueDispatch(m)
-	}
+
+// acceptedDispatch owns fixture scheduling and receiver policy, not wire acceptance.
+func (s *lifecycleReceiver) acceptedDispatch(ctx context.Context, m Object) (Object, error) {
 	if m["method"] == "hooks/observe" {
-		if e := s.validator.validate("observe", m); e != nil {
-			return nil, e
-		}
 		p := obj(m["params"])
 		ev := obj(p["event"])
 		sub := "" // scope comes from receiver policy after event authentication
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if e := checkContent(ev, sub, s.eventContent()); e != nil {
+			markLifecyclePolicyConflict(ctx)
 			return nil, e
 		}
 		if e := s.lineage.Accept(ev); e != nil {
@@ -84,16 +80,14 @@ func (s *lifecycleReceiver) dispatch(ctx context.Context, m Object) (Object, err
 				return nil, err
 			}
 		}
-		r := lifecycleReply("unsolicited-observer")
-		obj(r["result"])["effects"] = []any{Object{"type": "deny", "reason": "observer must not decide"}}
-		return r, nil
-	}
-	if e := s.validator.validate("intercept-request", m); e != nil {
-		return nil, e
+		// Ordinary notifications have no protocol response. Adversarial replies
+		// belong to the explicit raw emit schedule, not every observation.
+		return nil, nil
 	}
 	id := lifecycleID(m)
 	s.mu.Lock()
 	if e := checkContent(obj(obj(m["params"])["event"]), "", s.eventContent()); e != nil {
+		markLifecyclePolicyConflict(ctx)
 		s.mu.Unlock()
 		return nil, e
 	}
@@ -274,6 +268,10 @@ func LifecycleServer(parent context.Context, c LifecycleConfig) error {
 	go cs.Serve(control)
 	endpoint := ""
 	fatal := make(chan error, 1)
+	handler, e := s.publicHandler()
+	if e != nil {
+		return e
+	}
 	if c.Transport == "http" {
 		ln, e := net.Listen("tcp", "127.0.0.1:0")
 		if e != nil {
@@ -295,68 +293,23 @@ func LifecycleServer(parent context.Context, c LifecycleConfig) error {
 				w.WriteHeader(401)
 				return
 			}
-			w.Header().Set("Content-Type", "application/json")
-			var m Object
 			if r.Method != "POST" || (r.URL.Path != "/intercept" && r.URL.Path != "/observe" && !(c.Suite == "catalogue" && r.URL.Path == "/capabilities")) {
 				w.WriteHeader(404)
 				return
 			}
-			if json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<20)).Decode(&m) != nil {
-				w.WriteHeader(400)
-				return
-			}
-			reply, e := s.dispatch(ctx, m)
-			if e != nil {
-				status := 409
-				if rejection, ok := e.(catalogueRejection); ok && rejection.kind == "schema" {
-					status = 400
-				}
-				w.WriteHeader(status)
-				_ = json.NewEncoder(w).Encode(Object{"error": e.Error()})
-				return
-			}
-			_ = json.NewEncoder(w).Encode(reply)
+			handler.ServeHTTP(w, r)
 		})}
 		defer hs.Close()
 		go hs.Serve(ln)
 	} else if c.Transport == "stdio" {
 		go func() {
-			scan := bufio.NewScanner(os.Stdin)
-			scan.Buffer(make([]byte, 4096), 16<<20)
-			for scan.Scan() {
-				var m Object
-				if e := json.Unmarshal(scan.Bytes(), &m); e != nil {
-					select {
-					case fatal <- e:
-					default:
-					}
-					return
+			err := serveLifecycleStdio(ctx, os.Stdin, os.Stdout, &out, handler)
+			if err != nil && ctx.Err() == nil {
+				select {
+				case fatal <- err:
+				default:
 				}
-				go func(m Object) {
-					reply, e := s.dispatch(ctx, m)
-					if e != nil {
-						if _, ok := e.(catalogueRejection); ok {
-							return
-						}
-						select {
-						case fatal <- e:
-						default:
-						}
-						return
-					}
-					if reply == nil {
-						return
-					}
-					out.Lock()
-					e = json.NewEncoder(os.Stdout).Encode(reply)
-					out.Unlock()
-					if e != nil {
-						select {
-						case fatal <- e:
-						default:
-						}
-					}
-				}(m)
+				return
 			}
 			cancel()
 		}()

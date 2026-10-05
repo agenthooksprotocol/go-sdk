@@ -2,7 +2,10 @@ package interop
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	ahp "github.com/agenthooksprotocol/go-sdk"
+	hooks "github.com/agenthooksprotocol/go-sdk/client"
 	"net/http"
 	"reflect"
 )
@@ -108,7 +111,10 @@ func catalogueClient(ctx context.Context, c LifecycleConfig, v *lifecycleValidat
 		for _, step := range sc.Steps {
 			switch step["op"] {
 			case "register":
-				accepted := validateRegistration(v.core, obj(step["registration"]), manifest, array(step["requirements"]), obj(step["context"])) == nil
+				registration := obj(step["registration"])
+				// Public configuration admission owns protocol registration validity;
+				// the synthetic host additionally enforces native requirements/policy.
+				accepted := admitCatalogueRegistration(registration, manifest) == nil && validateRegistration(v.core, registration, manifest, array(step["requirements"]), obj(step["context"])) == nil
 				actual["registrations"] = append(array(actual["registrations"]), Object{"accepted": accepted})
 			case "notify", "rawNotify":
 				m := obj(clone(step["message"]))
@@ -125,19 +131,36 @@ func catalogueClient(ctx context.Context, c LifecycleConfig, v *lifecycleValidat
 						return e
 					}
 				}
-				if pipe != nil {
-					if e := pipe.send(m, nil); e != nil {
-						return e
+				send := func(ctx context.Context, _ string, raw []byte) ([]byte, error) {
+					var wire Object
+					if err := json.Unmarshal(raw, &wire); err != nil {
+						return nil, err
 					}
-				} else {
-					_, status, e := lifecycleCallWith(ctx, client, token, c.Endpoint+"/observe", m)
-					if e != nil {
-						return e
+					if pipe != nil {
+						return nil, pipe.send(wire, nil)
 					}
-					if status != 200 && status != 204 && !(step["op"] == "rawNotify" && (status == 400 || status == 409)) {
-						return fmt.Errorf("notify HTTP %d", status)
+					reply, status, err := lifecycleCallWith(ctx, client, token, c.Endpoint+"/observe", wire)
+					if err != nil {
+						return nil, err
 					}
+					if status != http.StatusAccepted && status != http.StatusNoContent && !(step["op"] == "rawNotify" && (status == 400 || status == 409)) {
+						return nil, fmt.Errorf("notify HTTP %d", status)
+					}
+					if step["op"] != "rawNotify" && reply != nil {
+						return nil, fmt.Errorf("nonempty notification acknowledgement")
+					}
+					return nil, nil
 				}
+				if step["op"] == "rawNotify" {
+					// These fixtures deliberately violate schema or source-local
+					// lineage; bypass only the sender, so the receiver sees them.
+					if _, err := send(ctx, "hooks/observe", jsonBytes(m)); err != nil {
+						return err
+					}
+				} else if _, _, err := PublicBoundary(ctx, m, send); err != nil {
+					return err
+				}
+
 				actual["sent"] = append(array(actual["sent"]), m)
 				id := str(event["id"])
 				counts[id]++
@@ -155,4 +178,22 @@ func catalogueClient(ctx context.Context, c LifecycleConfig, v *lifecycleValidat
 		return e
 	}
 	return writeAtomic(c.ReportFile, Object{"language": "go", "discovery": discovery, "results": results, "receipts": receipts})
+}
+
+// Construction validates the discovered static manifest and portable registration
+// through the public runtime. No delivery occurs and no fixture backend starts.
+func admitCatalogueRegistration(registration, manifest Object) error {
+	parsed := ahp.ParseRegistration(jsonBytes(registration))
+	if !parsed.OK {
+		return fmt.Errorf("invalid catalogue registration")
+	}
+	var typed ahp.StaticCapabilityManifest
+	if err := json.Unmarshal(jsonBytes(manifest), &typed); err != nil {
+		return err
+	}
+	c, err := hooks.New(parsed.Value, hooks.Options{Source: "urn:ahp:catalogue", Manifest: typed})
+	if err != nil {
+		return err
+	}
+	return c.Close()
 }

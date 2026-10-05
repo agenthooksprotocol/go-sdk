@@ -19,12 +19,14 @@ type Config struct {
 	Auth          Auth     `json:"auth"`
 }
 type Scenario struct {
-	ID          string          `json:"id"`
-	Request     json.RawMessage `json:"request"`
-	Response    json.RawMessage `json:"response"`
-	Expected    Object          `json:"expected"`
-	ExpectError bool            `json:"expectError"`
-	Barrier     string          `json:"barrier"`
+	ID           string          `json:"id"`
+	Request      json.RawMessage `json:"request"`
+	Response     json.RawMessage `json:"response"`
+	Expected     Object          `json:"expected"`
+	HostExpected Object          `json:"hostExpected"`
+	Tags         []string        `json:"tags"`
+	ExpectError  bool            `json:"expectError"`
+	Barrier      string          `json:"barrier"`
 }
 
 func Load(path string, v any) error {
