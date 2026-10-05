@@ -13,6 +13,7 @@ import (
 )
 
 type lifecycleReceiver struct {
+	life                context.Context // fixture lifetime, independent of a disconnected HTTP caller
 	suite               string
 	mu                  sync.Mutex
 	changed             chan struct{}
@@ -108,7 +109,15 @@ func (s *lifecycleReceiver) acceptedDispatch(ctx context.Context, m Object) (Obj
 	if !ok {
 		return nil, fmt.Errorf("unknown intercept")
 	}
-	if e := s.wait(ctx, func() bool { return s.released[id] }); e != nil {
+	// This fixture deliberately produces replies after caller cancellation.
+	// A disconnected HTTP request must not erase the controller's release or
+	// its receiver receipt. Bound the held work by fixture shutdown instead;
+	// ordinary SDK handlers still receive their original request context.
+	waitContext := ctx
+	if s.life != nil {
+		waitContext = s.life
+	}
+	if e := s.wait(waitContext, func() bool { return s.released[id] }); e != nil {
 		return nil, e
 	}
 	s.mu.Lock()
@@ -136,7 +145,7 @@ func LifecycleServer(parent context.Context, c LifecycleConfig) error {
 	if e != nil {
 		return e
 	}
-	s := &lifecycleReceiver{changed: make(chan struct{}), entries: []any{}, released: map[string]bool{}, responses: map[string]Object{}, sequences: map[string][]Object{}, occurrences: map[string]int{}, uploads: map[string]string{}, validator: v}
+	s := &lifecycleReceiver{life: ctx, changed: make(chan struct{}), entries: []any{}, released: map[string]bool{}, responses: map[string]Object{}, sequences: map[string][]Object{}, occurrences: map[string]int{}, uploads: map[string]string{}, validator: v}
 	s.suite = c.Suite
 	s.uploadToken = c.UploadAuth.Token
 	s.uploadSubscriptions = map[string]bool{}
