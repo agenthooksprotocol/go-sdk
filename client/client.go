@@ -66,6 +66,7 @@ type DeliveryError struct {
 	BackendID    string
 	Subscription int
 	Stage        string
+	Code         DeliveryCode
 	Err          error
 	FailClosed   bool
 }

@@ -198,7 +198,7 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 						stage = "acceptance"
 						response := ahp.ParseInterceptResponse(raw)
 						if canonical.Validate("intercept-response", raw) != nil || !response.OK {
-							e = errors.New("invalid intercept response")
+							e = interceptResponseFailure(raw, request["id"])
 						} else {
 							// Compose against the complete host event, not a subscriber's redacted
 							// projection. Projection is a delivery view, not an accepted mutation.
@@ -232,7 +232,7 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 			}
 			if deliveryErr != nil {
 				closed := sub["failurePolicy"] == "fail-closed"
-				result.Errors = append(result.Errors, DeliveryError{BackendID: backend.id, Subscription: i, Stage: stage, Err: deliveryErr, FailClosed: closed})
+				result.Errors = append(result.Errors, DeliveryError{BackendID: backend.id, Subscription: i, Stage: stage, Code: deliveryCode(stage, deliveryErr), Err: deliveryErr, FailClosed: closed})
 				if closed {
 					state["permission"] = "deny"
 					settled = true

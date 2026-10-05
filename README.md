@@ -80,6 +80,11 @@ compaction changes. The host remains responsible for those operations.
   proves execution or grants authority.
 - A protocol denial is a result, not a Go error. Operational failures appear in
   `Result.Errors`; fail-closed failures are distinguishable from backend effects.
+  Each `DeliveryError.Code` is a typed `DeliveryCode`: `protocol_rejection`,
+  `remote_rpc`, `transport`, `cancelled`, `deadline_exceeded`, `preparation`, or
+  `capacity`. `Stage` still identifies the phase, and `FailClosed` identifies
+  synthetic denial. Remote RPC codes require a valid, correlated error envelope;
+  backend error messages/data are not exposed. Inspect `Code`, not error text.
   Cancellation returns the accepted prefix with `Interrupted` set and a context
   error. Never execute interrupted work, including under fail-open policy.
 - A `DecodeError` means protocol acceptance succeeded but the effective input

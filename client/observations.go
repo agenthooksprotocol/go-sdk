@@ -48,7 +48,7 @@ func (c *Hooks) scheduleObservations(event map[string]any, pending []observation
 		case c.observations <- struct{}{}:
 		default:
 			o.mu.Lock()
-			o.errors = append(o.errors, DeliveryError{BackendID: delivery.backend.id, Subscription: delivery.index, Stage: "admission", Err: errors.New("observation capacity exceeded")})
+			o.errors = append(o.errors, DeliveryError{BackendID: delivery.backend.id, Subscription: delivery.index, Stage: "admission", Code: DeliveryCapacity, Err: errors.New("observation capacity exceeded")})
 			o.mu.Unlock()
 			continue
 		}
@@ -61,8 +61,10 @@ func (c *Hooks) scheduleObservations(event map[string]any, pending []observation
 			defer func() { <-c.observations }()
 			task, done := context.WithTimeout(ctx, c.opts.ObservationTimeout)
 			defer done()
+			stage := "prepare"
 			projected, err := c.projectContent(task, snapshot, d.sub, d.backend.id)
 			if err == nil {
+				stage = "observation"
 				note := sdkJSON(map[string]any{"jsonrpc": "2.0", "method": "hooks/observe", "params": map[string]any{"protocolVersion": "draft", "event": projected}})
 				if canonical.Validate("observe-notification", note) != nil || !ahp.ParseObserveNotification(note).OK {
 					err = errors.New("invalid projected observation")
@@ -72,7 +74,7 @@ func (c *Hooks) scheduleObservations(event map[string]any, pending []observation
 			}
 			if err != nil {
 				o.mu.Lock()
-				o.errors = append(o.errors, DeliveryError{BackendID: d.backend.id, Subscription: d.index, Stage: "observation", Err: err})
+				o.errors = append(o.errors, DeliveryError{BackendID: d.backend.id, Subscription: d.index, Stage: "observation", Code: deliveryCode(stage, err), Err: err})
 				o.mu.Unlock()
 			}
 		}(delivery)
