@@ -4,99 +4,99 @@ package client
 import "context"
 import "github.com/agenthooksprotocol/go-sdk/event"
 
-func (c *Client) ConfigChangeAfter(ctx context.Context, input event.ConfigChangeAfterInput) (*Result, error) {
+func (c *Hooks) ConfigChangeAfter(ctx context.Context, input event.ConfigChangeAfterInput) (*Result, error) {
 	return c.intercept(ctx, "config.change.after", input)
 }
-func (c *Client) ConfigChangeBefore(ctx context.Context, input event.ConfigChangeBeforeInput, opts ...InterceptOption) (*Result, error) {
+func (c *Hooks) ConfigChangeBefore(ctx context.Context, input event.ConfigChangeBeforeInput, opts ...InterceptOption) (*Result, error) {
 	return c.intercept(ctx, "config.change.before", input, opts...)
 }
-func (c *Client) ContextCompactAfter(ctx context.Context, input event.ContextCompactAfterInput, opts ...InterceptOption) (*Result, error) {
+func (c *Hooks) ContextCompactAfter(ctx context.Context, input event.ContextCompactAfterInput, opts ...InterceptOption) (*Result, error) {
 	return c.intercept(ctx, "context.compact.after", input, opts...)
 }
-func (c *Client) ContextCompactBefore(ctx context.Context, input event.ContextCompactBeforeInput, opts ...InterceptOption) (*Result, error) {
+func (c *Hooks) ContextCompactBefore(ctx context.Context, input event.ContextCompactBeforeInput, opts ...InterceptOption) (*Result, error) {
 	return c.intercept(ctx, "context.compact.before", input, opts...)
 }
-func (c *Client) FileChanged(ctx context.Context, input event.FileChangedInput) (*Result, error) {
+func (c *Hooks) FileChanged(ctx context.Context, input event.FileChangedInput) (*Result, error) {
 	return c.intercept(ctx, "file.changed", input)
 }
-func (c *Client) HookFailure(ctx context.Context, input event.HookFailureInput) (*Result, error) {
+func (c *Hooks) HookFailure(ctx context.Context, input event.HookFailureInput) (*Result, error) {
 	return c.intercept(ctx, "hook.failure", input)
 }
-func (c *Client) ModelError(ctx context.Context, input event.ModelErrorInput) (*Result, error) {
+func (c *Hooks) ModelError(ctx context.Context, input event.ModelErrorInput) (*Result, error) {
 	return c.intercept(ctx, "model.error", input)
 }
-func (c *Client) ModelRequestBefore(ctx context.Context, input event.ModelRequestBeforeInput, opts ...InterceptOption) (*Result, error) {
+func (c *Hooks) ModelRequestBefore(ctx context.Context, input event.ModelRequestBeforeInput, opts ...InterceptOption) (*Result, error) {
 	return c.intercept(ctx, "model.request.before", input, opts...)
 }
-func (c *Client) ModelResponseAfter(ctx context.Context, input event.ModelResponseAfterInput, opts ...InterceptOption) (*Result, error) {
+func (c *Hooks) ModelResponseAfter(ctx context.Context, input event.ModelResponseAfterInput, opts ...InterceptOption) (*Result, error) {
 	return c.intercept(ctx, "model.response.after", input, opts...)
 }
-func (c *Client) ModelSwitchAfter(ctx context.Context, input event.ModelSwitchAfterInput) (*Result, error) {
+func (c *Hooks) ModelSwitchAfter(ctx context.Context, input event.ModelSwitchAfterInput) (*Result, error) {
 	return c.intercept(ctx, "model.switch.after", input)
 }
-func (c *Client) ModelSwitchBefore(ctx context.Context, input event.ModelSwitchBeforeInput, opts ...InterceptOption) (*Result, error) {
+func (c *Hooks) ModelSwitchBefore(ctx context.Context, input event.ModelSwitchBeforeInput, opts ...InterceptOption) (*Result, error) {
 	return c.intercept(ctx, "model.switch.before", input, opts...)
 }
-func (c *Client) SessionEnd(ctx context.Context, input event.SessionEndInput) (*Result, error) {
+func (c *Hooks) SessionEnd(ctx context.Context, input event.SessionEndInput) (*Result, error) {
 	return c.intercept(ctx, "session.end", input)
 }
-func (c *Client) SessionStart(ctx context.Context, input event.SessionStartInput, opts ...InterceptOption) (*Result, error) {
+func (c *Hooks) SessionStart(ctx context.Context, input event.SessionStartInput, opts ...InterceptOption) (*Result, error) {
 	return c.intercept(ctx, "session.start", input, opts...)
 }
-func (c *Client) TaskChangeAfter(ctx context.Context, input event.TaskChangeAfterInput) (*Result, error) {
+func (c *Hooks) TaskChangeAfter(ctx context.Context, input event.TaskChangeAfterInput) (*Result, error) {
 	return c.intercept(ctx, "task.change.after", input)
 }
-func (c *Client) TaskChangeBefore(ctx context.Context, input event.TaskChangeBeforeInput, opts ...InterceptOption) (*Result, error) {
+func (c *Hooks) TaskChangeBefore(ctx context.Context, input event.TaskChangeBeforeInput, opts ...InterceptOption) (*Result, error) {
 	return c.intercept(ctx, "task.change.before", input, opts...)
 }
-func (c *Client) ToolAfter(ctx context.Context, input event.ToolAfterInput, opts ...InterceptOption) (*Result, error) {
+func (c *Hooks) ToolAfter(ctx context.Context, input event.ToolAfterInput, opts ...InterceptOption) (*Result, error) {
 	return c.intercept(ctx, "tool.after", input, opts...)
 }
-func (c *Client) ToolBatchAfter(ctx context.Context, input event.ToolBatchAfterInput, opts ...InterceptOption) (*Result, error) {
+func (c *Hooks) ToolBatchAfter(ctx context.Context, input event.ToolBatchAfterInput, opts ...InterceptOption) (*Result, error) {
 	return c.intercept(ctx, "tool.batch.after", input, opts...)
 }
-func (c *Client) ToolBefore[T any](ctx context.Context, input event.ToolBeforeInput[T], opts ...InterceptOption) (*ToolBeforeResult[T], error) {
+func (c *Hooks) ToolBefore[T any](ctx context.Context, input event.ToolBeforeInput[T], opts ...InterceptOption) (*ToolBeforeResult[T], error) {
 	return decodeToolBefore[T](c.intercept(ctx, "tool.before", input, opts...))
 }
-func (c *Client) ToolPermissionRequest(ctx context.Context, input event.ToolPermissionRequestInput, opts ...InterceptOption) (*Result, error) {
+func (c *Hooks) ToolPermissionRequest(ctx context.Context, input event.ToolPermissionRequestInput, opts ...InterceptOption) (*Result, error) {
 	return c.intercept(ctx, "tool.permission.request", input, opts...)
 }
-func (c *Client) ToolPermissionResolved(ctx context.Context, input event.ToolPermissionResolvedInput) (*Result, error) {
+func (c *Hooks) ToolPermissionResolved(ctx context.Context, input event.ToolPermissionResolvedInput) (*Result, error) {
 	return c.intercept(ctx, "tool.permission.resolved", input)
 }
-func (c *Client) ToolProgress(ctx context.Context, input event.ToolProgressInput) (*Result, error) {
+func (c *Hooks) ToolProgress(ctx context.Context, input event.ToolProgressInput) (*Result, error) {
 	return c.intercept(ctx, "tool.progress", input)
 }
-func (c *Client) TurnEnd(ctx context.Context, input event.TurnEndInput) (*Result, error) {
+func (c *Hooks) TurnEnd(ctx context.Context, input event.TurnEndInput) (*Result, error) {
 	return c.intercept(ctx, "turn.end", input)
 }
-func (c *Client) TurnFinishBefore(ctx context.Context, input event.TurnFinishBeforeInput, opts ...InterceptOption) (*Result, error) {
+func (c *Hooks) TurnFinishBefore(ctx context.Context, input event.TurnFinishBeforeInput, opts ...InterceptOption) (*Result, error) {
 	return c.intercept(ctx, "turn.finish.before", input, opts...)
 }
-func (c *Client) TurnProgress(ctx context.Context, input event.TurnProgressInput) (*Result, error) {
+func (c *Hooks) TurnProgress(ctx context.Context, input event.TurnProgressInput) (*Result, error) {
 	return c.intercept(ctx, "turn.progress", input)
 }
-func (c *Client) TurnStart(ctx context.Context, input event.TurnStartInput, opts ...InterceptOption) (*Result, error) {
+func (c *Hooks) TurnStart(ctx context.Context, input event.TurnStartInput, opts ...InterceptOption) (*Result, error) {
 	return c.intercept(ctx, "turn.start", input, opts...)
 }
-func (c *Client) UserAttention(ctx context.Context, input event.UserAttentionInput) (*Result, error) {
+func (c *Hooks) UserAttention(ctx context.Context, input event.UserAttentionInput) (*Result, error) {
 	return c.intercept(ctx, "user.attention", input)
 }
-func (c *Client) UserElicitationRequest(ctx context.Context, input event.UserElicitationRequestInput, opts ...InterceptOption) (*Result, error) {
+func (c *Hooks) UserElicitationRequest(ctx context.Context, input event.UserElicitationRequestInput, opts ...InterceptOption) (*Result, error) {
 	return c.intercept(ctx, "user.elicitation.request", input, opts...)
 }
-func (c *Client) UserElicitationResult(ctx context.Context, input event.UserElicitationResultInput, opts ...InterceptOption) (*Result, error) {
+func (c *Hooks) UserElicitationResult(ctx context.Context, input event.UserElicitationResultInput, opts ...InterceptOption) (*Result, error) {
 	return c.intercept(ctx, "user.elicitation.result", input, opts...)
 }
-func (c *Client) UserMessageInbound(ctx context.Context, input event.UserMessageInboundInput, opts ...InterceptOption) (*Result, error) {
+func (c *Hooks) UserMessageInbound(ctx context.Context, input event.UserMessageInboundInput, opts ...InterceptOption) (*Result, error) {
 	return c.intercept(ctx, "user.message.inbound", input, opts...)
 }
-func (c *Client) UserMessageOutbound(ctx context.Context, input event.UserMessageOutboundInput, opts ...InterceptOption) (*Result, error) {
+func (c *Hooks) UserMessageOutbound(ctx context.Context, input event.UserMessageOutboundInput, opts ...InterceptOption) (*Result, error) {
 	return c.intercept(ctx, "user.message.outbound", input, opts...)
 }
-func (c *Client) WorkspaceChangeAfter(ctx context.Context, input event.WorkspaceChangeAfterInput) (*Result, error) {
+func (c *Hooks) WorkspaceChangeAfter(ctx context.Context, input event.WorkspaceChangeAfterInput) (*Result, error) {
 	return c.intercept(ctx, "workspace.change.after", input)
 }
-func (c *Client) WorkspaceChangeBefore(ctx context.Context, input event.WorkspaceChangeBeforeInput, opts ...InterceptOption) (*Result, error) {
+func (c *Hooks) WorkspaceChangeBefore(ctx context.Context, input event.WorkspaceChangeBeforeInput, opts ...InterceptOption) (*Result, error) {
 	return c.intercept(ctx, "workspace.change.before", input, opts...)
 }

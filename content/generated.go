@@ -64,8 +64,8 @@ func NewSelection(argDefault ahp.ContentSelectionDefault, opts ...SelectionOptio
 
 type UploadOption func(*ahp.ContentUpload)
 
-func WithUploadAuth(value ahp.ContentUploadAuth) UploadOption {
-	return func(v *ahp.ContentUpload) { v.Auth = ahp.Optional[ahp.ContentUploadAuth]{Present: true, Value: value} }
+func WithUploadAuth(value *ahp.Authentication) UploadOption {
+	return func(v *ahp.ContentUpload) { v.Auth = ahp.Optional[*ahp.Authentication]{Present: true, Value: value} }
 }
 func NewUploadMilliseconds(argEndpoint string, argMaxBytes json.Number, argTimeoutMs json.Number, opts ...UploadOption) *ahp.ContentUpload {
 	v := &ahp.ContentUpload{Endpoint: argEndpoint, MaxBytes: argMaxBytes, TimeoutMs: argTimeoutMs}

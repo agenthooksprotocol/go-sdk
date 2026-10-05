@@ -74,7 +74,7 @@ func preparedItemPaths(event map[string]any, target string) ([]string, error) {
 	}
 	return nil, errors.New("ambiguous native target requires WithModificationTarget")
 }
-func (c *Client) prepareBoundary(ctx context.Context, event, caps map[string]any, cfg interceptConfig) (*preparedBoundary, error) {
+func (c *Hooks) prepareBoundary(ctx context.Context, event, caps map[string]any, cfg interceptConfig) (*preparedBoundary, error) {
 	p := &preparedBoundary{bodies: map[string][]byte{}, slots: map[string][]string{}, limit: c.opts.MaxContentBytes, bindings: map[string]ModificationTarget{}, absent: map[string]bool{}}
 	if p.limit == 0 {
 		p.limit = 4 << 20
@@ -171,7 +171,7 @@ func (c *Client) prepareBoundary(ctx context.Context, event, caps map[string]any
 
 	return p, nil
 }
-func (p *preparedBoundary) resolve(ctx context.Context, c *Client, item map[string]any) error {
+func (p *preparedBoundary) resolve(ctx context.Context, c *Hooks, item map[string]any) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}

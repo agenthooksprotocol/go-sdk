@@ -3,6 +3,7 @@ package capability
 
 import ahp "github.com/agenthooksprotocol/go-sdk"
 import "encoding/json"
+import "strconv"
 
 type Option func(*ahp.Capabilities)
 
@@ -24,11 +25,25 @@ func WithModify(value ahp.CapabilitiesModify) Option {
 		v.Modify = ahp.Optional[ahp.CapabilitiesModify]{Present: true, Value: value}
 	}
 }
-func WithEffects(values ...ahp.CapabilitiesEffectsItem) Option {
-	return func(v *ahp.Capabilities) { v.Effects = append([]ahp.CapabilitiesEffectsItem{}, values...) }
+func WithEffects(values ...string) Option {
+	return func(v *ahp.Capabilities) {
+		v.Effects = func() []ahp.CapabilitiesEffectsItem {
+			items := make([]ahp.CapabilitiesEffectsItem, len(values))
+			for i, value := range values {
+				items[i] = ahp.CapabilitiesEffectsItem{Variant2: ahp.Optional[string]{Present: true, Value: value}}
+			}
+			return items
+		}()
+	}
 }
-func New(argEffects []ahp.CapabilitiesEffectsItem, opts ...Option) *ahp.Capabilities {
-	v := &ahp.Capabilities{Effects: argEffects}
+func New(argEffects []string, opts ...Option) *ahp.Capabilities {
+	v := &ahp.Capabilities{Effects: func() []ahp.CapabilitiesEffectsItem {
+		items := make([]ahp.CapabilitiesEffectsItem, len(argEffects))
+		for i, value := range argEffects {
+			items[i] = ahp.CapabilitiesEffectsItem{Variant2: ahp.Optional[string]{Present: true, Value: value}}
+		}
+		return items
+	}()}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(v)
@@ -684,4 +699,92 @@ func NewWorkspaceChangeBefore(argEffects json.RawMessage, opts ...WorkspaceChang
 		}
 	}
 	return v
+}
+
+// WithElicitationForm grants only the declared nested capability; it never adds effects or modes.
+func WithElicitationForm() Option {
+	return func(v *ahp.Capabilities) {
+		v.Elicitation.Present = true
+		v.Elicitation.Value.Form = ahp.Optional[ahp.CapabilitiesElicitationForm]{Present: true, Value: ahp.CapabilitiesElicitationForm{}}
+	}
+}
+
+// WithElicitationURL grants only the declared nested capability; it never adds effects or modes.
+func WithElicitationURL() Option {
+	return func(v *ahp.Capabilities) {
+		v.Elicitation.Present = true
+		v.Elicitation.Value.URL = ahp.Optional[ahp.CapabilitiesElicitationURL]{Present: true, Value: ahp.CapabilitiesElicitationURL{}}
+	}
+}
+
+// WithContentModification grants only the declared nested capability; it never adds effects or modes.
+func WithContentModification(argReplace bool, argMerge bool) Option {
+	return func(v *ahp.Capabilities) {
+		v.Modify.Present = true
+		v.Modify.Value.Content = ahp.Optional[json.RawMessage]{Present: true, Value: json.RawMessage("{" + "\"replace\":" + strconv.FormatBool(argReplace) + ",\"merge\":" + strconv.FormatBool(argMerge) + "}")}
+	}
+}
+
+// WithInputModification grants only the declared nested capability; it never adds effects or modes.
+func WithInputModification(argReplace bool, argMerge bool) Option {
+	return func(v *ahp.Capabilities) {
+		v.Modify.Present = true
+		v.Modify.Value.Input = ahp.Optional[json.RawMessage]{Present: true, Value: json.RawMessage("{" + "\"replace\":" + strconv.FormatBool(argReplace) + ",\"merge\":" + strconv.FormatBool(argMerge) + "}")}
+	}
+}
+
+// WithInstructionsModification grants only the declared nested capability; it never adds effects or modes.
+func WithInstructionsModification(argReplace bool, argMerge bool) Option {
+	return func(v *ahp.Capabilities) {
+		v.Modify.Present = true
+		v.Modify.Value.Instructions = ahp.Optional[json.RawMessage]{Present: true, Value: json.RawMessage("{" + "\"replace\":" + strconv.FormatBool(argReplace) + ",\"merge\":" + strconv.FormatBool(argMerge) + "}")}
+	}
+}
+
+// WithOutputModification grants only the declared nested capability; it never adds effects or modes.
+func WithOutputModification(argReplace bool, argMerge bool) Option {
+	return func(v *ahp.Capabilities) {
+		v.Modify.Present = true
+		v.Modify.Value.Output = ahp.Optional[json.RawMessage]{Present: true, Value: json.RawMessage("{" + "\"replace\":" + strconv.FormatBool(argReplace) + ",\"merge\":" + strconv.FormatBool(argMerge) + "}")}
+	}
+}
+
+// WithPromptModification grants only the declared nested capability; it never adds effects or modes.
+func WithPromptModification(argReplace bool, argMerge bool) Option {
+	return func(v *ahp.Capabilities) {
+		v.Modify.Present = true
+		v.Modify.Value.Prompt = ahp.Optional[json.RawMessage]{Present: true, Value: json.RawMessage("{" + "\"replace\":" + strconv.FormatBool(argReplace) + ",\"merge\":" + strconv.FormatBool(argMerge) + "}")}
+	}
+}
+
+// WithRequestModification grants only the declared nested capability; it never adds effects or modes.
+func WithRequestModification(argReplace bool, argMerge bool) Option {
+	return func(v *ahp.Capabilities) {
+		v.Modify.Present = true
+		v.Modify.Value.Request = ahp.Optional[json.RawMessage]{Present: true, Value: json.RawMessage("{" + "\"replace\":" + strconv.FormatBool(argReplace) + ",\"merge\":" + strconv.FormatBool(argMerge) + "}")}
+	}
+}
+
+// WithResponseModification grants only the declared nested capability; it never adds effects or modes.
+func WithResponseModification(argReplace bool, argMerge bool) Option {
+	return func(v *ahp.Capabilities) {
+		v.Modify.Present = true
+		v.Modify.Value.Response = ahp.Optional[json.RawMessage]{Present: true, Value: json.RawMessage("{" + "\"replace\":" + strconv.FormatBool(argReplace) + ",\"merge\":" + strconv.FormatBool(argMerge) + "}")}
+	}
+}
+
+// WithSummaryModification grants only the declared nested capability; it never adds effects or modes.
+func WithSummaryModification(argReplace bool, argMerge bool) Option {
+	return func(v *ahp.Capabilities) {
+		v.Modify.Present = true
+		v.Modify.Value.Summary = ahp.Optional[json.RawMessage]{Present: true, Value: json.RawMessage("{" + "\"replace\":" + strconv.FormatBool(argReplace) + ",\"merge\":" + strconv.FormatBool(argMerge) + "}")}
+	}
+}
+
+// WithWorkspaceModification grants only the declared nested capability; it never adds effects or modes.
+func WithWorkspaceModification(argReplace bool, argMerge bool) Option {
+	return func(v *ahp.Capabilities) {
+		v.Modify.Present = true
+		v.Modify.Value.Workspace = ahp.Optional[json.RawMessage]{Present: true, Value: json.RawMessage("{" + "\"replace\":" + strconv.FormatBool(argReplace) + ",\"merge\":" + strconv.FormatBool(argMerge) + "}")}
+	}
 }

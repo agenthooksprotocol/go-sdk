@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func (c *Client) intercept(ctx context.Context, name string, input any, options ...InterceptOption) (*Result, error) {
+func (c *Hooks) intercept(ctx context.Context, name string, input any, options ...InterceptOption) (*Result, error) {
 	result, err := c.dispatch(ctx, name, input, options...)
 	if result == nil && err != nil {
 		return nil, &AdmissionError{Kind: "input", Err: err}
@@ -17,7 +17,7 @@ func (c *Client) intercept(ctx context.Context, name string, input any, options 
 	return result, err
 }
 
-func (c *Client) dispatch(ctx context.Context, name string, input any, options ...InterceptOption) (*Result, error) {
+func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ...InterceptOption) (*Result, error) {
 	if ctx == nil {
 		return nil, errors.New("nil context")
 	}

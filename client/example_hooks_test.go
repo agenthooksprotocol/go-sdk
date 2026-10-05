@@ -1,0 +1,123 @@
+package client_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http/httptest"
+	"os"
+
+	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/capability"
+	"github.com/agenthooksprotocol/go-sdk/client"
+	"github.com/agenthooksprotocol/go-sdk/effect"
+	"github.com/agenthooksprotocol/go-sdk/event"
+	"github.com/agenthooksprotocol/go-sdk/server"
+	"github.com/agenthooksprotocol/go-sdk/tool"
+)
+
+func ExampleHooks_ToolBefore() {
+	// The receiver is an ordinary http.Handler mounted on an owned server.
+	handler, err := server.NewHandler(server.Handlers{
+		Intercept: func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
+			version := ahp.ProtocolVersion("draft")
+			return ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: []*ahp.Effect{
+				effect.NewModify("replace", "input", json.RawMessage(`{"path":"safe.txt"}`)),
+			}}, nil
+		},
+		Observe: func(context.Context, ahp.ObserveNotification) error { return nil },
+	}, server.Options{})
+	if err != nil {
+		panic(err)
+	}
+	peer := httptest.NewServer(handler)
+	defer peer.Close()
+
+	// Registration is ordinary JSON, e.g. bytes from os.ReadFile. No SDK loader.
+	data := []byte(fmt.Sprintf(`{"protocolVersion":"draft","hooks":[{
+  "id":"com.example.guard","transport":{"type":"http","url":%q},
+  "subscriptions":[
+   {"events":["tool.before"],"mode":"intercept","timeoutMs":1000,"failurePolicy":"fail-closed","content":{"default":"metadata"}},
+   {"events":["tool.before"],"mode":"observe","content":{"default":"metadata"}}
+  ]}]}`, peer.URL))
+	var registration ahp.Registration
+	if err := json.Unmarshal(data, &registration); err != nil {
+		panic(err)
+	}
+
+	hooks, err := client.New(registration, client.Options{
+		Source: "urn:example:host",
+		Events: map[string]client.EventCapabilities{
+			"tool.before": {
+				Modes:        []client.Mode{client.Intercept, client.Observe},
+				Capabilities: capability.New([]string{"deny", "modify"}, capability.WithInputModification(true, false)),
+			},
+		},
+		EventClient: peer.Client(),
+		// Application input disclosure is an explicit host decision, not a grant
+		// inferred from registration or the event capability map.
+		Content: client.ContentOptions{ProjectOpaque: func(_ context.Context, _ client.ContentAuthorization, _ string, value any) (any, error) {
+			return value, nil
+		}},
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer hooks.Close()
+
+	type Arguments struct {
+		Path string `json:"path"`
+	}
+	ctx := context.Background()
+	var initial ahp.InterceptRequestParamsState
+	if err := json.Unmarshal([]byte(`{"permission":"none","candidate":null}`), &initial); err != nil {
+		panic(err)
+	}
+	result, err := hooks.ToolBefore(ctx, event.ToolBeforeInput[Arguments]{
+		Call: ahp.ToolBeforeEventCall{ID: "call-1"}, Path: "execute",
+		Tool: tool.NewInput("read_file", ahp.ExecutionEventToolOriginNative, Arguments{Path: "original.txt"}),
+	},
+		client.WithInitialState(initial),
+		client.WithCapabilities(*capability.New([]string{"modify"}, capability.WithInputModification(true, false))),
+	)
+	if err != nil {
+		var decode *client.DecodeError
+		if errors.As(err, &decode) && result != nil {
+			// Protocol effects remain accepted. result.EffectiveInput is available;
+			// do not execute result.Input when InputAvailable is false.
+			return
+		}
+		panic(err)
+	}
+	if result.Interrupted || !result.InputAvailable || result.State.Permission == "deny" || len(result.Errors) != 0 {
+		return
+	}
+	// Apply native permission and application validation before actual execution.
+	fmt.Println(result.Input.Path)
+	deliveryErrors, err := result.Observations.Wait(ctx)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(len(deliveryErrors))
+	// Output:
+	// safe.txt
+	// 0
+}
+
+func ExampleHooks_stdioServer() {
+	handler, err := server.NewHandler(server.Handlers{
+		Intercept: func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
+			version := ahp.ProtocolVersion("draft")
+			return ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: []*ahp.Effect{}}, nil
+		},
+	}, server.Options{})
+	if err != nil {
+		panic(err)
+	}
+	// A standalone process owns these streams. ServeStdio closes them on exit;
+	// use a cancellable application context for coordinated shutdown.
+	if err := server.ServeStdio(context.Background(), os.Stdin, os.Stdout, handler); err != nil {
+		panic(err)
+	}
+}

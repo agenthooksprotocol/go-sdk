@@ -23,7 +23,7 @@ import (
 // projectContent prepares a receiver-specific view. A returned error suppresses
 // publication; no partially prepared event escapes this function. It deliberately
 // does not normalize application data or infer authorization from event fields.
-func (c *Client) projectContent(ctx context.Context, event map[string]any, subscription map[string]any, backendID string) (map[string]any, error) {
+func (c *Hooks) projectContent(ctx context.Context, event map[string]any, subscription map[string]any, backendID string) (map[string]any, error) {
 	selection, _ := subscription["content"].(map[string]any)
 	mode, _ := selection["default"].(string)
 	if !contentMode(mode) {
@@ -161,7 +161,7 @@ func contentCategory(item map[string]any) string {
 	}
 }
 
-func (c *Client) projectContentItem(ctx context.Context, item, selection, subscription map[string]any, scope ContentAuthorization) (map[string]any, error) {
+func (c *Hooks) projectContentItem(ctx context.Context, item, selection, subscription map[string]any, scope ContentAuthorization) (map[string]any, error) {
 	out := map[string]any{}
 	// Only canonical descriptor fields survive. Payload permission flags, inline
 	// aliases and arbitrary duplicate bytes are never forwarded as metadata.
@@ -303,7 +303,7 @@ func contentMatches(metadata map[string]any, raw []byte) error {
 	return nil
 }
 
-func (c *Client) uploadContent(ctx context.Context, config map[string]any, raw []byte) (map[string]any, error) {
+func (c *Hooks) uploadContent(ctx context.Context, config map[string]any, raw []byte) (map[string]any, error) {
 	endpoint, ok := config["endpoint"].(string)
 	if !ok || strings.ContainsAny(endpoint, "\r\n") {
 		return nil, errors.New("invalid upload endpoint")

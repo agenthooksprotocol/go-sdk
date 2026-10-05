@@ -68,9 +68,10 @@ The `client` package composes protocol decisions; it does **not** run tools,
 validate application argument schemas, grant native permissions, or commit
 compaction changes. The host remains responsible for those operations.
 
-- Configure a client with a registration, stable host `Source`, and an explicit
-  capability manifest. Registration order, selectors, deadlines, and failure
-  policies govern delivery. Construction performs no network or process I/O.
+- Configure `client.Hooks` with JSON registration, stable host `Source`, and
+  explicit event modes/capability grants. A full manifest is an advanced
+  alternative. Registration order, selectors, deadlines, and failure policies
+  govern delivery. Construction performs no network or process I/O.
 - Call the context-first named boundary methods with generated `event` input
   projections. `ToolBefore` preserves the application argument type through its
   result. Use `json.RawMessage` as the type for dynamic tool registries.
@@ -96,39 +97,59 @@ wire types. Constructors fill schema literals and annotated defaults; parsers
 continue to preserve presence and never invent omitted required fields. The
 API targets the draft wire protocol and may evolve with it.
 
-For example, with host-defined `opts client.Options` and a standard `ctx`:
+`client.Hooks` is the registration-driven harness. Construct it with ordinary
+JSON registration and explicit event grants; there is no separate initialization
+step or custom registration-file loader:
 
 ```go
-reg := registration.New(registration.NewBackend(
-    "dev.example.guard",
-    transport.NewStdio("guard", ahp.StdioTransportLifecyclePersistent),
-    subscription.NewIntercept(
-        []string{"tool.before"}, time.Second,
-        ahp.InterceptSubscriptionFailurePolicyFailClosed,
-        content.NewSelection(ahp.ContentSelectionDefaultMetadata),
-    ),
-))
-hooks, err := client.New(reg, opts)
-// Handle err, then defer hooks.Close().
+data, err := os.ReadFile("hooks.json")
+if err != nil { return err }
+var reg ahp.Registration
+if err := json.Unmarshal(data, &reg); err != nil { return err }
+
+hooks, err := client.New(reg, client.Options{
+    Source: "urn:example:host",
+    Events: map[string]client.EventCapabilities{
+        "tool.before": {
+            Modes: []client.Mode{client.Intercept, client.Observe},
+            Capabilities: capability.New([]string{"deny", "modify"},
+                capability.WithInputModification(true, false)),
+        },
+    },
+    Content: hostContentPolicy, // Explicit, receiver-scoped host disclosure policy.
+})
+if err != nil { return err }
+defer hooks.Close()
 
 type Arguments struct { Path string `json:"path"` }
 result, err := hooks.ToolBefore(ctx, event.ToolBeforeInput[Arguments]{
     Call: ahp.ToolBeforeEventCall{ID: "call-1"},
     Path: "execute",
-    Tool: tool.NewInput(
-        "read_file", ahp.ExecutionEventToolOriginNative,
-        Arguments{Path: "notes.txt"},
-    ),
+    Tool: tool.NewInput("read_file", ahp.ExecutionEventToolOriginNative,
+        Arguments{Path: "notes.txt"}),
 })
 // Check err, result.Interrupted, protocol state, and host policy before execution.
 // result.Input has type Arguments when result.InputAvailable is true.
 ```
 
-The host's content projection policy in `opts` must explicitly permit the tool
-input disclosure; the example does not grant it implicitly. See the compiled
-[constructor examples](facade_generated_test.go),
-[generic method examples](client/facade_generated_test.go), and
-[public HTTP tests](client/public_http_test.go).
+The JSON document uses the unchanged `ahp.Registration` wire model: backend
+routes, modes, deadlines, failure policies, content selections, and upload
+endpoints remain registration data. The event map adds no implicit modes,
+effects, or elicitation support. For example, use
+`capability.WithElicitationForm()` explicitly when advertising form decisions.
+`Options.Manifest` remains available for advanced full-manifest metadata;
+provide it instead of `Events`, not together with it. `client.Client` is a
+deprecated alias of `Hooks`, not a second runtime or API.
+
+See the executable [JSON registration and typed boundary example](client/example_hooks_test.go),
+[generated constructor examples](facade_generated_test.go), and
+[public HTTP tests](client/public_http_test.go). The compiled example includes
+initial state, capability narrowing, decode-error handling, observation drain,
+shutdown, and a standard owned-stream stdio server. The compiled
+[resolved-content walkthrough](public_protocol_completion_test.go) shows verified
+host bytes, explicit receiver authorization, independent upload routes,
+`WithCompactionInstructions`, and detached `Result.Content` retrieval side by
+side with the receiving HTTP handlers.
 
 Duration constructors preserve exact decimal milliseconds. Canonical admission
 rejects fractional milliseconds and nonpositive deadlines. Use the generated
@@ -223,7 +244,7 @@ for transport, authentication, upload, and synthetic-host boundaries.
 
 Generated code lives in `generated.go`, semantic-package `generated.go` files, and `client/boundaries_generated.go`. Its provenance is recorded in `ahp-codegen.lock.json`; schema changes are made in the [protocol repository](https://github.com/agenthooksprotocol/agent-hooks-protocol), not by editing the generated file.
 
-The generator source is protocol commit `7544872e5beff69f29b04ae61686cc8ac25c3654`. From a protocol checkout at that commit, regenerate and verify with:
+The generator source is protocol commit `12da4174588bed02ad491c3e31ee685b255e77ff`. From a protocol checkout at that commit, regenerate and verify with:
 
 ```sh
 python3 tools/generate_sdk.py --go-sdk ../go-sdk

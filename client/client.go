@@ -23,7 +23,10 @@ import (
 // Options describes host-owned identity, supported protocol operations and I/O.
 // The two HTTP clients are deliberately independent credential scopes.
 type Options struct {
-	Source                 string
+	Source string
+	// Events explicitly advertises boundary modes and capabilities.
+	// Use Events for ordinary configuration or Manifest for advanced metadata, not both.
+	Events                 map[string]EventCapabilities
 	Manifest               ahp.StaticCapabilityManifest
 	EventClient            *http.Client
 	EventTransportResolver EventTransportResolver
@@ -34,7 +37,9 @@ type Options struct {
 	Content                ContentOptions
 }
 
-type Client struct {
+// Hooks is the registration-driven host for AHP boundary delivery.
+// It composes protocol decisions, but never executes native operations.
+type Hooks struct {
 	opts         Options
 	manifest     map[string]any
 	backends     []registeredBackend
@@ -45,6 +50,11 @@ type Client struct {
 	life         context.Context
 	observations chan struct{}
 }
+
+// Client is retained for source compatibility.
+// Deprecated: use Hooks.
+type Client = Hooks
+
 type registeredBackend struct {
 	id            string
 	subscriptions []map[string]any
@@ -81,7 +91,7 @@ type Result struct {
 }
 
 // New validates and snapshots configuration before opening any transport.
-func New(reg ahp.Registration, opts Options) (*Client, error) {
+func New(reg ahp.Registration, opts Options) (*Hooks, error) {
 	c, err := newClient(reg, opts)
 	if err != nil {
 		return nil, &AdmissionError{Kind: "config", Err: err}
@@ -89,7 +99,7 @@ func New(reg ahp.Registration, opts Options) (*Client, error) {
 	return c, nil
 }
 
-func newClient(reg ahp.Registration, opts Options) (*Client, error) {
+func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
 	if strings.TrimSpace(opts.Source) == "" {
 		return nil, errors.New("source is required")
 	}
@@ -116,7 +126,7 @@ func newClient(reg ahp.Registration, opts Options) (*Client, error) {
 	if !parsed.OK {
 		return nil, errors.New("invalid registration")
 	}
-	manifest, err := sdkMap(opts.Manifest)
+	manifest, err := manifestForOptions(parsed.Value, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +137,9 @@ func newClient(reg ahp.Registration, opts Options) (*Client, error) {
 	if err = json.Unmarshal(sdkJSON(manifest), &opts.Manifest); err != nil {
 		return nil, err
 	}
-	c := &Client{opts: opts, manifest: manifest, observations: make(chan struct{}, opts.MaxPendingObservations)}
+	// Retain only the detached normalized advertisement, not the caller's map.
+	opts.Events = nil
+	c := &Hooks{opts: opts, manifest: manifest, observations: make(chan struct{}, opts.MaxPendingObservations)}
 	c.life, c.cancel = context.WithCancel(context.Background())
 	ids := map[string]bool{}
 	for _, backend := range parsed.Value.Hooks {
@@ -169,7 +181,7 @@ func newClient(reg ahp.Registration, opts Options) (*Client, error) {
 
 // Close cancels outstanding calls and observations and releases owned processes.
 // Injected HTTP clients remain caller-owned. Close is safe to call repeatedly.
-func (c *Client) Close() error {
+func (c *Hooks) Close() error {
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()

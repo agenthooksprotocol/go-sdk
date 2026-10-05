@@ -31,18 +31,24 @@ func WithInterceptUpload(value *ahp.ContentUpload) InterceptOption {
 		v.Upload = ahp.Optional[*ahp.ContentUpload]{Present: true, Value: value}
 	}
 }
-func WithInterceptEvents(values ...ahp.InterceptSubscriptionEventsItem) InterceptOption {
+func WithInterceptEvents(values ...string) InterceptOption {
 	return func(v *ahp.InterceptSubscription) {
-		v.Events = append([]ahp.InterceptSubscriptionEventsItem{}, values...)
+		v.Events = func() []ahp.InterceptSubscriptionEventsItem {
+			items := make([]ahp.InterceptSubscriptionEventsItem, len(values))
+			for i, value := range values {
+				items[i] = ahp.InterceptSubscriptionEventsItem{Variant2: ahp.Optional[string]{Present: true, Value: value}}
+			}
+			return items
+		}()
 	}
 }
 func NewInterceptMilliseconds(argEvents []string, argTimeoutMs json.Number, argFailurePolicy ahp.InterceptSubscriptionFailurePolicy, argContent *ahp.ContentSelection, opts ...InterceptOption) ahp.BackendSubscriptionsItem {
 	v := &ahp.InterceptSubscription{Events: func() []ahp.InterceptSubscriptionEventsItem {
-		values := make([]ahp.InterceptSubscriptionEventsItem, len(argEvents))
+		items := make([]ahp.InterceptSubscriptionEventsItem, len(argEvents))
 		for i, value := range argEvents {
-			values[i] = ahp.InterceptSubscriptionEventsItem{Variant2: ahp.Optional[string]{Present: true, Value: value}}
+			items[i] = ahp.InterceptSubscriptionEventsItem{Variant2: ahp.Optional[string]{Present: true, Value: value}}
 		}
-		return values
+		return items
 	}(), TimeoutMs: argTimeoutMs, FailurePolicy: argFailurePolicy, Content: argContent, Mode: "intercept", IncludeNative: ahp.Optional[bool]{Present: true, Value: bool(false)}}
 	for _, opt := range opts {
 		if opt != nil {
@@ -90,16 +96,24 @@ func WithObserveUpload(value *ahp.ContentUpload) ObserveOption {
 		v.Upload = ahp.Optional[*ahp.ContentUpload]{Present: true, Value: value}
 	}
 }
-func WithObserveEvents(values ...ahp.ObserveSubscriptionEventsItem) ObserveOption {
-	return func(v *ahp.ObserveSubscription) { v.Events = append([]ahp.ObserveSubscriptionEventsItem{}, values...) }
+func WithObserveEvents(values ...string) ObserveOption {
+	return func(v *ahp.ObserveSubscription) {
+		v.Events = func() []ahp.ObserveSubscriptionEventsItem {
+			items := make([]ahp.ObserveSubscriptionEventsItem, len(values))
+			for i, value := range values {
+				items[i] = ahp.ObserveSubscriptionEventsItem{Variant2: ahp.Optional[string]{Present: true, Value: value}}
+			}
+			return items
+		}()
+	}
 }
 func NewObserve(argContent *ahp.ContentSelection, argEvents []string, opts ...ObserveOption) ahp.BackendSubscriptionsItem {
 	v := &ahp.ObserveSubscription{Content: argContent, Events: func() []ahp.ObserveSubscriptionEventsItem {
-		values := make([]ahp.ObserveSubscriptionEventsItem, len(argEvents))
+		items := make([]ahp.ObserveSubscriptionEventsItem, len(argEvents))
 		for i, value := range argEvents {
-			values[i] = ahp.ObserveSubscriptionEventsItem{Variant2: ahp.Optional[string]{Present: true, Value: value}}
+			items[i] = ahp.ObserveSubscriptionEventsItem{Variant2: ahp.Optional[string]{Present: true, Value: value}}
 		}
-		return values
+		return items
 	}(), Mode: "observe", IncludeNative: ahp.Optional[bool]{Present: true, Value: bool(false)}}
 	for _, opt := range opts {
 		if opt != nil {

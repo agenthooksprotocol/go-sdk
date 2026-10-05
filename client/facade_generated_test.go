@@ -4,6 +4,7 @@ package client
 import (
 	"context"
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/capability"
 	"github.com/agenthooksprotocol/go-sdk/content"
 	"github.com/agenthooksprotocol/go-sdk/event"
 	"github.com/agenthooksprotocol/go-sdk/registration"
@@ -17,12 +18,16 @@ import (
 // supplies its source/manifest and owns actual backend execution. This checks the
 // complete public expression and generic inference without network or subprocesses.
 func compileGeneratedFacadeExample(ctx context.Context, opts Options) {
+	opts.Events = map[string]EventCapabilities{
+		"tool.before": {Modes: []Mode{Intercept, Observe}, Capabilities: capability.New([]string{"modify"}, capability.WithInputModification(true, true))},
+	}
 	c, err := New(registration.New(registration.NewBackend("dev.example.guard",
 		transport.NewStdio("guard", ahp.StdioTransportLifecyclePersistent),
 		subscription.NewIntercept([]string{"tool.before"}, time.Second, ahp.InterceptSubscriptionFailurePolicyFailClosed, content.NewSelection(ahp.ContentSelectionDefaultOmit)))), opts)
 	if err != nil {
 		return
 	}
+	var _ *Hooks = c
 	defer c.Close()
 	type arguments struct {
 		Path string `json:"path"`

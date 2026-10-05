@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -71,36 +72,47 @@ func TestContentProjectionDeadlineClosesOwnedReader(t *testing.T) {
 }
 
 func TestContentInterceptDeadlineClosesNonmodifiableReader(t *testing.T) {
-	c, transports := testClient(t, "fail-open")
-	reader, writer := cancellationPipe(t)
-	cancellationContent(c, reader)
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	type completion struct {
-		result *Result
-		err    error
-	}
-	done := make(chan completion, 1)
-	go func() { r, err := c.intercept(ctx, "tool.before", cancellationInput()); done <- completion{r, err} }()
-	select {
-	case out := <-done:
-		if !errors.Is(out.err, context.DeadlineExceeded) || out.result == nil || !out.result.Interrupted {
-			t.Fatalf("lost interruption result: %+v %v", out.result, out.err)
+	// Advance the deadline only once admission has reached blocking I/O. With
+	// wall-clock time, race instrumentation can exhaust the deadline before
+	// projection begins and legitimately route the interceptor to observation.
+	synctest.Test(t, func(t *testing.T) {
+		c, transports := testClient(t, "fail-open")
+		reader, writer := cancellationPipe(t)
+		cancellationContent(c, reader)
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		type completion struct {
+			result *Result
+			err    error
 		}
-		waitObservations(t, out.result)
-	case <-time.After(time.Second):
-		_ = writer.Close()
-		t.Fatal("intercept preparation ignored deadline")
-	}
-	if reader.closes.Load() != 1 {
-		t.Fatalf("reader closed %d times", reader.closes.Load())
-	}
-	transports[0].mu.Lock()
-	calls := len(transports[0].calls)
-	transports[0].mu.Unlock()
-	if calls != 0 {
-		t.Fatal("incomplete content reached interceptor")
-	}
+		done := make(chan completion, 1)
+		go func() { r, err := c.intercept(ctx, "tool.before", cancellationInput()); done <- completion{r, err} }()
+		select {
+		case out := <-done:
+			if !errors.Is(out.err, context.DeadlineExceeded) || out.result == nil || !out.result.Interrupted {
+				t.Fatalf("lost interruption result: %+v %v", out.result, out.err)
+			}
+			waitObservations(t, out.result)
+		case <-time.After(time.Second):
+			_ = writer.Close()
+			t.Fatal("intercept preparation ignored deadline")
+		}
+		select {
+		case <-reader.started:
+		default:
+			t.Fatal("deadline expired before the content read began")
+		}
+		if reader.closes.Load() != 1 {
+			t.Fatalf("reader closed %d times", reader.closes.Load())
+		}
+		transports[0].mu.Lock()
+		calls := len(transports[0].calls)
+		transports[0].mu.Unlock()
+		if calls != 0 {
+			t.Fatal("incomplete content reached interceptor")
+		}
+
+	})
 }
 
 func TestContentObservationDeadlineReleasesReaderAndCapacity(t *testing.T) {

@@ -4,6 +4,7 @@ package ahp_test
 import (
 	"encoding/json"
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/capability"
 	"github.com/agenthooksprotocol/go-sdk/content"
 	"github.com/agenthooksprotocol/go-sdk/effect"
 	"github.com/agenthooksprotocol/go-sdk/event"
@@ -193,5 +194,65 @@ func TestGeneratedConstructorLiteralsAndOptionalDefaults(t *testing.T) {
 	}
 	if _, exists := again["includeNative"]; exists {
 		t.Fatal("parser roundtrip materialized absent default")
+	}
+}
+
+func TestGeneratedCapabilityHelpers(t *testing.T) {
+	absent := capability.New([]string{})
+	if absent.Elicitation.Present || absent.Modify.Present || absent.Flow.Present || absent.Inject.Present || len(absent.Effects) != 0 {
+		t.Fatal("constructor invented grants")
+	}
+	empty := capability.New(nil, capability.WithElicitation(ahp.CapabilitiesElicitation{}))
+	if !empty.Elicitation.Present || empty.Elicitation.Value.Form.Present || empty.Elicitation.Value.URL.Present {
+		t.Fatal("empty elicitation inferred a mode")
+	}
+	grants := capability.New([]string{"modify", "dev.example.extension"},
+		capability.WithInputModification(false, true),
+		capability.WithOutputModification(true, false),
+		capability.WithElicitationForm(), capability.WithElicitationURL())
+	if !grants.Elicitation.Value.Form.Present || !grants.Elicitation.Value.URL.Present {
+		t.Fatal("explicit elicitation grant absent")
+	}
+	raw, err := json.Marshal(grants)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Effects     []string                   `json:"effects"`
+		Modify      map[string]map[string]bool `json:"modify"`
+		Elicitation map[string]map[string]any  `json:"elicitation"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Effects) != 2 || decoded.Effects[0] != "modify" || decoded.Effects[1] != "dev.example.extension" {
+		t.Fatalf("effects changed: %s", raw)
+	}
+	input := decoded.Modify["input"]
+	if value, present := input["replace"]; !present || value {
+		t.Fatalf("explicit false lost: %s", raw)
+	}
+	if !input["merge"] || !decoded.Modify["output"]["replace"] {
+		t.Fatalf("target operation lost: %s", raw)
+	}
+	for _, mode := range []string{"form", "url"} {
+		if value, ok := decoded.Elicitation[mode]; !ok || value == nil || len(value) != 0 {
+			t.Fatalf("grant must be explicit empty object: %s", raw)
+		}
+	}
+	overridden := capability.New(nil, capability.WithEffects("allow"), capability.WithEffects("deny"), capability.WithInputModification(true, false), capability.WithInputModification(false, true))
+	if len(overridden.Effects) != 1 || string(overridden.Modify.Value.Input.Value) != `{"replace":false,"merge":true}` {
+		t.Fatal("last option did not win")
+	}
+	noImplicitEffects := capability.New(nil, capability.WithInputModification(false, false), capability.WithElicitationForm())
+	if len(noImplicitEffects.Effects) != 0 {
+		t.Fatal("nested helper implicitly granted an effect")
+	}
+	// Options produce new body storage for each use, not shared raw JSON.
+	option := capability.WithInputModification(true, false)
+	first, second := capability.New(nil, option), capability.New(nil, option)
+	first.Modify.Value.Input.Value[0] = 'x'
+	if second.Modify.Value.Input.Value[0] != '{' {
+		t.Fatal("shared modification backing storage")
 	}
 }

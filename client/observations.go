@@ -36,7 +36,7 @@ type observationDelivery struct {
 	index   int
 }
 
-func (c *Client) scheduleObservations(event map[string]any, pending []observationDelivery, prepared ...*preparedBoundary) *Observations {
+func (c *Hooks) scheduleObservations(event map[string]any, pending []observationDelivery, prepared ...*preparedBoundary) *Observations {
 	ctx, cancel := context.WithCancel(c.life)
 	if len(prepared) > 0 && prepared[0] != nil {
 		ctx = context.WithValue(ctx, preparedContextKey{}, prepared[0])
