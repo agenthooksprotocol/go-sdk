@@ -232,7 +232,7 @@ func TestLifecycleAdversarialSettledReport(t *testing.T) {
 			}
 			for _, raw := range diagnostics {
 				d := obj(raw)
-				if d["status"] != float64(200) || !reflect.DeepEqual(d["response"], malicious) {
+				if d["kind"] != "invalid-observation-acknowledgement" || d["eventId"] != "settled-observer-effects-ignored:a" || d["status"] != float64(200) || !reflect.DeepEqual(d["response"], malicious) {
 					t.Fatalf("malicious response not retained: %#v", d)
 				}
 			}

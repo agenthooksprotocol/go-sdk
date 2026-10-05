@@ -180,7 +180,7 @@ func LifecycleClient(ctx context.Context, c LifecycleConfig) error {
 	observed := map[string]int{}
 	for _, sc := range fixtures {
 		if sc.Chain != nil {
-			result, err := runObservationChain(sc, func(request Object) (<-chan lifecycleResult, error) {
+			result, observationDiagnostics, err := runObservationChain(sc, func(request Object) (<-chan lifecycleResult, error) {
 				done := make(chan lifecycleResult, 1)
 				go func() {
 					response, err := lifecyclePublicCall(ctx, request, pipe, eventHTTP, eventToken, c.Endpoint)
@@ -197,7 +197,11 @@ func LifecycleClient(ctx context.Context, c LifecycleConfig) error {
 			if err != nil {
 				return err
 			}
-			results = append(results, Object{"id": sc.ID, "actual": result})
+			row := Object{"id": sc.ID, "actual": result}
+			if len(observationDiagnostics) > 0 {
+				row["observationDiagnostics"] = observationDiagnostics
+			}
+			results = append(results, row)
 			continue
 		}
 

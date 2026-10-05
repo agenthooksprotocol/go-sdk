@@ -1,13 +1,14 @@
 package interop
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 )
 
 // runObservationChain runs actual serial wire interception; subscriptions after
 // settlement are automatically observed, never expanded into fixture decisions.
-func runObservationChain(sc lifecycleScenario, send func(Object) (<-chan lifecycleResult, error), control func(string, Object) error, observe func(Object) error, validate func(string, Object) error) (Object, error) {
+func runObservationChain(sc lifecycleScenario, send func(Object) (<-chan lifecycleResult, error), control func(string, Object) error, observe func(Object) error, validate func(string, Object) error) (Object, []any, error) {
 	original := sc.Requests["a"]
 	id := original["id"]
 	event := obj(clone(obj(original["params"])["event"]))
@@ -30,26 +31,26 @@ func runObservationChain(sc lifecycleScenario, send func(Object) (<-chan lifecyc
 			obj(params["event"])["items"] = []any{}
 		}
 		if err := validate("intercept-request", request); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		called = append(called, sub["id"])
 		reply, err := send(request)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err = control("/wait", Object{"id": id, "count": len(called)}); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if sc.Chain["interrupt"] == true {
 			if err = control("/mark", Object{"scenario": sc.ID, "kind": "cancelled", "id": id}); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			pending = reply
 			halted = true
 			continue
 		}
 		if err = control("/release", Object{"id": id}); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		result := <-reply
 		var state Object
@@ -94,9 +95,14 @@ func runObservationChain(sc lifecycleScenario, send func(Object) (<-chan lifecyc
 		}
 	}
 	if err := control("/mark", Object{"scenario": sc.ID, "kind": "chain-settled", "id": id}); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	deliveries := make(chan error, len(remaining))
+	type observationDelivery struct {
+		eventID      any
+		subscription any
+		done         <-chan error
+	}
+	deliveries := make([]observationDelivery, 0, len(remaining))
 	observed := []any{}
 	for _, sub := range remaining {
 		projected := obj(clone(event))
@@ -112,32 +118,41 @@ func runObservationChain(sc lifecycleScenario, send func(Object) (<-chan lifecyc
 		}
 		note := Object{"jsonrpc": "2.0", "method": "hooks/observe", "params": Object{"protocolVersion": "draft", "event": projected}}
 		if err := validate("observe", note); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		observed = append(observed, sub["id"])
-		go func() { deliveries <- observe(note) }()
+		done := make(chan error, 1)
+		deliveries = append(deliveries, observationDelivery{eventID: projected["id"], subscription: sub["id"], done: done})
+		go func() { done <- observe(note) }()
 	}
 	// Only the test controller drains; execution has already settled or stopped.
 	if pending != nil {
 		if err := control("/release", Object{"id": id}); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		<-pending
 	}
 	if len(remaining) > 0 {
 		if err := control("/wait-observed", Object{"eventId": event["id"], "count": len(remaining)}); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	if sc.Chain["holdObservers"] == true {
 		if err := control("/release", Object{"id": str(id) + ":observers"}); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
-	for range remaining {
-		if err := <-deliveries; err != nil {
-			return nil, fmt.Errorf("observation test drain: %w", err)
+	diagnostics := []any{}
+	// Drain in subscription order, independent of asynchronous completion order.
+	// Rejected acknowledgements are delivery evidence, never new decisions.
+	for _, delivery := range deliveries {
+		if err := <-delivery.done; err != nil {
+			var acknowledgement *lifecycleObservationAcknowledgementError
+			if !errors.As(err, &acknowledgement) {
+				return nil, nil, fmt.Errorf("observation test drain: %w", err)
+			}
+			diagnostics = append(diagnostics, Object{"eventId": delivery.eventID, "subscription": delivery.subscription, "kind": "invalid-observation-acknowledgement", "status": acknowledgement.Status, "response": clone(acknowledgement.Response)})
 		}
 	}
-	return Object{"called": called, "failures": failures, "observations": observed, "input": obj(event["tool"])["input"]}, nil
+	return Object{"called": called, "failures": failures, "observations": observed, "input": obj(event["tool"])["input"]}, diagnostics, nil
 }

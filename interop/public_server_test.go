@@ -101,6 +101,46 @@ func TestPublicHTTPOrdinaryRoundTrip(t *testing.T) {
 	}
 }
 
+// The synthetic TLS/workload controls are transport fixtures, not portable AHP
+// authentication advertisements. A stale manifest breaks discovery for every
+// stdio sender when regenerated against the portable-auth protocol snapshot.
+func TestPublicStdioCapabilitiesPortableAuthentication(t *testing.T) {
+	validator, err := NewValidator(schemaPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := &serverState{validator: validator, barriers: map[string]chan struct{}{}}
+	host, receiver := net.Pipe()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	handler, err := state.publicHandler(receiver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- server.ServeStdio(ctx, receiver, receiver, handler) }()
+	_ = host.SetDeadline(time.Now().Add(5 * time.Second))
+	req := Object{"jsonrpc": "2.0", "id": "capabilities", "method": "hooks/capabilities", "params": Object{"protocolVersion": "draft"}}
+	_, writeErr := host.Write(append(wire(req), '\n'))
+	frame, readErr := bufio.NewReader(host).ReadBytes('\n')
+	host.Close()
+	serveErr := <-done
+	if writeErr != nil || readErr != nil || serveErr != nil {
+		t.Fatalf("stdio: write=%v read=%v serve=%v", writeErr, readErr, serveErr)
+	}
+	response, err := validator.Validate("capabilities-response", frame)
+	if err != nil {
+		t.Fatalf("capabilities response rejected: %v: %s", err, frame)
+	}
+	if response["id"] != "capabilities" || response["error"] != nil {
+		t.Fatalf("discovery failed: %s", frame)
+	}
+	authentication := obj(obj(response["result"])["manifest"])["authentication"]
+	if !reflect.DeepEqual(authentication, []any{"bearer", "oauth"}) {
+		t.Fatalf("nonportable authentication advertised: %v", authentication)
+	}
+}
+
 func TestPublicStdioOrdinaryAndAdversarialFrames(t *testing.T) {
 	validator, err := NewValidator(schemaPath(t))
 	if err != nil {
