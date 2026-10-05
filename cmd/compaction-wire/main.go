@@ -322,7 +322,11 @@ func run() error {
 		return e
 	}
 	fmt.Printf("{\"endpoint\":\"http://%s\"}\n", listener.Addr())
-	return http.Serve(listener, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return http.Serve(listener, compactionHTTPHandler(config, store, v))
+}
+
+func compactionHTTPHandler(config O, store string, v *ahp.Validator) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upload := r.URL.Path == "/upload"
 		name := "AHP_COMPACTION_TOKENS"
 		if upload {
@@ -376,8 +380,9 @@ func run() error {
 			w.WriteHeader(400)
 			return
 		}
+		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(receive(request, sub, config, store, v))
-	}))
+	})
 }
 
 // Upload credentials are scoped independently from hook event credentials.
