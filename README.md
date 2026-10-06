@@ -124,14 +124,14 @@ if err != nil { return err }
 var reg ahp.Registration
 if err := json.Unmarshal(data, &reg); err != nil { return err }
 
+toolCapabilities, err := capability.Intercept(
+    capability.Deny(), capability.ModifyInput(capability.Replace))
+if err != nil { return err }
+
 hooks, err := client.New(reg, client.Options{
     Source: "urn:example:host",
     Events: map[string]client.EventCapabilities{
-        "tool.before": {
-            Modes: []client.Mode{client.Intercept, client.Observe},
-            Capabilities: capability.New([]string{"deny", "modify"},
-                capability.WithInputModification(true, false)),
-        },
+        "tool.before": toolCapabilities,
     },
     Content: hostContentPolicy, // Explicit, receiver-scoped host disclosure policy.
 })
@@ -140,10 +140,9 @@ defer hooks.Close()
 
 type Arguments struct { Path string `json:"path"` }
 result, err := hooks.ToolBefore(ctx, event.ToolBeforeInput[Arguments]{
-    Call: ahp.ToolBeforeEventCall{ID: "call-1"},
-    Path: "execute",
-    Tool: tool.NewInput("read_file", ahp.ExecutionEventToolOriginNative,
-        Arguments{Path: "notes.txt"}),
+    CallID: "call-1", Path: "execute",
+    Name: "read_file", Origin: ahp.ExecutionEventToolOriginNative,
+    Input: Arguments{Path: "notes.txt"},
 })
 // Check err, result.Interrupted, protocol state, and host policy before execution.
 // result.Input has type Arguments when result.InputAvailable is true.
@@ -151,9 +150,10 @@ result, err := hooks.ToolBefore(ctx, event.ToolBeforeInput[Arguments]{
 
 The JSON document uses the unchanged `ahp.Registration` wire model: backend
 routes, modes, deadlines, failure policies, content selections, and upload
-endpoints remain registration data. The event map adds no implicit modes,
-effects, or elicitation support. For example, use
-`capability.WithElicitationForm()` explicitly when advertising form decisions.
+endpoints remain registration data. The event map grants no effects or elicitation support beyond the supplied
+declaration. `capability.Intercept` deliberately advertises both intercept and
+observe modes; `capability.Observe` advertises only observe. Include
+`capability.ElicitationForm()` explicitly when advertising form decisions.
 `Options.Manifest` remains available for advanced full-manifest metadata;
 provide it instead of `Events`, not together with it. `client.Client` is a
 deprecated alias of `Hooks`, not a second runtime or API.
@@ -173,6 +173,67 @@ rejects fractional milliseconds and nonpositive deadlines. Use the generated
 `NewInterceptDuration` helper for an eager checked constructor, or
 `NewInterceptMilliseconds` for explicit wire values. No timeout or stdio
 lifecycle default is invented.
+
+### Generated event, capability, state, and effect helpers
+
+Generated `event.*Input` structs are ergonomic boundary inputs, not copies of
+nested wire envelopes. For tool boundaries, set `CallID`, `Name`, `Origin`,
+`Input`, and `Path` directly instead of constructing `Call` and `Tool` wrappers.
+`ToolBeforeInput[T]` retains the application's typed input. Other event-specific
+fields remain typed; optional fields use `ahp.Some(value)`, including `ID` and
+`ParentEventID`. Zero optional values mean absent, not an explicit null.
+The generated marshaler restores canonical nested wire fields. Use root `ahp`
+wire models and parsers for decoding protocol JSON, not ergonomic input structs.
+Advanced dynamic callers can use `Hooks.Dispatch(ctx, eventType, input, options...)`
+with canonical host fields, excluding SDK-owned `type`, `source`, and `manifest`.
+Canonical fixture adapters use this path instead of duplicating generated mappings.
+The SDK owns the protocol envelope and fills permitted identity fields; callers
+still supply required occurrence and application data.
+
+`capability.Event` is the event declaration used by `client.EventCapabilities`.
+`capability.Intercept(grants...)` returns `(capability.Event, error)` and requires
+explicit grants; always handle its error. Available grants are:
+
+- `Allow`, `Ask`, `Deny`, `Message`, and `Return`.
+- `ModifyContent`, `ModifyInput`, `ModifyInstructions`, `ModifyOutput`,
+  `ModifyPrompt`, `ModifyRequest`, `ModifyResponse`, `ModifySummary`, and
+  `ModifyWorkspace`, each with explicit `capability.Merge` and/or
+  `capability.Replace` operations.
+- `FlowContinue(remaining, count)` and `FlowStop`.
+- `InjectContextAppend`, with explicit `capability.Now` and/or
+  `capability.NextTurn` delivery timing.
+- `ElicitationForm` and `ElicitationURL`, independently granted.
+
+Construction is not event admission or execution authorization. Hooks still
+checks event compatibility, host support, and per-call narrowing. Pass a checked
+narrower declaration's dereferenced `Capabilities` to `client.WithCapabilities`.
+The lower-level `capability.New` and event-specific wire constructors remain
+available for advanced declarations.
+
+`state.Initial(permission.None)` returns a pointer to state with no candidate.
+`permission.Allow`, `Ask`, `Deny`, and `None` represent native decisions already
+made for this occurrence, not a new authorization. Pass the dereferenced result
+to `client.WithInitialState`. `state.Candidate(value, provenance...)` encodes a
+candidate and returns an error; `state.WithCandidate`, `WithFlow`,
+`WithInjections`, and `WithInstructions` supply explicit accumulated state.
+`state.NoCandidate` represents an explicit absent candidate. Initial state never
+skips host permission, approval, or application-schema validation.
+
+Receiver-side `effect.Modify<Target>Merge(value)` and
+`effect.Modify<Target>Replace(value)` accept typed application values for all
+nine modification targets above. `effect.Return(value)` and
+`effect.InjectContextAppend(effect.Now, value)` (or `effect.NextTurn`) likewise
+encode payloads and return `(*ahp.Effect, error)`; check errors before publishing
+a response. Simple effects retain `NewAllow`, `NewAsk`, `NewDeny`, `NewMessage`,
+`NewFlowStop`, and `NewFlowContinue`. Raw `NewModify`, `NewReturn`, and
+`NewInjectAppend` remain advanced wire helpers. These constructors neither grant
+capabilities nor establish that a payload satisfies the host application's schema.
+
+Generated content-source companions such as `ItemsSources`, `InstructionsSource`,
+and `SummarySource` bind owned `*content.Source` values to their descriptor slots
+without serializing readers or reading at construction. Sources supplement, not
+replace, canonical descriptors. Explicit host content authorization, disclosure
+policy, size limits, and source ownership rules still apply.
 
 ### Current composition coverage
 
@@ -256,7 +317,9 @@ performs no reads. Only an authorized selected body snapshots bytes, within the
 configured limit, computes actual size/SHA-256 and uploads independently to each
 receiver before publishing its event. Fan-out reuses the immutable snapshot. Unused,
 failed and cancelled sources are closed, and a source cannot be reused across
-occurrences. Reader `Close` must unblock a pending `Read`. Advanced callers may
+occurrences. Reader `Close` must unblock a pending `Read`. Original source snapshots
+and rewritten prepared bodies each have an aggregate `MaxContentBytes` bound;
+together they can retain twice that limit, plus bounded delivery copies. Advanced callers may
 bind canonical slots with `client.WithContentSource`; wire references/resolvers
 remain available for already prepared content.
 
@@ -285,7 +348,7 @@ for transport, authentication, upload, and synthetic-host boundaries.
 
 Generated code lives in `generated.go`, semantic-package `generated.go` files, and `client/boundaries_generated.go`. Its provenance is recorded in `ahp-codegen.lock.json`; schema changes are made in the [protocol repository](https://github.com/agenthooksprotocol/agent-hooks-protocol), not by editing the generated file.
 
-The generator source is protocol commit `12da4174588bed02ad491c3e31ee685b255e77ff`. From a protocol checkout at that commit, regenerate and verify with:
+The generator source is protocol commit `472c16e97cfd456d98cefa0c2a3d23df2f57dbcf`. From a protocol checkout at that commit, regenerate and verify with:
 
 ```sh
 python3 tools/generate_sdk.py --go-sdk ../go-sdk

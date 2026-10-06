@@ -9,7 +9,6 @@ import (
 	"github.com/agenthooksprotocol/go-sdk/event"
 	"github.com/agenthooksprotocol/go-sdk/registration"
 	"github.com/agenthooksprotocol/go-sdk/subscription"
-	"github.com/agenthooksprotocol/go-sdk/tool"
 	"github.com/agenthooksprotocol/go-sdk/transport"
 	"time"
 )
@@ -32,7 +31,7 @@ func compileGeneratedFacadeExample(ctx context.Context, opts Options) {
 	type arguments struct {
 		Path string `json:"path"`
 	}
-	result, err := c.ToolBefore(ctx, event.ToolBeforeInput[arguments]{Path: "/tools/read", Call: ahp.ToolBeforeEventCall{ID: "call-1"}, Tool: tool.NewInput("read", "native", arguments{Path: "file.txt"}, tool.WithInputKind("task"))})
+	result, err := c.ToolBefore(ctx, event.ToolBeforeInput[arguments]{Path: "/tools/read", CallID: "call-1", Name: "read", Origin: "native", Input: arguments{Path: "file.txt"}, ToolKind: ahp.Some("task")})
 	if err != nil || result == nil {
 		return
 	}

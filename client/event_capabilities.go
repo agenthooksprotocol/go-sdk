@@ -7,10 +7,11 @@ import (
 	"sort"
 
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/capability"
 )
 
 // Mode is an explicitly supported delivery mode for a boundary.
-type Mode = ahp.StaticCapabilityManifestEventsItemModesItem
+type Mode = capability.Mode
 
 const (
 	Intercept Mode = ahp.StaticCapabilityManifestEventsItemModesItemIntercept
@@ -21,10 +22,7 @@ const (
 // be nonempty and unique. Intercept requires an explicit Capabilities value,
 // including when its Effects list is empty. Observe-only entries omit Capabilities.
 // Neither registration subscriptions nor per-occurrence options grant authority.
-type EventCapabilities struct {
-	Modes        []Mode
-	Capabilities *ahp.Capabilities
-}
+type EventCapabilities = capability.Event
 
 // manifestForOptions synthesizes only the metadata needed by the ordinary path.
 // Events are host declarations, never inferred from registration. Transport and

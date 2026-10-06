@@ -15,6 +15,7 @@ import (
 	"time"
 
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/capability"
 	"github.com/agenthooksprotocol/go-sdk/client"
 	"github.com/agenthooksprotocol/go-sdk/content"
 	"github.com/agenthooksprotocol/go-sdk/effect"
@@ -86,7 +87,11 @@ func TestPublicResolvedInstructionsAcrossReceivers(t *testing.T) {
 			version := ahp.ProtocolVersion("draft")
 			effects := []*ahp.Effect{}
 			if receiver == "a" {
-				effects = append(effects, effect.NewModify("replace", "instructions", json.RawMessage(`"accepted instructions\n"`)))
+				modification, err := effect.ModifyInstructionsReplace("accepted instructions\n")
+				if err != nil {
+					return ahp.InterceptResponseResult{}, err
+				}
+				effects = append(effects, modification)
 			}
 			return ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: effects}, nil
 		}}, server.Options{})
@@ -103,8 +108,12 @@ func TestPublicResolvedInstructionsAcrossReceivers(t *testing.T) {
 		sub := subscription.NewIntercept([]string{"context.compact.before"}, time.Second, "fail-closed", content.NewSelection("body"), subscription.WithInterceptUpload(upload))
 		backends = append(backends, registration.NewBackend("com.example."+receiver, transport.NewHttp(endpoint.URL+"/hooks/"+receiver), sub))
 	}
+	compactCapabilities, err := capability.Intercept(capability.ModifyInstructions(capability.Replace))
+	if err != nil {
+		t.Fatal(err)
+	}
 	var manifest ahp.StaticCapabilityManifest
-	if err := json.Unmarshal(completionJSON(map[string]any{"events": []any{map[string]any{"event": "context.compact.before", "modes": []string{"intercept"}, "capabilities": map[string]any{"effects": []string{"modify"}, "modify": map[string]any{"instructions": map[string]any{"replace": true, "merge": false}}}}}, "gaps": []any{}, "transports": []string{"http"}, "authentication": []any{}, "toolPaths": []any{}, "contentCategories": []string{"text"}, "limits": map[string]any{"maxUploadBytes": 4096}, "managedPolicy": map[string]any{"scopes": []string{"user"}, "disableable": true}, "correlationIdentityFields": []string{"event.id"}}), &manifest); err != nil {
+	if err := json.Unmarshal(completionJSON(map[string]any{"events": []any{map[string]any{"event": "context.compact.before", "modes": []string{"intercept"}, "capabilities": compactCapabilities.Capabilities}}, "gaps": []any{}, "transports": []string{"http"}, "authentication": []any{}, "toolPaths": []any{}, "contentCategories": []string{"text"}, "limits": map[string]any{"maxUploadBytes": 4096}, "managedPolicy": map[string]any{"scopes": []string{"user"}, "disableable": true}, "correlationIdentityFields": []string{"event.id"}}), &manifest); err != nil {
 		t.Fatal(err)
 	}
 	hooks, err := client.New(registration.New(backends...), client.Options{Source: "urn:test:completion", Manifest: manifest, EventClient: endpoint.Client(), UploadClient: endpoint.Client(), Content: client.ContentOptions{AllowLoopbackHTTP: true, AuthorizeContent: func(context.Context, client.ContentAuthorization) (bool, error) { return true, nil }, Resolver: func(_ context.Context, ref string) (io.ReadCloser, error) {
@@ -117,7 +126,7 @@ func TestPublicResolvedInstructionsAcrossReceivers(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer hooks.Close()
-	result, err := hooks.ContextCompactBefore(context.Background(), event.ContextCompactBeforeInput{ID: "compact-public", Trigger: "manual", Items: []*ahp.ModelVisibleItem{}, Instructions: ahp.Optional[*ahp.ContentItem]{Present: true, Value: &instruction}})
+	result, err := hooks.ContextCompactBefore(context.Background(), event.ContextCompactBeforeInput{ID: ahp.Some("compact-public"), Trigger: "manual", Items: []*ahp.ModelVisibleItem{}, Instructions: ahp.Some(&instruction)})
 	if err != nil {
 		t.Fatal(err)
 	}

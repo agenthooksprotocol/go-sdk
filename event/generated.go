@@ -3,1754 +3,3371 @@ package event
 
 import ahp "github.com/agenthooksprotocol/go-sdk"
 import "encoding/json"
-import "github.com/agenthooksprotocol/go-sdk/tool"
+import "strconv"
+import "github.com/agenthooksprotocol/go-sdk/content"
 
+type Type = string
 type ConfigChangeAfterInput struct {
-	Change        ahp.ConfigChangeAfterEventChange                   `json:"change"`
-	Extensions    ahp.Optional[*ahp.Extensions]                      `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.ConfigChangeAfterEventGapsItem] `json:"gaps"`
-	ID            string                                             `json:"id"`
-	Items         ahp.Optional[[]*ahp.ContentItem]                   `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]                     `json:"native"`
-	ParentEventId ahp.Optional[string]                               `json:"parentEventId"`
-	Session       ahp.Optional[*ahp.Session]                         `json:"session"`
-	Synthesized   ahp.Optional[bool]                                 `json:"synthesized"`
-	Time          string                                             `json:"time"`
-	Turn          ahp.Optional[ahp.ConfigChangeAfterEventTurn]       `json:"turn"`
+	Change        ahp.ConfigChangeAfterEventChange
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Gaps          ahp.Optional[[]ahp.ConfigChangeAfterEventGapsItem]
+	ID            ahp.Optional[string]
+	Items         ahp.Optional[[]*ahp.ContentItem]
+	Native        ahp.Optional[*ahp.NativeEvent]
+	ParentEventID ahp.Optional[string]
+	Session       ahp.Optional[*ahp.Session]
+	Synthesized   ahp.Optional[bool]
+	Time          ahp.Optional[string]
+	Turn          ahp.Optional[ahp.ConfigChangeAfterEventTurn]
+	ItemsSources  []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v ConfigChangeAfterInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v ConfigChangeAfterInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	fields["change"] = v.Change
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		fields["change"] = v.Change
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
 	}
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const ConfigChangeAfter Type = "config.change.after"
 
 type ConfigChangeBeforeInput struct {
-	Change        ahp.ConfigChangeBeforeEventChange                   `json:"change"`
-	Extensions    ahp.Optional[*ahp.Extensions]                       `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.ConfigChangeBeforeEventGapsItem] `json:"gaps"`
-	ID            string                                              `json:"id"`
-	Items         ahp.Optional[[]*ahp.ContentItem]                    `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]                      `json:"native"`
-	ParentEventId ahp.Optional[string]                                `json:"parentEventId"`
-	Session       ahp.Optional[*ahp.Session]                          `json:"session"`
-	Synthesized   ahp.Optional[bool]                                  `json:"synthesized"`
-	Time          string                                              `json:"time"`
-	Turn          ahp.Optional[ahp.ConfigChangeBeforeEventTurn]       `json:"turn"`
+	Change        ahp.ConfigChangeBeforeEventChange
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Gaps          ahp.Optional[[]ahp.ConfigChangeBeforeEventGapsItem]
+	ID            ahp.Optional[string]
+	Items         ahp.Optional[[]*ahp.ContentItem]
+	Native        ahp.Optional[*ahp.NativeEvent]
+	ParentEventID ahp.Optional[string]
+	Session       ahp.Optional[*ahp.Session]
+	Synthesized   ahp.Optional[bool]
+	Time          ahp.Optional[string]
+	Turn          ahp.Optional[ahp.ConfigChangeBeforeEventTurn]
+	ItemsSources  []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v ConfigChangeBeforeInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v ConfigChangeBeforeInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	fields["change"] = v.Change
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		fields["change"] = v.Change
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
 	}
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const ConfigChangeBefore Type = "config.change.before"
 
 type ContextCompactAfterInput struct {
-	Execution     *ahp.ExecutionEventExecution                         `json:"execution"`
-	Extensions    ahp.Optional[*ahp.Extensions]                        `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.ContextCompactAfterEventGapsItem] `json:"gaps"`
-	ID            string                                               `json:"id"`
-	Items         ahp.Optional[[]*ahp.ModelVisibleItem]                `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]                       `json:"native"`
-	ParentEventId ahp.Optional[string]                                 `json:"parentEventId"`
-	Removed       []ahp.ContextCompactAfterEventRemovedItem            `json:"removed"`
-	Session       ahp.Optional[*ahp.Session]                           `json:"session"`
-	Summary       *ahp.ModelVisibleItem                                `json:"summary"`
-	Synthesized   ahp.Optional[bool]                                   `json:"synthesized"`
-	Time          string                                               `json:"time"`
-	TokenCounts   ahp.Optional[*ahp.ExecutionEventTokencounts]         `json:"tokenCounts"`
-	Turn          ahp.Optional[ahp.ContextCompactAfterEventTurn]       `json:"turn"`
+	Execution     *ahp.ExecutionEventExecution
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Gaps          ahp.Optional[[]ahp.ContextCompactAfterEventGapsItem]
+	ID            ahp.Optional[string]
+	Items         ahp.Optional[[]*ahp.ModelVisibleItem]
+	Native        ahp.Optional[*ahp.NativeEvent]
+	ParentEventID ahp.Optional[string]
+	Removed       []ahp.ContextCompactAfterEventRemovedItem
+	Session       ahp.Optional[*ahp.Session]
+	Summary       *ahp.ModelVisibleItem
+	Synthesized   ahp.Optional[bool]
+	Time          ahp.Optional[string]
+	TokenCounts   ahp.Optional[*ahp.ExecutionEventTokencounts]
+	Turn          ahp.Optional[ahp.ContextCompactAfterEventTurn]
+	ItemsSources  []*content.Source `json:"-"`
+	SummarySource *content.Source   `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v ContextCompactAfterInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	if v.SummarySource != nil {
+		sources["/summary"] = v.SummarySource
+	}
+	return sources
+}
 func (v ContextCompactAfterInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	fields["execution"] = v.Execution
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		fields["execution"] = v.Execution
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	fields["removed"] = v.Removed
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	fields["summary"] = v.Summary
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		fields["removed"] = v.Removed
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
 	}
-	if v.TokenCounts.Present {
-		fields["tokenCounts"] = v.TokenCounts.Value
+	{
+		fields["summary"] = v.Summary
 	}
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
+	}
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		if v.TokenCounts.Present {
+			fields["tokenCounts"] = v.TokenCounts.Value
+		}
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const ContextCompactAfter Type = "context.compact.after"
 
 type ContextCompactBeforeInput struct {
-	Extensions    ahp.Optional[*ahp.Extensions]                `json:"extensions"`
-	Gaps          ahp.Optional[[]json.RawMessage]              `json:"gaps"`
-	ID            string                                       `json:"id"`
-	Instructions  ahp.Optional[*ahp.ContentItem]               `json:"instructions"`
-	Items         []*ahp.ModelVisibleItem                      `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]               `json:"native"`
-	ParentEventId ahp.Optional[string]                         `json:"parentEventId"`
-	Session       ahp.Optional[*ahp.Session]                   `json:"session"`
-	Synthesized   ahp.Optional[bool]                           `json:"synthesized"`
-	Time          string                                       `json:"time"`
-	TokenCounts   ahp.Optional[*ahp.ExecutionEventTokencounts] `json:"tokenCounts"`
-	Trigger       string                                       `json:"trigger"`
-	Turn          ahp.Optional[json.RawMessage]                `json:"turn"`
+	Extensions         ahp.Optional[*ahp.Extensions]
+	Gaps               ahp.Optional[[]json.RawMessage]
+	ID                 ahp.Optional[string]
+	Instructions       ahp.Optional[*ahp.ContentItem]
+	Items              []*ahp.ModelVisibleItem
+	Native             ahp.Optional[*ahp.NativeEvent]
+	ParentEventID      ahp.Optional[string]
+	Session            ahp.Optional[*ahp.Session]
+	Synthesized        ahp.Optional[bool]
+	Time               ahp.Optional[string]
+	TokenCounts        ahp.Optional[*ahp.ExecutionEventTokencounts]
+	Trigger            string
+	Turn               ahp.Optional[json.RawMessage]
+	InstructionsSource *content.Source   `json:"-"`
+	ItemsSources       []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v ContextCompactBeforeInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	if v.InstructionsSource != nil {
+		sources["/instructions"] = v.InstructionsSource
+	}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v ContextCompactBeforeInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Instructions.Present {
-		fields["instructions"] = v.Instructions.Value
+	{
+		if v.Instructions.Present {
+			fields["instructions"] = v.Instructions.Value
+		}
 	}
-	fields["items"] = v.Items
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		fields["items"] = v.Items
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
 	}
-	if v.TokenCounts.Present {
-		fields["tokenCounts"] = v.TokenCounts.Value
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
 	}
-	fields["trigger"] = v.Trigger
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.TokenCounts.Present {
+			fields["tokenCounts"] = v.TokenCounts.Value
+		}
+	}
+	{
+		fields["trigger"] = v.Trigger
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const ContextCompactBefore Type = "context.compact.before"
 
 type FileChangedInput struct {
-	Changes       []ahp.FileChangedEventChangesItem            `json:"changes"`
-	Extensions    ahp.Optional[*ahp.Extensions]                `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.FileChangedEventGapsItem] `json:"gaps"`
-	ID            string                                       `json:"id"`
-	Items         ahp.Optional[[]*ahp.ContentItem]             `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]               `json:"native"`
-	ParentEventId ahp.Optional[string]                         `json:"parentEventId"`
-	Session       ahp.Optional[*ahp.Session]                   `json:"session"`
-	Synthesized   ahp.Optional[bool]                           `json:"synthesized"`
-	Time          string                                       `json:"time"`
-	Turn          ahp.Optional[ahp.FileChangedEventTurn]       `json:"turn"`
+	Changes       []ahp.FileChangedEventChangesItem
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Gaps          ahp.Optional[[]ahp.FileChangedEventGapsItem]
+	ID            ahp.Optional[string]
+	Items         ahp.Optional[[]*ahp.ContentItem]
+	Native        ahp.Optional[*ahp.NativeEvent]
+	ParentEventID ahp.Optional[string]
+	Session       ahp.Optional[*ahp.Session]
+	Synthesized   ahp.Optional[bool]
+	Time          ahp.Optional[string]
+	Turn          ahp.Optional[ahp.FileChangedEventTurn]
+	ItemsSources  []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v FileChangedInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v FileChangedInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	fields["changes"] = v.Changes
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		fields["changes"] = v.Changes
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
 	}
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const FileChanged Type = "file.changed"
 
 type HookFailureInput struct {
-	Extensions    ahp.Optional[*ahp.Extensions]                `json:"extensions"`
-	Failure       ahp.HookFailureEventFailure                  `json:"failure"`
-	Gaps          ahp.Optional[[]ahp.HookFailureEventGapsItem] `json:"gaps"`
-	ID            string                                       `json:"id"`
-	Items         ahp.Optional[[]*ahp.ContentItem]             `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]               `json:"native"`
-	ParentEventId string                                       `json:"parentEventId"`
-	Session       ahp.Optional[*ahp.Session]                   `json:"session"`
-	Synthesized   ahp.Optional[bool]                           `json:"synthesized"`
-	Time          string                                       `json:"time"`
-	Turn          ahp.Optional[ahp.HookFailureEventTurn]       `json:"turn"`
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Failure       ahp.HookFailureEventFailure
+	Gaps          ahp.Optional[[]ahp.HookFailureEventGapsItem]
+	ID            ahp.Optional[string]
+	Items         ahp.Optional[[]*ahp.ContentItem]
+	Native        ahp.Optional[*ahp.NativeEvent]
+	ParentEventID string
+	Session       ahp.Optional[*ahp.Session]
+	Synthesized   ahp.Optional[bool]
+	Time          ahp.Optional[string]
+	Turn          ahp.Optional[ahp.HookFailureEventTurn]
+	ItemsSources  []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v HookFailureInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v HookFailureInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	fields["failure"] = v.Failure
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		fields["failure"] = v.Failure
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	fields["parentEventId"] = v.ParentEventId
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		fields["parentEventId"] = v.ParentEventID
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
 	}
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
+	}
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const HookFailure Type = "hook.failure"
 
 type ModelErrorInput struct {
-	Attempt       *ahp.ExecutionEventAttempt                    `json:"attempt"`
-	Error         *ahp.ExecutionEventError                      `json:"error"`
-	Execution     json.RawMessage                               `json:"execution"`
-	Extensions    ahp.Optional[*ahp.Extensions]                 `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.ModelErrorEventGapsItem]   `json:"gaps"`
-	ID            string                                        `json:"id"`
-	Items         ahp.Optional[[]*ahp.ContentItem]              `json:"items"`
-	LatencyMs     ahp.Optional[json.Number]                     `json:"latencyMs"`
-	Model         *ahp.ExecutionEventModel                      `json:"model"`
-	Native        ahp.Optional[*ahp.NativeEvent]                `json:"native"`
-	ParentEventId ahp.Optional[string]                          `json:"parentEventId"`
-	Recovery      ahp.Optional[string]                          `json:"recovery"`
-	Session       ahp.Optional[*ahp.Session]                    `json:"session"`
-	Synthesized   ahp.Optional[bool]                            `json:"synthesized"`
-	Time          string                                        `json:"time"`
-	Turn          ahp.Optional[ahp.ModelErrorEventTurn]         `json:"turn"`
-	Usage         ahp.Optional[*ahp.ExecutionEventAttemptusage] `json:"usage"`
+	Attempt       *ahp.ExecutionEventAttempt
+	Error         *ahp.ExecutionEventError
+	Execution     json.RawMessage
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Gaps          ahp.Optional[[]ahp.ModelErrorEventGapsItem]
+	ID            ahp.Optional[string]
+	Items         ahp.Optional[[]*ahp.ContentItem]
+	LatencyMs     ahp.Optional[json.Number]
+	Model         *ahp.ExecutionEventModel
+	Native        ahp.Optional[*ahp.NativeEvent]
+	ParentEventID ahp.Optional[string]
+	Recovery      ahp.Optional[string]
+	Session       ahp.Optional[*ahp.Session]
+	Synthesized   ahp.Optional[bool]
+	Time          ahp.Optional[string]
+	Turn          ahp.Optional[ahp.ModelErrorEventTurn]
+	Usage         ahp.Optional[*ahp.ExecutionEventAttemptusage]
+	ItemsSources  []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v ModelErrorInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v ModelErrorInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	fields["attempt"] = v.Attempt
-	fields["error"] = v.Error
-	fields["execution"] = v.Execution
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		fields["attempt"] = v.Attempt
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		fields["error"] = v.Error
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		fields["execution"] = v.Execution
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.LatencyMs.Present {
-		fields["latencyMs"] = v.LatencyMs.Value
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	fields["model"] = v.Model
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	if v.Recovery.Present {
-		fields["recovery"] = v.Recovery.Value
+	{
+		if v.LatencyMs.Present {
+			fields["latencyMs"] = v.LatencyMs.Value
+		}
 	}
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		fields["model"] = v.Model
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.Recovery.Present {
+			fields["recovery"] = v.Recovery.Value
+		}
 	}
-	if v.Usage.Present {
-		fields["usage"] = v.Usage.Value
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
+	}
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
+	}
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
+	}
+	{
+		if v.Usage.Present {
+			fields["usage"] = v.Usage.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const ModelError Type = "model.error"
 
 type ModelRequestBeforeInput struct {
-	Attempt       *ahp.ExecutionEventAttempt                          `json:"attempt"`
-	Extensions    ahp.Optional[*ahp.Extensions]                       `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.ModelRequestBeforeEventGapsItem] `json:"gaps"`
-	ID            string                                              `json:"id"`
-	Items         []*ahp.ModelVisibleItem                             `json:"items"`
-	Model         *ahp.ExecutionEventModel                            `json:"model"`
-	Native        ahp.Optional[*ahp.NativeEvent]                      `json:"native"`
-	Params        ahp.ModelRequestBeforeEventParams                   `json:"params"`
-	ParentEventId ahp.Optional[string]                                `json:"parentEventId"`
-	Session       ahp.Optional[*ahp.Session]                          `json:"session"`
-	Synthesized   ahp.Optional[bool]                                  `json:"synthesized"`
-	Time          string                                              `json:"time"`
-	Turn          ahp.Optional[ahp.ModelRequestBeforeEventTurn]       `json:"turn"`
+	Attempt       *ahp.ExecutionEventAttempt
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Gaps          ahp.Optional[[]ahp.ModelRequestBeforeEventGapsItem]
+	ID            ahp.Optional[string]
+	Items         []*ahp.ModelVisibleItem
+	Model         *ahp.ExecutionEventModel
+	Native        ahp.Optional[*ahp.NativeEvent]
+	Params        ahp.ModelRequestBeforeEventParams
+	ParentEventID ahp.Optional[string]
+	Session       ahp.Optional[*ahp.Session]
+	Synthesized   ahp.Optional[bool]
+	Time          ahp.Optional[string]
+	Turn          ahp.Optional[ahp.ModelRequestBeforeEventTurn]
+	ItemsSources  []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v ModelRequestBeforeInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v ModelRequestBeforeInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	fields["attempt"] = v.Attempt
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		fields["attempt"] = v.Attempt
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	fields["items"] = v.Items
-	fields["model"] = v.Model
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	fields["params"] = v.Params
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		fields["items"] = v.Items
 	}
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		fields["model"] = v.Model
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		fields["params"] = v.Params
 	}
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
+	}
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
+	}
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
+	}
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const ModelRequestBefore Type = "model.request.before"
 
 type ModelResponseAfterInput struct {
-	Attempt       *ahp.ExecutionEventAttempt                          `json:"attempt"`
-	Execution     *ahp.ExecutionEventExecution                        `json:"execution"`
-	Extensions    ahp.Optional[*ahp.Extensions]                       `json:"extensions"`
-	FinishReason  string                                              `json:"finishReason"`
-	Gaps          ahp.Optional[[]ahp.ModelResponseAfterEventGapsItem] `json:"gaps"`
-	ID            string                                              `json:"id"`
-	Items         []*ahp.ModelVisibleItem                             `json:"items"`
-	LatencyMs     ahp.Optional[json.Number]                           `json:"latencyMs"`
-	Model         *ahp.ExecutionEventModel                            `json:"model"`
-	Native        ahp.Optional[*ahp.NativeEvent]                      `json:"native"`
-	ParentEventId ahp.Optional[string]                                `json:"parentEventId"`
-	Session       ahp.Optional[*ahp.Session]                          `json:"session"`
-	Synthesized   ahp.Optional[bool]                                  `json:"synthesized"`
-	Time          string                                              `json:"time"`
-	Turn          ahp.Optional[ahp.ModelResponseAfterEventTurn]       `json:"turn"`
-	Usage         ahp.Optional[*ahp.ExecutionEventAttemptusage]       `json:"usage"`
+	Attempt       *ahp.ExecutionEventAttempt
+	Execution     *ahp.ExecutionEventExecution
+	Extensions    ahp.Optional[*ahp.Extensions]
+	FinishReason  string
+	Gaps          ahp.Optional[[]ahp.ModelResponseAfterEventGapsItem]
+	ID            ahp.Optional[string]
+	Items         []*ahp.ModelVisibleItem
+	LatencyMs     ahp.Optional[json.Number]
+	Model         *ahp.ExecutionEventModel
+	Native        ahp.Optional[*ahp.NativeEvent]
+	ParentEventID ahp.Optional[string]
+	Session       ahp.Optional[*ahp.Session]
+	Synthesized   ahp.Optional[bool]
+	Time          ahp.Optional[string]
+	Turn          ahp.Optional[ahp.ModelResponseAfterEventTurn]
+	Usage         ahp.Optional[*ahp.ExecutionEventAttemptusage]
+	ItemsSources  []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v ModelResponseAfterInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v ModelResponseAfterInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	fields["attempt"] = v.Attempt
-	fields["execution"] = v.Execution
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		fields["attempt"] = v.Attempt
 	}
-	fields["finishReason"] = v.FinishReason
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		fields["execution"] = v.Execution
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	fields["items"] = v.Items
-	if v.LatencyMs.Present {
-		fields["latencyMs"] = v.LatencyMs.Value
+	{
+		fields["finishReason"] = v.FinishReason
 	}
-	fields["model"] = v.Model
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		fields["items"] = v.Items
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.LatencyMs.Present {
+			fields["latencyMs"] = v.LatencyMs.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		fields["model"] = v.Model
 	}
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.Usage.Present {
-		fields["usage"] = v.Usage.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
+	}
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
+	}
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
+	}
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
+	}
+	{
+		if v.Usage.Present {
+			fields["usage"] = v.Usage.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const ModelResponseAfter Type = "model.response.after"
 
 type ModelSwitchAfterInput struct {
-	Current       *ahp.ExecutionEventModel                          `json:"current"`
-	Extensions    ahp.Optional[*ahp.Extensions]                     `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.ModelSwitchAfterEventGapsItem] `json:"gaps"`
-	ID            string                                            `json:"id"`
-	Items         ahp.Optional[[]*ahp.ContentItem]                  `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]                    `json:"native"`
-	ParentEventId ahp.Optional[string]                              `json:"parentEventId"`
-	Previous      *ahp.ExecutionEventModel                          `json:"previous"`
-	Reason        string                                            `json:"reason"`
-	Session       ahp.Optional[*ahp.Session]                        `json:"session"`
-	Synthesized   ahp.Optional[bool]                                `json:"synthesized"`
-	Time          string                                            `json:"time"`
-	Turn          ahp.Optional[ahp.ModelSwitchAfterEventTurn]       `json:"turn"`
+	Current       *ahp.ExecutionEventModel
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Gaps          ahp.Optional[[]ahp.ModelSwitchAfterEventGapsItem]
+	ID            ahp.Optional[string]
+	Items         ahp.Optional[[]*ahp.ContentItem]
+	Native        ahp.Optional[*ahp.NativeEvent]
+	ParentEventID ahp.Optional[string]
+	Previous      *ahp.ExecutionEventModel
+	Reason        string
+	Session       ahp.Optional[*ahp.Session]
+	Synthesized   ahp.Optional[bool]
+	Time          ahp.Optional[string]
+	Turn          ahp.Optional[ahp.ModelSwitchAfterEventTurn]
+	ItemsSources  []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v ModelSwitchAfterInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v ModelSwitchAfterInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	fields["current"] = v.Current
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		fields["current"] = v.Current
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	fields["previous"] = v.Previous
-	fields["reason"] = v.Reason
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		fields["previous"] = v.Previous
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		fields["reason"] = v.Reason
 	}
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
+	}
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
+	}
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const ModelSwitchAfter Type = "model.switch.after"
 
 type ModelSwitchBeforeInput struct {
-	Current       *ahp.ExecutionEventModel                           `json:"current"`
-	Extensions    ahp.Optional[*ahp.Extensions]                      `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.ModelSwitchBeforeEventGapsItem] `json:"gaps"`
-	ID            string                                             `json:"id"`
-	Items         ahp.Optional[[]*ahp.ContentItem]                   `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]                     `json:"native"`
-	ParentEventId ahp.Optional[string]                               `json:"parentEventId"`
-	Pricing       ahp.Optional[ahp.ModelSwitchBeforeEventPricing]    `json:"pricing"`
-	Proposed      *ahp.ExecutionEventModel                           `json:"proposed"`
-	Reason        string                                             `json:"reason"`
-	Session       ahp.Optional[*ahp.Session]                         `json:"session"`
-	Synthesized   ahp.Optional[bool]                                 `json:"synthesized"`
-	Time          string                                             `json:"time"`
-	Turn          ahp.Optional[ahp.ModelSwitchBeforeEventTurn]       `json:"turn"`
+	Current       *ahp.ExecutionEventModel
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Gaps          ahp.Optional[[]ahp.ModelSwitchBeforeEventGapsItem]
+	ID            ahp.Optional[string]
+	Items         ahp.Optional[[]*ahp.ContentItem]
+	Native        ahp.Optional[*ahp.NativeEvent]
+	ParentEventID ahp.Optional[string]
+	Pricing       ahp.Optional[ahp.ModelSwitchBeforeEventPricing]
+	Proposed      *ahp.ExecutionEventModel
+	Reason        string
+	Session       ahp.Optional[*ahp.Session]
+	Synthesized   ahp.Optional[bool]
+	Time          ahp.Optional[string]
+	Turn          ahp.Optional[ahp.ModelSwitchBeforeEventTurn]
+	ItemsSources  []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v ModelSwitchBeforeInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v ModelSwitchBeforeInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	fields["current"] = v.Current
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		fields["current"] = v.Current
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.Pricing.Present {
-		fields["pricing"] = v.Pricing.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	fields["proposed"] = v.Proposed
-	fields["reason"] = v.Reason
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.Pricing.Present {
+			fields["pricing"] = v.Pricing.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		fields["proposed"] = v.Proposed
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		fields["reason"] = v.Reason
 	}
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
+	}
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
+	}
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const ModelSwitchBefore Type = "model.switch.before"
 
 type SessionEndInput struct {
-	Counters      ahp.Optional[ahp.SessionEndEventCounters]   `json:"counters"`
-	Extensions    ahp.Optional[*ahp.Extensions]               `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.SessionEndEventGapsItem] `json:"gaps"`
-	ID            string                                      `json:"id"`
-	Items         ahp.Optional[[]*ahp.ContentItem]            `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]              `json:"native"`
-	Outcome       ahp.SessionEndEventOutcome                  `json:"outcome"`
-	ParentEventId ahp.Optional[string]                        `json:"parentEventId"`
-	Reason        string                                      `json:"reason"`
-	Session       *ahp.Session                                `json:"session"`
-	Synthesized   ahp.Optional[bool]                          `json:"synthesized"`
-	Time          string                                      `json:"time"`
-	Turn          ahp.Optional[ahp.SessionEndEventTurn]       `json:"turn"`
+	Counters      ahp.Optional[ahp.SessionEndEventCounters]
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Gaps          ahp.Optional[[]ahp.SessionEndEventGapsItem]
+	ID            ahp.Optional[string]
+	Items         ahp.Optional[[]*ahp.ContentItem]
+	Native        ahp.Optional[*ahp.NativeEvent]
+	Outcome       ahp.SessionEndEventOutcome
+	ParentEventID ahp.Optional[string]
+	Reason        string
+	Session       *ahp.Session
+	Synthesized   ahp.Optional[bool]
+	Time          ahp.Optional[string]
+	Turn          ahp.Optional[ahp.SessionEndEventTurn]
+	ItemsSources  []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v SessionEndInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v SessionEndInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	if v.Counters.Present {
-		fields["counters"] = v.Counters.Value
+	{
+		if v.Counters.Present {
+			fields["counters"] = v.Counters.Value
+		}
 	}
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	fields["outcome"] = v.Outcome
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		fields["outcome"] = v.Outcome
 	}
-	fields["reason"] = v.Reason
-	fields["session"] = v.Session
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		fields["reason"] = v.Reason
 	}
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		fields["session"] = v.Session
+	}
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
+	}
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const SessionEnd Type = "session.end"
 
 type SessionStartInput struct {
-	Extensions     ahp.Optional[*ahp.Extensions]                  `json:"extensions"`
-	Gaps           ahp.Optional[[]ahp.SessionStartEventGapsItem]  `json:"gaps"`
-	Harness        ahp.SessionStartEventHarness                   `json:"harness"`
-	ID             string                                         `json:"id"`
-	Items          []*ahp.ModelVisibleItem                        `json:"items"`
-	Native         ahp.Optional[*ahp.NativeEvent]                 `json:"native"`
-	ParentEventId  ahp.Optional[string]                           `json:"parentEventId"`
-	PermissionMode string                                         `json:"permissionMode"`
-	ResumedFrom    ahp.Optional[ahp.SessionStartEventResumedFrom] `json:"resumedFrom"`
-	Session        *ahp.Session                                   `json:"session"`
-	Synthesized    ahp.Optional[bool]                             `json:"synthesized"`
-	Time           string                                         `json:"time"`
-	Trigger        ahp.SessionStartEventTrigger                   `json:"trigger"`
-	Turn           ahp.Optional[ahp.SessionStartEventTurn]        `json:"turn"`
+	Extensions     ahp.Optional[*ahp.Extensions]
+	Gaps           ahp.Optional[[]ahp.SessionStartEventGapsItem]
+	Harness        ahp.SessionStartEventHarness
+	ID             ahp.Optional[string]
+	Items          []*ahp.ModelVisibleItem
+	Native         ahp.Optional[*ahp.NativeEvent]
+	ParentEventID  ahp.Optional[string]
+	PermissionMode string
+	ResumedFrom    ahp.Optional[ahp.SessionStartEventResumedFrom]
+	Session        *ahp.Session
+	Synthesized    ahp.Optional[bool]
+	Time           ahp.Optional[string]
+	Trigger        ahp.SessionStartEventTrigger
+	Turn           ahp.Optional[ahp.SessionStartEventTurn]
+	ItemsSources   []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v SessionStartInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v SessionStartInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	fields["harness"] = v.Harness
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		fields["harness"] = v.Harness
 	}
-	fields["items"] = v.Items
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		fields["items"] = v.Items
 	}
-	fields["permissionMode"] = v.PermissionMode
-	if v.ResumedFrom.Present {
-		fields["resumedFrom"] = v.ResumedFrom.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	fields["session"] = v.Session
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		fields["permissionMode"] = v.PermissionMode
 	}
-	fields["trigger"] = v.Trigger
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.ResumedFrom.Present {
+			fields["resumedFrom"] = v.ResumedFrom.Value
+		}
+	}
+	{
+		fields["session"] = v.Session
+	}
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
+	}
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		fields["trigger"] = v.Trigger
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const SessionStart Type = "session.start"
 
 type TaskChangeAfterInput struct {
-	Extensions    ahp.Optional[*ahp.Extensions]                    `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.TaskChangeAfterEventGapsItem] `json:"gaps"`
-	ID            string                                           `json:"id"`
-	Items         ahp.Optional[[]*ahp.ContentItem]                 `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]                   `json:"native"`
-	ParentEventId ahp.Optional[string]                             `json:"parentEventId"`
-	Session       ahp.Optional[*ahp.Session]                       `json:"session"`
-	Synthesized   ahp.Optional[bool]                               `json:"synthesized"`
-	Task          ahp.TaskChangeAfterEventTask                     `json:"task"`
-	Time          string                                           `json:"time"`
-	Turn          ahp.Optional[ahp.TaskChangeAfterEventTurn]       `json:"turn"`
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Gaps          ahp.Optional[[]ahp.TaskChangeAfterEventGapsItem]
+	ID            ahp.Optional[string]
+	Items         ahp.Optional[[]*ahp.ContentItem]
+	Native        ahp.Optional[*ahp.NativeEvent]
+	ParentEventID ahp.Optional[string]
+	Session       ahp.Optional[*ahp.Session]
+	Synthesized   ahp.Optional[bool]
+	Task          ahp.TaskChangeAfterEventTask
+	Time          ahp.Optional[string]
+	Turn          ahp.Optional[ahp.TaskChangeAfterEventTurn]
+	ItemsSources  []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v TaskChangeAfterInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v TaskChangeAfterInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
 	}
-	fields["task"] = v.Task
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		fields["task"] = v.Task
 	}
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const TaskChangeAfter Type = "task.change.after"
 
 type TaskChangeBeforeInput struct {
-	Extensions    ahp.Optional[*ahp.Extensions]                     `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.TaskChangeBeforeEventGapsItem] `json:"gaps"`
-	ID            string                                            `json:"id"`
-	Items         ahp.Optional[[]*ahp.ContentItem]                  `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]                    `json:"native"`
-	ParentEventId ahp.Optional[string]                              `json:"parentEventId"`
-	Session       ahp.Optional[*ahp.Session]                        `json:"session"`
-	Synthesized   ahp.Optional[bool]                                `json:"synthesized"`
-	Task          ahp.TaskChangeBeforeEventTask                     `json:"task"`
-	Time          string                                            `json:"time"`
-	Turn          ahp.Optional[ahp.TaskChangeBeforeEventTurn]       `json:"turn"`
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Gaps          ahp.Optional[[]ahp.TaskChangeBeforeEventGapsItem]
+	ID            ahp.Optional[string]
+	Items         ahp.Optional[[]*ahp.ContentItem]
+	Native        ahp.Optional[*ahp.NativeEvent]
+	ParentEventID ahp.Optional[string]
+	Session       ahp.Optional[*ahp.Session]
+	Synthesized   ahp.Optional[bool]
+	Task          ahp.TaskChangeBeforeEventTask
+	Time          ahp.Optional[string]
+	Turn          ahp.Optional[ahp.TaskChangeBeforeEventTurn]
+	ItemsSources  []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v TaskChangeBeforeInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v TaskChangeBeforeInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
 	}
-	fields["task"] = v.Task
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		fields["task"] = v.Task
 	}
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const TaskChangeBefore Type = "task.change.before"
 
 type ToolAfterInput struct {
-	Batch         ahp.Optional[*ahp.ExecutionEventBatch]        `json:"batch"`
-	Call          ahp.ToolAfterEventCall                        `json:"call"`
-	DurationMs    ahp.Optional[json.Number]                     `json:"durationMs"`
-	Error         ahp.Optional[*ahp.ExecutionEventError]        `json:"error"`
-	Execution     *ahp.ExecutionEventExecution                  `json:"execution"`
-	Extensions    ahp.Optional[*ahp.Extensions]                 `json:"extensions"`
-	FileChanges   ahp.Optional[[]*ahp.ExecutionEventFilechange] `json:"fileChanges"`
-	Gaps          ahp.Optional[[]ahp.ToolAfterEventGapsItem]    `json:"gaps"`
-	ID            string                                        `json:"id"`
-	Items         []*ahp.ModelVisibleItem                       `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]                `json:"native"`
-	Outcome       ahp.ToolAfterEventOutcome                     `json:"outcome"`
-	ParentEventId ahp.Optional[string]                          `json:"parentEventId"`
-	Path          string                                        `json:"path"`
-	Session       ahp.Optional[*ahp.Session]                    `json:"session"`
-	Synthesized   ahp.Optional[bool]                            `json:"synthesized"`
-	Time          string                                        `json:"time"`
-	Tool          *ahp.ExecutionEventTool                       `json:"tool"`
-	Turn          ahp.Optional[ahp.ToolAfterEventTurn]          `json:"turn"`
+	Batch                    ahp.Optional[*ahp.ExecutionEventBatch]
+	CallID                   string
+	CallSynthesized          ahp.Optional[bool]
+	DurationMs               ahp.Optional[json.Number]
+	Error                    ahp.Optional[*ahp.ExecutionEventError]
+	Execution                *ahp.ExecutionEventExecution
+	Extensions               ahp.Optional[*ahp.Extensions]
+	FileChanges              ahp.Optional[[]*ahp.ExecutionEventFilechange]
+	Gaps                     ahp.Optional[[]ahp.ToolAfterEventGapsItem]
+	ID                       ahp.Optional[string]
+	Items                    []*ahp.ModelVisibleItem
+	Native                   ahp.Optional[*ahp.NativeEvent]
+	Outcome                  ahp.ToolAfterEventOutcome
+	ParentEventID            ahp.Optional[string]
+	Path                     string
+	Session                  ahp.Optional[*ahp.Session]
+	Synthesized              ahp.Optional[bool]
+	Time                     ahp.Optional[string]
+	Input                    ahp.ExecutionEventToolInput
+	ToolKind                 ahp.Optional[string]
+	ToolMcp                  ahp.Optional[*ahp.ExecutionEventMcp]
+	Name                     string
+	Origin                   ahp.ExecutionEventToolOrigin
+	Turn                     ahp.Optional[ahp.ToolAfterEventTurn]
+	FileChangesAfterSources  []*content.Source `json:"-"`
+	FileChangesBeforeSources []*content.Source `json:"-"`
+	ItemsSources             []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v ToolAfterInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.FileChangesAfterSources {
+		if source != nil {
+			sources["/fileChanges/"+strconv.Itoa(index)+"/after"] = source
+		}
+	}
+	for index, source := range v.FileChangesBeforeSources {
+		if source != nil {
+			sources["/fileChanges/"+strconv.Itoa(index)+"/before"] = source
+		}
+	}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v ToolAfterInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	if v.Batch.Present {
-		fields["batch"] = v.Batch.Value
+	{
+		if v.Batch.Present {
+			fields["batch"] = v.Batch.Value
+		}
 	}
-	fields["call"] = v.Call
-	if v.DurationMs.Present {
-		fields["durationMs"] = v.DurationMs.Value
+	{
+		nested0, ok := fields["call"].(map[string]any)
+		if !ok {
+			nested0 = map[string]any{}
+			fields["call"] = nested0
+		}
+		nested0["id"] = v.CallID
 	}
-	if v.Error.Present {
-		fields["error"] = v.Error.Value
+	{
+		if v.CallSynthesized.Present {
+			nested0, ok := fields["call"].(map[string]any)
+			if !ok {
+				nested0 = map[string]any{}
+				fields["call"] = nested0
+			}
+			nested0["synthesized"] = v.CallSynthesized.Value
+		}
 	}
-	fields["execution"] = v.Execution
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		if v.DurationMs.Present {
+			fields["durationMs"] = v.DurationMs.Value
+		}
 	}
-	if v.FileChanges.Present {
-		fields["fileChanges"] = v.FileChanges.Value
+	{
+		if v.Error.Present {
+			fields["error"] = v.Error.Value
+		}
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		fields["execution"] = v.Execution
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	fields["items"] = v.Items
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.FileChanges.Present {
+			fields["fileChanges"] = v.FileChanges.Value
+		}
 	}
-	fields["outcome"] = v.Outcome
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	fields["path"] = v.Path
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		fields["items"] = v.Items
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	fields["tool"] = v.Tool
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		fields["outcome"] = v.Outcome
+	}
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
+	}
+	{
+		fields["path"] = v.Path
+	}
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
+	}
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
+	}
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		nested0, ok := fields["tool"].(map[string]any)
+		if !ok {
+			nested0 = map[string]any{}
+			fields["tool"] = nested0
+		}
+		nested0["input"] = v.Input
+	}
+	{
+		if v.ToolKind.Present {
+			nested0, ok := fields["tool"].(map[string]any)
+			if !ok {
+				nested0 = map[string]any{}
+				fields["tool"] = nested0
+			}
+			nested0["kind"] = v.ToolKind.Value
+		}
+	}
+	{
+		if v.ToolMcp.Present {
+			nested0, ok := fields["tool"].(map[string]any)
+			if !ok {
+				nested0 = map[string]any{}
+				fields["tool"] = nested0
+			}
+			nested0["mcp"] = v.ToolMcp.Value
+		}
+	}
+	{
+		nested0, ok := fields["tool"].(map[string]any)
+		if !ok {
+			nested0 = map[string]any{}
+			fields["tool"] = nested0
+		}
+		nested0["name"] = v.Name
+	}
+	{
+		nested0, ok := fields["tool"].(map[string]any)
+		if !ok {
+			nested0 = map[string]any{}
+			fields["tool"] = nested0
+		}
+		nested0["origin"] = v.Origin
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const ToolAfter Type = "tool.after"
 
 type ToolBatchAfterInput struct {
-	Batch         ahp.ToolBatchAfterEventBatch                    `json:"batch"`
-	Calls         []ahp.ToolBatchAfterEventCallsItem              `json:"calls"`
-	Extensions    ahp.Optional[*ahp.Extensions]                   `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.ToolBatchAfterEventGapsItem] `json:"gaps"`
-	ID            string                                          `json:"id"`
-	Items         ahp.Optional[[]*ahp.ContentItem]                `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]                  `json:"native"`
-	ParentEventId ahp.Optional[string]                            `json:"parentEventId"`
-	Session       ahp.Optional[*ahp.Session]                      `json:"session"`
-	Synthesized   ahp.Optional[bool]                              `json:"synthesized"`
-	Time          string                                          `json:"time"`
-	Turn          ahp.Optional[ahp.ToolBatchAfterEventTurn]       `json:"turn"`
+	Batch         ahp.ToolBatchAfterEventBatch
+	Calls         []ahp.ToolBatchAfterEventCallsItem
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Gaps          ahp.Optional[[]ahp.ToolBatchAfterEventGapsItem]
+	ID            ahp.Optional[string]
+	Items         ahp.Optional[[]*ahp.ContentItem]
+	Native        ahp.Optional[*ahp.NativeEvent]
+	ParentEventID ahp.Optional[string]
+	Session       ahp.Optional[*ahp.Session]
+	Synthesized   ahp.Optional[bool]
+	Time          ahp.Optional[string]
+	Turn          ahp.Optional[ahp.ToolBatchAfterEventTurn]
+	ItemsSources  []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v ToolBatchAfterInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v ToolBatchAfterInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	fields["batch"] = v.Batch
-	fields["calls"] = v.Calls
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		fields["batch"] = v.Batch
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		fields["calls"] = v.Calls
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
 	}
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
+	}
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const ToolBatchAfter Type = "tool.batch.after"
 
 type ToolBeforeInput[T any] struct {
-	Batch         ahp.Optional[*ahp.ExecutionEventBatch]      `json:"batch"`
-	Call          ahp.ToolBeforeEventCall                     `json:"call"`
-	Extensions    ahp.Optional[*ahp.Extensions]               `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.ToolBeforeEventGapsItem] `json:"gaps"`
-	ID            string                                      `json:"id"`
-	Items         ahp.Optional[[]*ahp.ContentItem]            `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]              `json:"native"`
-	ParentEventId ahp.Optional[string]                        `json:"parentEventId"`
-	Path          string                                      `json:"path"`
-	Session       ahp.Optional[*ahp.Session]                  `json:"session"`
-	Synthesized   ahp.Optional[bool]                          `json:"synthesized"`
-	Time          string                                      `json:"time"`
-	Tool          tool.Input[T]                               `json:"tool"`
-	Turn          ahp.Optional[ahp.ToolBeforeEventTurn]       `json:"turn"`
+	Batch           ahp.Optional[*ahp.ExecutionEventBatch]
+	CallID          string
+	CallSynthesized ahp.Optional[bool]
+	Extensions      ahp.Optional[*ahp.Extensions]
+	Gaps            ahp.Optional[[]ahp.ToolBeforeEventGapsItem]
+	ID              ahp.Optional[string]
+	Items           ahp.Optional[[]*ahp.ContentItem]
+	Native          ahp.Optional[*ahp.NativeEvent]
+	ParentEventID   ahp.Optional[string]
+	Path            string
+	Session         ahp.Optional[*ahp.Session]
+	Synthesized     ahp.Optional[bool]
+	Time            ahp.Optional[string]
+	Input           T
+	ToolKind        ahp.Optional[string]
+	ToolMcp         ahp.Optional[*ahp.ExecutionEventMcp]
+	Name            string
+	Origin          ahp.ExecutionEventToolOrigin
+	Turn            ahp.Optional[ahp.ToolBeforeEventTurn]
+	ItemsSources    []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v ToolBeforeInput[T]) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v ToolBeforeInput[T]) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	if v.Batch.Present {
-		fields["batch"] = v.Batch.Value
+	{
+		if v.Batch.Present {
+			fields["batch"] = v.Batch.Value
+		}
 	}
-	fields["call"] = v.Call
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		nested0, ok := fields["call"].(map[string]any)
+		if !ok {
+			nested0 = map[string]any{}
+			fields["call"] = nested0
+		}
+		nested0["id"] = v.CallID
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.CallSynthesized.Present {
+			nested0, ok := fields["call"].(map[string]any)
+			if !ok {
+				nested0 = map[string]any{}
+				fields["call"] = nested0
+			}
+			nested0["synthesized"] = v.CallSynthesized.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	fields["path"] = v.Path
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		fields["path"] = v.Path
 	}
-	fields["tool"] = v.Tool
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
+	}
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
+	}
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		nested0, ok := fields["tool"].(map[string]any)
+		if !ok {
+			nested0 = map[string]any{}
+			fields["tool"] = nested0
+		}
+		nested0["input"] = v.Input
+	}
+	{
+		if v.ToolKind.Present {
+			nested0, ok := fields["tool"].(map[string]any)
+			if !ok {
+				nested0 = map[string]any{}
+				fields["tool"] = nested0
+			}
+			nested0["kind"] = v.ToolKind.Value
+		}
+	}
+	{
+		if v.ToolMcp.Present {
+			nested0, ok := fields["tool"].(map[string]any)
+			if !ok {
+				nested0 = map[string]any{}
+				fields["tool"] = nested0
+			}
+			nested0["mcp"] = v.ToolMcp.Value
+		}
+	}
+	{
+		nested0, ok := fields["tool"].(map[string]any)
+		if !ok {
+			nested0 = map[string]any{}
+			fields["tool"] = nested0
+		}
+		nested0["name"] = v.Name
+	}
+	{
+		nested0, ok := fields["tool"].(map[string]any)
+		if !ok {
+			nested0 = map[string]any{}
+			fields["tool"] = nested0
+		}
+		nested0["origin"] = v.Origin
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const ToolBefore Type = "tool.before"
 
 type ToolPermissionRequestInput struct {
-	Batch         ahp.Optional[*ahp.ExecutionEventBatch]                 `json:"batch"`
-	Call          ahp.ToolPermissionRequestEventCall                     `json:"call"`
-	Extensions    ahp.Optional[*ahp.Extensions]                          `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.ToolPermissionRequestEventGapsItem] `json:"gaps"`
-	ID            string                                                 `json:"id"`
-	Items         ahp.Optional[[]*ahp.ContentItem]                       `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]                         `json:"native"`
-	ParentEventId ahp.Optional[string]                                   `json:"parentEventId"`
-	Path          string                                                 `json:"path"`
-	SandboxBypass bool                                                   `json:"sandboxBypass"`
-	Session       ahp.Optional[*ahp.Session]                             `json:"session"`
-	Suggestions   []ahp.ToolPermissionRequestEventSuggestionsItem        `json:"suggestions"`
-	Synthesized   ahp.Optional[bool]                                     `json:"synthesized"`
-	Time          string                                                 `json:"time"`
-	Tool          *ahp.ExecutionEventTool                                `json:"tool"`
-	Turn          ahp.Optional[ahp.ToolPermissionRequestEventTurn]       `json:"turn"`
+	Batch           ahp.Optional[*ahp.ExecutionEventBatch]
+	CallID          string
+	CallSynthesized ahp.Optional[bool]
+	Extensions      ahp.Optional[*ahp.Extensions]
+	Gaps            ahp.Optional[[]ahp.ToolPermissionRequestEventGapsItem]
+	ID              ahp.Optional[string]
+	Items           ahp.Optional[[]*ahp.ContentItem]
+	Native          ahp.Optional[*ahp.NativeEvent]
+	ParentEventID   ahp.Optional[string]
+	Path            string
+	SandboxBypass   bool
+	Session         ahp.Optional[*ahp.Session]
+	Suggestions     []ahp.ToolPermissionRequestEventSuggestionsItem
+	Synthesized     ahp.Optional[bool]
+	Time            ahp.Optional[string]
+	Input           ahp.ExecutionEventToolInput
+	ToolKind        ahp.Optional[string]
+	ToolMcp         ahp.Optional[*ahp.ExecutionEventMcp]
+	Name            string
+	Origin          ahp.ExecutionEventToolOrigin
+	Turn            ahp.Optional[ahp.ToolPermissionRequestEventTurn]
+	ItemsSources    []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v ToolPermissionRequestInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v ToolPermissionRequestInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	if v.Batch.Present {
-		fields["batch"] = v.Batch.Value
+	{
+		if v.Batch.Present {
+			fields["batch"] = v.Batch.Value
+		}
 	}
-	fields["call"] = v.Call
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		nested0, ok := fields["call"].(map[string]any)
+		if !ok {
+			nested0 = map[string]any{}
+			fields["call"] = nested0
+		}
+		nested0["id"] = v.CallID
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.CallSynthesized.Present {
+			nested0, ok := fields["call"].(map[string]any)
+			if !ok {
+				nested0 = map[string]any{}
+				fields["call"] = nested0
+			}
+			nested0["synthesized"] = v.CallSynthesized.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	fields["path"] = v.Path
-	fields["sandboxBypass"] = v.SandboxBypass
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	fields["suggestions"] = v.Suggestions
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		fields["path"] = v.Path
 	}
-	fields["tool"] = v.Tool
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		fields["sandboxBypass"] = v.SandboxBypass
+	}
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
+	}
+	{
+		fields["suggestions"] = v.Suggestions
+	}
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
+	}
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		nested0, ok := fields["tool"].(map[string]any)
+		if !ok {
+			nested0 = map[string]any{}
+			fields["tool"] = nested0
+		}
+		nested0["input"] = v.Input
+	}
+	{
+		if v.ToolKind.Present {
+			nested0, ok := fields["tool"].(map[string]any)
+			if !ok {
+				nested0 = map[string]any{}
+				fields["tool"] = nested0
+			}
+			nested0["kind"] = v.ToolKind.Value
+		}
+	}
+	{
+		if v.ToolMcp.Present {
+			nested0, ok := fields["tool"].(map[string]any)
+			if !ok {
+				nested0 = map[string]any{}
+				fields["tool"] = nested0
+			}
+			nested0["mcp"] = v.ToolMcp.Value
+		}
+	}
+	{
+		nested0, ok := fields["tool"].(map[string]any)
+		if !ok {
+			nested0 = map[string]any{}
+			fields["tool"] = nested0
+		}
+		nested0["name"] = v.Name
+	}
+	{
+		nested0, ok := fields["tool"].(map[string]any)
+		if !ok {
+			nested0 = map[string]any{}
+			fields["tool"] = nested0
+		}
+		nested0["origin"] = v.Origin
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const ToolPermissionRequest Type = "tool.permission.request"
 
 type ToolPermissionResolvedInput struct {
-	Batch         ahp.Optional[*ahp.ExecutionEventBatch]                  `json:"batch"`
-	Call          ahp.ToolPermissionResolvedEventCall                     `json:"call"`
-	DecidedBy     ahp.ToolPermissionResolvedEventDecidedBy                `json:"decidedBy"`
-	Decision      ahp.ToolPermissionResolvedEventDecision                 `json:"decision"`
-	Extensions    ahp.Optional[*ahp.Extensions]                           `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.ToolPermissionResolvedEventGapsItem] `json:"gaps"`
-	ID            string                                                  `json:"id"`
-	Items         ahp.Optional[[]*ahp.ContentItem]                        `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]                          `json:"native"`
-	ParentEventId ahp.Optional[string]                                    `json:"parentEventId"`
-	Path          string                                                  `json:"path"`
-	Session       ahp.Optional[*ahp.Session]                              `json:"session"`
-	Synthesized   ahp.Optional[bool]                                      `json:"synthesized"`
-	Time          string                                                  `json:"time"`
-	Tool          *ahp.ExecutionEventTool                                 `json:"tool"`
-	Turn          ahp.Optional[ahp.ToolPermissionResolvedEventTurn]       `json:"turn"`
+	Batch           ahp.Optional[*ahp.ExecutionEventBatch]
+	CallID          string
+	CallSynthesized ahp.Optional[bool]
+	DecidedBy       ahp.ToolPermissionResolvedEventDecidedBy
+	Decision        ahp.ToolPermissionResolvedEventDecision
+	Extensions      ahp.Optional[*ahp.Extensions]
+	Gaps            ahp.Optional[[]ahp.ToolPermissionResolvedEventGapsItem]
+	ID              ahp.Optional[string]
+	Items           ahp.Optional[[]*ahp.ContentItem]
+	Native          ahp.Optional[*ahp.NativeEvent]
+	ParentEventID   ahp.Optional[string]
+	Path            string
+	Session         ahp.Optional[*ahp.Session]
+	Synthesized     ahp.Optional[bool]
+	Time            ahp.Optional[string]
+	Input           ahp.ExecutionEventToolInput
+	ToolKind        ahp.Optional[string]
+	ToolMcp         ahp.Optional[*ahp.ExecutionEventMcp]
+	Name            string
+	Origin          ahp.ExecutionEventToolOrigin
+	Turn            ahp.Optional[ahp.ToolPermissionResolvedEventTurn]
+	ItemsSources    []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v ToolPermissionResolvedInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v ToolPermissionResolvedInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	if v.Batch.Present {
-		fields["batch"] = v.Batch.Value
+	{
+		if v.Batch.Present {
+			fields["batch"] = v.Batch.Value
+		}
 	}
-	fields["call"] = v.Call
-	fields["decidedBy"] = v.DecidedBy
-	fields["decision"] = v.Decision
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		nested0, ok := fields["call"].(map[string]any)
+		if !ok {
+			nested0 = map[string]any{}
+			fields["call"] = nested0
+		}
+		nested0["id"] = v.CallID
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.CallSynthesized.Present {
+			nested0, ok := fields["call"].(map[string]any)
+			if !ok {
+				nested0 = map[string]any{}
+				fields["call"] = nested0
+			}
+			nested0["synthesized"] = v.CallSynthesized.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		fields["decidedBy"] = v.DecidedBy
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		fields["decision"] = v.Decision
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	fields["path"] = v.Path
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	fields["tool"] = v.Tool
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
+	}
+	{
+		fields["path"] = v.Path
+	}
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
+	}
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
+	}
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		nested0, ok := fields["tool"].(map[string]any)
+		if !ok {
+			nested0 = map[string]any{}
+			fields["tool"] = nested0
+		}
+		nested0["input"] = v.Input
+	}
+	{
+		if v.ToolKind.Present {
+			nested0, ok := fields["tool"].(map[string]any)
+			if !ok {
+				nested0 = map[string]any{}
+				fields["tool"] = nested0
+			}
+			nested0["kind"] = v.ToolKind.Value
+		}
+	}
+	{
+		if v.ToolMcp.Present {
+			nested0, ok := fields["tool"].(map[string]any)
+			if !ok {
+				nested0 = map[string]any{}
+				fields["tool"] = nested0
+			}
+			nested0["mcp"] = v.ToolMcp.Value
+		}
+	}
+	{
+		nested0, ok := fields["tool"].(map[string]any)
+		if !ok {
+			nested0 = map[string]any{}
+			fields["tool"] = nested0
+		}
+		nested0["name"] = v.Name
+	}
+	{
+		nested0, ok := fields["tool"].(map[string]any)
+		if !ok {
+			nested0 = map[string]any{}
+			fields["tool"] = nested0
+		}
+		nested0["origin"] = v.Origin
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const ToolPermissionResolved Type = "tool.permission.resolved"
 
 type ToolProgressInput struct {
-	Backgrounded  bool                                          `json:"backgrounded"`
-	Batch         ahp.Optional[*ahp.ExecutionEventBatch]        `json:"batch"`
-	Call          ahp.ToolProgressEventCall                     `json:"call"`
-	Extensions    ahp.Optional[*ahp.Extensions]                 `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.ToolProgressEventGapsItem] `json:"gaps"`
-	ID            string                                        `json:"id"`
-	Items         ahp.Optional[[]*ahp.ContentItem]              `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]                `json:"native"`
-	ParentEventId ahp.Optional[string]                          `json:"parentEventId"`
-	PartialOutput *ahp.ModelVisibleItem                         `json:"partialOutput"`
-	Path          string                                        `json:"path"`
-	Session       ahp.Optional[*ahp.Session]                    `json:"session"`
-	Synthesized   ahp.Optional[bool]                            `json:"synthesized"`
-	Time          string                                        `json:"time"`
-	Tool          *ahp.ExecutionEventTool                       `json:"tool"`
-	Turn          ahp.Optional[ahp.ToolProgressEventTurn]       `json:"turn"`
+	Backgrounded        bool
+	Batch               ahp.Optional[*ahp.ExecutionEventBatch]
+	CallID              string
+	CallSynthesized     ahp.Optional[bool]
+	Extensions          ahp.Optional[*ahp.Extensions]
+	Gaps                ahp.Optional[[]ahp.ToolProgressEventGapsItem]
+	ID                  ahp.Optional[string]
+	Items               ahp.Optional[[]*ahp.ContentItem]
+	Native              ahp.Optional[*ahp.NativeEvent]
+	ParentEventID       ahp.Optional[string]
+	PartialOutput       *ahp.ModelVisibleItem
+	Path                string
+	Session             ahp.Optional[*ahp.Session]
+	Synthesized         ahp.Optional[bool]
+	Time                ahp.Optional[string]
+	Input               ahp.ExecutionEventToolInput
+	ToolKind            ahp.Optional[string]
+	ToolMcp             ahp.Optional[*ahp.ExecutionEventMcp]
+	Name                string
+	Origin              ahp.ExecutionEventToolOrigin
+	Turn                ahp.Optional[ahp.ToolProgressEventTurn]
+	ItemsSources        []*content.Source `json:"-"`
+	PartialOutputSource *content.Source   `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v ToolProgressInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	if v.PartialOutputSource != nil {
+		sources["/partialOutput"] = v.PartialOutputSource
+	}
+	return sources
+}
 func (v ToolProgressInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	fields["backgrounded"] = v.Backgrounded
-	if v.Batch.Present {
-		fields["batch"] = v.Batch.Value
+	{
+		fields["backgrounded"] = v.Backgrounded
 	}
-	fields["call"] = v.Call
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		if v.Batch.Present {
+			fields["batch"] = v.Batch.Value
+		}
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		nested0, ok := fields["call"].(map[string]any)
+		if !ok {
+			nested0 = map[string]any{}
+			fields["call"] = nested0
+		}
+		nested0["id"] = v.CallID
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.CallSynthesized.Present {
+			nested0, ok := fields["call"].(map[string]any)
+			if !ok {
+				nested0 = map[string]any{}
+				fields["call"] = nested0
+			}
+			nested0["synthesized"] = v.CallSynthesized.Value
+		}
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	fields["partialOutput"] = v.PartialOutput
-	fields["path"] = v.Path
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	fields["tool"] = v.Tool
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		fields["partialOutput"] = v.PartialOutput
+	}
+	{
+		fields["path"] = v.Path
+	}
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
+	}
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
+	}
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		nested0, ok := fields["tool"].(map[string]any)
+		if !ok {
+			nested0 = map[string]any{}
+			fields["tool"] = nested0
+		}
+		nested0["input"] = v.Input
+	}
+	{
+		if v.ToolKind.Present {
+			nested0, ok := fields["tool"].(map[string]any)
+			if !ok {
+				nested0 = map[string]any{}
+				fields["tool"] = nested0
+			}
+			nested0["kind"] = v.ToolKind.Value
+		}
+	}
+	{
+		if v.ToolMcp.Present {
+			nested0, ok := fields["tool"].(map[string]any)
+			if !ok {
+				nested0 = map[string]any{}
+				fields["tool"] = nested0
+			}
+			nested0["mcp"] = v.ToolMcp.Value
+		}
+	}
+	{
+		nested0, ok := fields["tool"].(map[string]any)
+		if !ok {
+			nested0 = map[string]any{}
+			fields["tool"] = nested0
+		}
+		nested0["name"] = v.Name
+	}
+	{
+		nested0, ok := fields["tool"].(map[string]any)
+		if !ok {
+			nested0 = map[string]any{}
+			fields["tool"] = nested0
+		}
+		nested0["origin"] = v.Origin
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const ToolProgress Type = "tool.progress"
 
 type TurnEndInput struct {
-	ContinuationCount json.Number                                     `json:"continuationCount"`
-	Error             ahp.Optional[*ahp.ExecutionEventError]          `json:"error"`
-	Extensions        ahp.Optional[*ahp.Extensions]                   `json:"extensions"`
-	Gaps              ahp.Optional[[]ahp.TurnEndEventGapsItem]        `json:"gaps"`
-	ID                string                                          `json:"id"`
-	Items             []*ahp.ModelVisibleItem                         `json:"items"`
-	LastAssistantItem ahp.Optional[ahp.TurnEndEventLastAssistantItem] `json:"lastAssistantItem"`
-	Native            ahp.Optional[*ahp.NativeEvent]                  `json:"native"`
-	Outcome           ahp.TurnEndEventOutcome                         `json:"outcome"`
-	ParentEventId     ahp.Optional[string]                            `json:"parentEventId"`
-	Session           ahp.Optional[*ahp.Session]                      `json:"session"`
-	Synthesized       ahp.Optional[bool]                              `json:"synthesized"`
-	Time              string                                          `json:"time"`
-	Turn              ahp.TurnEndEventTurn                            `json:"turn"`
-	Usage             ahp.Optional[*ahp.ExecutionEventTurnusage]      `json:"usage"`
+	ContinuationCount json.Number
+	Error             ahp.Optional[*ahp.ExecutionEventError]
+	Extensions        ahp.Optional[*ahp.Extensions]
+	Gaps              ahp.Optional[[]ahp.TurnEndEventGapsItem]
+	ID                ahp.Optional[string]
+	Items             []*ahp.ModelVisibleItem
+	LastAssistantItem ahp.Optional[ahp.TurnEndEventLastAssistantItem]
+	Native            ahp.Optional[*ahp.NativeEvent]
+	Outcome           ahp.TurnEndEventOutcome
+	ParentEventID     ahp.Optional[string]
+	Session           ahp.Optional[*ahp.Session]
+	Synthesized       ahp.Optional[bool]
+	Time              ahp.Optional[string]
+	Turn              ahp.TurnEndEventTurn
+	Usage             ahp.Optional[*ahp.ExecutionEventTurnusage]
+	ItemsSources      []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v TurnEndInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v TurnEndInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	fields["continuationCount"] = v.ContinuationCount
-	if v.Error.Present {
-		fields["error"] = v.Error.Value
+	{
+		fields["continuationCount"] = v.ContinuationCount
 	}
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		if v.Error.Present {
+			fields["error"] = v.Error.Value
+		}
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	fields["items"] = v.Items
-	if v.LastAssistantItem.Present {
-		fields["lastAssistantItem"] = v.LastAssistantItem.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		fields["items"] = v.Items
 	}
-	fields["outcome"] = v.Outcome
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.LastAssistantItem.Present {
+			fields["lastAssistantItem"] = v.LastAssistantItem.Value
+		}
 	}
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		fields["outcome"] = v.Outcome
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	fields["turn"] = v.Turn
-	if v.Usage.Present {
-		fields["usage"] = v.Usage.Value
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
+	}
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
+	}
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		fields["turn"] = v.Turn
+	}
+	{
+		if v.Usage.Present {
+			fields["usage"] = v.Usage.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const TurnEnd Type = "turn.end"
 
 type TurnFinishBeforeInput struct {
-	ContinuationCount json.Number                                              `json:"continuationCount"`
-	Extensions        ahp.Optional[*ahp.Extensions]                            `json:"extensions"`
-	Gaps              ahp.Optional[[]ahp.TurnFinishBeforeEventGapsItem]        `json:"gaps"`
-	ID                string                                                   `json:"id"`
-	Items             []*ahp.ModelVisibleItem                                  `json:"items"`
-	LastAssistantItem ahp.Optional[ahp.TurnFinishBeforeEventLastAssistantItem] `json:"lastAssistantItem"`
-	Native            ahp.Optional[*ahp.NativeEvent]                           `json:"native"`
-	Outcome           ahp.TurnFinishBeforeEventOutcome                         `json:"outcome"`
-	ParentEventId     ahp.Optional[string]                                     `json:"parentEventId"`
-	Session           ahp.Optional[*ahp.Session]                               `json:"session"`
-	Synthesized       ahp.Optional[bool]                                       `json:"synthesized"`
-	Time              string                                                   `json:"time"`
-	Turn              ahp.TurnFinishBeforeEventTurn                            `json:"turn"`
-	Usage             ahp.Optional[*ahp.ExecutionEventTurnusage]               `json:"usage"`
+	ContinuationCount json.Number
+	Extensions        ahp.Optional[*ahp.Extensions]
+	Gaps              ahp.Optional[[]ahp.TurnFinishBeforeEventGapsItem]
+	ID                ahp.Optional[string]
+	Items             []*ahp.ModelVisibleItem
+	LastAssistantItem ahp.Optional[ahp.TurnFinishBeforeEventLastAssistantItem]
+	Native            ahp.Optional[*ahp.NativeEvent]
+	Outcome           ahp.TurnFinishBeforeEventOutcome
+	ParentEventID     ahp.Optional[string]
+	Session           ahp.Optional[*ahp.Session]
+	Synthesized       ahp.Optional[bool]
+	Time              ahp.Optional[string]
+	Turn              ahp.TurnFinishBeforeEventTurn
+	Usage             ahp.Optional[*ahp.ExecutionEventTurnusage]
+	ItemsSources      []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v TurnFinishBeforeInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v TurnFinishBeforeInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	fields["continuationCount"] = v.ContinuationCount
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		fields["continuationCount"] = v.ContinuationCount
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	fields["items"] = v.Items
-	if v.LastAssistantItem.Present {
-		fields["lastAssistantItem"] = v.LastAssistantItem.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		fields["items"] = v.Items
 	}
-	fields["outcome"] = v.Outcome
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.LastAssistantItem.Present {
+			fields["lastAssistantItem"] = v.LastAssistantItem.Value
+		}
 	}
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		fields["outcome"] = v.Outcome
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	fields["turn"] = v.Turn
-	if v.Usage.Present {
-		fields["usage"] = v.Usage.Value
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
+	}
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
+	}
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		fields["turn"] = v.Turn
+	}
+	{
+		if v.Usage.Present {
+			fields["usage"] = v.Usage.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const TurnFinishBefore Type = "turn.finish.before"
 
 type TurnProgressInput struct {
-	Delta         *ahp.ModelVisibleItem                         `json:"delta"`
-	Extensions    ahp.Optional[*ahp.Extensions]                 `json:"extensions"`
-	Final         bool                                          `json:"final"`
-	Gaps          ahp.Optional[[]ahp.TurnProgressEventGapsItem] `json:"gaps"`
-	ID            string                                        `json:"id"`
-	Item          ahp.TurnProgressEventItem                     `json:"item"`
-	Items         ahp.Optional[[]*ahp.ContentItem]              `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]                `json:"native"`
-	ParentEventId ahp.Optional[string]                          `json:"parentEventId"`
-	Session       ahp.Optional[*ahp.Session]                    `json:"session"`
-	Synthesized   ahp.Optional[bool]                            `json:"synthesized"`
-	Time          string                                        `json:"time"`
-	Turn          ahp.TurnProgressEventTurn                     `json:"turn"`
+	Delta         *ahp.ModelVisibleItem
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Final         bool
+	Gaps          ahp.Optional[[]ahp.TurnProgressEventGapsItem]
+	ID            ahp.Optional[string]
+	Item          ahp.TurnProgressEventItem
+	Items         ahp.Optional[[]*ahp.ContentItem]
+	Native        ahp.Optional[*ahp.NativeEvent]
+	ParentEventID ahp.Optional[string]
+	Session       ahp.Optional[*ahp.Session]
+	Synthesized   ahp.Optional[bool]
+	Time          ahp.Optional[string]
+	Turn          ahp.TurnProgressEventTurn
+	DeltaSource   *content.Source   `json:"-"`
+	ItemsSources  []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v TurnProgressInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	if v.DeltaSource != nil {
+		sources["/delta"] = v.DeltaSource
+	}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v TurnProgressInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	fields["delta"] = v.Delta
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		fields["delta"] = v.Delta
 	}
-	fields["final"] = v.Final
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		fields["final"] = v.Final
 	}
-	fields["item"] = v.Item
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		fields["item"] = v.Item
 	}
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	fields["turn"] = v.Turn
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
+	}
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
+	}
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		fields["turn"] = v.Turn
+	}
 	return json.Marshal(fields)
 }
+
+const TurnProgress Type = "turn.progress"
 
 type TurnStartInput struct {
-	ExpandedFrom  ahp.Optional[string]                       `json:"expandedFrom"`
-	Extensions    ahp.Optional[*ahp.Extensions]              `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.TurnStartEventGapsItem] `json:"gaps"`
-	ID            string                                     `json:"id"`
-	Items         []*ahp.ModelVisibleItem                    `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]             `json:"native"`
-	ParentEventId ahp.Optional[string]                       `json:"parentEventId"`
-	Session       ahp.Optional[*ahp.Session]                 `json:"session"`
-	Synthesized   ahp.Optional[bool]                         `json:"synthesized"`
-	Time          string                                     `json:"time"`
-	Trigger       ahp.TurnStartEventTrigger                  `json:"trigger"`
-	Turn          ahp.TurnStartEventTurn                     `json:"turn"`
+	ExpandedFrom  ahp.Optional[string]
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Gaps          ahp.Optional[[]ahp.TurnStartEventGapsItem]
+	ID            ahp.Optional[string]
+	Items         []*ahp.ModelVisibleItem
+	Native        ahp.Optional[*ahp.NativeEvent]
+	ParentEventID ahp.Optional[string]
+	Session       ahp.Optional[*ahp.Session]
+	Synthesized   ahp.Optional[bool]
+	Time          ahp.Optional[string]
+	Trigger       ahp.TurnStartEventTrigger
+	Turn          ahp.TurnStartEventTurn
+	ItemsSources  []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v TurnStartInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v TurnStartInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	if v.ExpandedFrom.Present {
-		fields["expandedFrom"] = v.ExpandedFrom.Value
+	{
+		if v.ExpandedFrom.Present {
+			fields["expandedFrom"] = v.ExpandedFrom.Value
+		}
 	}
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	fields["items"] = v.Items
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		fields["items"] = v.Items
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
 	}
-	fields["trigger"] = v.Trigger
-	fields["turn"] = v.Turn
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		fields["trigger"] = v.Trigger
+	}
+	{
+		fields["turn"] = v.Turn
+	}
 	return json.Marshal(fields)
 }
+
+const TurnStart Type = "turn.start"
 
 type UserAttentionInput struct {
-	Attention     ahp.UserAttentionEventAttention                `json:"attention"`
-	Extensions    ahp.Optional[*ahp.Extensions]                  `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.UserAttentionEventGapsItem] `json:"gaps"`
-	ID            string                                         `json:"id"`
-	Items         ahp.Optional[[]*ahp.ContentItem]               `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]                 `json:"native"`
-	ParentEventId ahp.Optional[string]                           `json:"parentEventId"`
-	Session       ahp.Optional[*ahp.Session]                     `json:"session"`
-	Synthesized   ahp.Optional[bool]                             `json:"synthesized"`
-	Time          string                                         `json:"time"`
-	Turn          ahp.Optional[ahp.UserAttentionEventTurn]       `json:"turn"`
+	Attention               ahp.UserAttentionEventAttention
+	Extensions              ahp.Optional[*ahp.Extensions]
+	Gaps                    ahp.Optional[[]ahp.UserAttentionEventGapsItem]
+	ID                      ahp.Optional[string]
+	Items                   ahp.Optional[[]*ahp.ContentItem]
+	Native                  ahp.Optional[*ahp.NativeEvent]
+	ParentEventID           ahp.Optional[string]
+	Session                 ahp.Optional[*ahp.Session]
+	Synthesized             ahp.Optional[bool]
+	Time                    ahp.Optional[string]
+	Turn                    ahp.Optional[ahp.UserAttentionEventTurn]
+	AttentionMessageSources []*content.Source `json:"-"`
+	AttentionTitleSources   []*content.Source `json:"-"`
+	ItemsSources            []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v UserAttentionInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.AttentionMessageSources {
+		if source != nil {
+			sources["/attention/message/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	for index, source := range v.AttentionTitleSources {
+		if source != nil {
+			sources["/attention/title/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v UserAttentionInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	fields["attention"] = v.Attention
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		fields["attention"] = v.Attention
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
 	}
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const UserAttention Type = "user.attention"
 
 type UserElicitationRequestInput struct {
-	Elicitation   ahp.UserElicitationRequestEventElicitation              `json:"elicitation"`
-	Extensions    ahp.Optional[*ahp.Extensions]                           `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.UserElicitationRequestEventGapsItem] `json:"gaps"`
-	ID            string                                                  `json:"id"`
-	Items         ahp.Optional[[]*ahp.ContentItem]                        `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]                          `json:"native"`
-	ParentEventId ahp.Optional[string]                                    `json:"parentEventId"`
-	Session       ahp.Optional[*ahp.Session]                              `json:"session"`
-	Synthesized   ahp.Optional[bool]                                      `json:"synthesized"`
-	Time          string                                                  `json:"time"`
-	Turn          ahp.Optional[ahp.UserElicitationRequestEventTurn]       `json:"turn"`
+	Elicitation              ahp.UserElicitationRequestEventElicitation
+	Extensions               ahp.Optional[*ahp.Extensions]
+	Gaps                     ahp.Optional[[]ahp.UserElicitationRequestEventGapsItem]
+	ID                       ahp.Optional[string]
+	Items                    ahp.Optional[[]*ahp.ContentItem]
+	Native                   ahp.Optional[*ahp.NativeEvent]
+	ParentEventID            ahp.Optional[string]
+	Session                  ahp.Optional[*ahp.Session]
+	Synthesized              ahp.Optional[bool]
+	Time                     ahp.Optional[string]
+	Turn                     ahp.Optional[ahp.UserElicitationRequestEventTurn]
+	ElicitationRequestSource *content.Source   `json:"-"`
+	ItemsSources             []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v UserElicitationRequestInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	if v.ElicitationRequestSource != nil {
+		sources["/elicitation/request"] = v.ElicitationRequestSource
+	}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v UserElicitationRequestInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	fields["elicitation"] = v.Elicitation
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		fields["elicitation"] = v.Elicitation
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
 	}
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const UserElicitationRequest Type = "user.elicitation.request"
 
 type UserElicitationResultInput struct {
-	Elicitation   ahp.UserElicitationResultEventElicitation              `json:"elicitation"`
-	Extensions    ahp.Optional[*ahp.Extensions]                          `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.UserElicitationResultEventGapsItem] `json:"gaps"`
-	ID            string                                                 `json:"id"`
-	Items         ahp.Optional[[]*ahp.ContentItem]                       `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]                         `json:"native"`
-	ParentEventId ahp.Optional[string]                                   `json:"parentEventId"`
-	Session       ahp.Optional[*ahp.Session]                             `json:"session"`
-	Synthesized   ahp.Optional[bool]                                     `json:"synthesized"`
-	Time          string                                                 `json:"time"`
-	Turn          ahp.Optional[ahp.UserElicitationResultEventTurn]       `json:"turn"`
+	Elicitation             ahp.UserElicitationResultEventElicitation
+	Extensions              ahp.Optional[*ahp.Extensions]
+	Gaps                    ahp.Optional[[]ahp.UserElicitationResultEventGapsItem]
+	ID                      ahp.Optional[string]
+	Items                   ahp.Optional[[]*ahp.ContentItem]
+	Native                  ahp.Optional[*ahp.NativeEvent]
+	ParentEventID           ahp.Optional[string]
+	Session                 ahp.Optional[*ahp.Session]
+	Synthesized             ahp.Optional[bool]
+	Time                    ahp.Optional[string]
+	Turn                    ahp.Optional[ahp.UserElicitationResultEventTurn]
+	ElicitationResultSource *content.Source   `json:"-"`
+	ItemsSources            []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v UserElicitationResultInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	if v.ElicitationResultSource != nil {
+		sources["/elicitation/result"] = v.ElicitationResultSource
+	}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v UserElicitationResultInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	fields["elicitation"] = v.Elicitation
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		fields["elicitation"] = v.Elicitation
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
 	}
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const UserElicitationResult Type = "user.elicitation.result"
 
 type UserMessageInboundInput struct {
-	Extensions    ahp.Optional[*ahp.Extensions]                       `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.UserMessageInboundEventGapsItem] `json:"gaps"`
-	ID            string                                              `json:"id"`
-	Items         ahp.Optional[[]*ahp.ContentItem]                    `json:"items"`
-	Message       ahp.UserMessageInboundEventMessage                  `json:"message"`
-	Native        ahp.Optional[*ahp.NativeEvent]                      `json:"native"`
-	ParentEventId ahp.Optional[string]                                `json:"parentEventId"`
-	Session       ahp.Optional[*ahp.Session]                          `json:"session"`
-	Synthesized   ahp.Optional[bool]                                  `json:"synthesized"`
-	Time          string                                              `json:"time"`
-	Turn          ahp.Optional[ahp.UserMessageInboundEventTurn]       `json:"turn"`
+	Extensions         ahp.Optional[*ahp.Extensions]
+	Gaps               ahp.Optional[[]ahp.UserMessageInboundEventGapsItem]
+	ID                 ahp.Optional[string]
+	Items              ahp.Optional[[]*ahp.ContentItem]
+	Message            ahp.UserMessageInboundEventMessage
+	Native             ahp.Optional[*ahp.NativeEvent]
+	ParentEventID      ahp.Optional[string]
+	Session            ahp.Optional[*ahp.Session]
+	Synthesized        ahp.Optional[bool]
+	Time               ahp.Optional[string]
+	Turn               ahp.Optional[ahp.UserMessageInboundEventTurn]
+	ItemsSources       []*content.Source `json:"-"`
+	MessageTextSources []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v UserMessageInboundInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	for index, source := range v.MessageTextSources {
+		if source != nil {
+			sources["/message/text/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v UserMessageInboundInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	fields["message"] = v.Message
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		fields["message"] = v.Message
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
 	}
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const UserMessageInbound Type = "user.message.inbound"
 
 type UserMessageOutboundInput struct {
-	Extensions    ahp.Optional[*ahp.Extensions]                        `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.UserMessageOutboundEventGapsItem] `json:"gaps"`
-	ID            string                                               `json:"id"`
-	Items         ahp.Optional[[]*ahp.ContentItem]                     `json:"items"`
-	Message       ahp.UserMessageOutboundEventMessage                  `json:"message"`
-	Native        ahp.Optional[*ahp.NativeEvent]                       `json:"native"`
-	ParentEventId ahp.Optional[string]                                 `json:"parentEventId"`
-	Session       ahp.Optional[*ahp.Session]                           `json:"session"`
-	Synthesized   ahp.Optional[bool]                                   `json:"synthesized"`
-	Time          string                                               `json:"time"`
-	Turn          ahp.Optional[ahp.UserMessageOutboundEventTurn]       `json:"turn"`
+	Extensions            ahp.Optional[*ahp.Extensions]
+	Gaps                  ahp.Optional[[]ahp.UserMessageOutboundEventGapsItem]
+	ID                    ahp.Optional[string]
+	Items                 ahp.Optional[[]*ahp.ContentItem]
+	Message               ahp.UserMessageOutboundEventMessage
+	Native                ahp.Optional[*ahp.NativeEvent]
+	ParentEventID         ahp.Optional[string]
+	Session               ahp.Optional[*ahp.Session]
+	Synthesized           ahp.Optional[bool]
+	Time                  ahp.Optional[string]
+	Turn                  ahp.Optional[ahp.UserMessageOutboundEventTurn]
+	ItemsSources          []*content.Source `json:"-"`
+	MessagePayloadSources []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v UserMessageOutboundInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	for index, source := range v.MessagePayloadSources {
+		if source != nil {
+			sources["/message/payload/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v UserMessageOutboundInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	fields["message"] = v.Message
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		fields["message"] = v.Message
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
 	}
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
+	}
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
 	return json.Marshal(fields)
 }
+
+const UserMessageOutbound Type = "user.message.outbound"
 
 type WorkspaceChangeAfterInput struct {
-	Extensions    ahp.Optional[*ahp.Extensions]                         `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.WorkspaceChangeAfterEventGapsItem] `json:"gaps"`
-	ID            string                                                `json:"id"`
-	Items         ahp.Optional[[]*ahp.ContentItem]                      `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]                        `json:"native"`
-	ParentEventId ahp.Optional[string]                                  `json:"parentEventId"`
-	Session       ahp.Optional[*ahp.Session]                            `json:"session"`
-	Synthesized   ahp.Optional[bool]                                    `json:"synthesized"`
-	Time          string                                                `json:"time"`
-	Turn          ahp.Optional[ahp.WorkspaceChangeAfterEventTurn]       `json:"turn"`
-	Workspace     ahp.WorkspaceChangeAfterEventWorkspace                `json:"workspace"`
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Gaps          ahp.Optional[[]ahp.WorkspaceChangeAfterEventGapsItem]
+	ID            ahp.Optional[string]
+	Items         ahp.Optional[[]*ahp.ContentItem]
+	Native        ahp.Optional[*ahp.NativeEvent]
+	ParentEventID ahp.Optional[string]
+	Session       ahp.Optional[*ahp.Session]
+	Synthesized   ahp.Optional[bool]
+	Time          ahp.Optional[string]
+	Turn          ahp.Optional[ahp.WorkspaceChangeAfterEventTurn]
+	Workspace     ahp.WorkspaceChangeAfterEventWorkspace
+	ItemsSources  []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v WorkspaceChangeAfterInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v WorkspaceChangeAfterInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
 	}
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
-	fields["workspace"] = v.Workspace
+	{
+		fields["workspace"] = v.Workspace
+	}
 	return json.Marshal(fields)
 }
+
+const WorkspaceChangeAfter Type = "workspace.change.after"
 
 type WorkspaceChangeBeforeInput struct {
-	Extensions    ahp.Optional[*ahp.Extensions]                          `json:"extensions"`
-	Gaps          ahp.Optional[[]ahp.WorkspaceChangeBeforeEventGapsItem] `json:"gaps"`
-	ID            string                                                 `json:"id"`
-	Items         ahp.Optional[[]*ahp.ContentItem]                       `json:"items"`
-	Native        ahp.Optional[*ahp.NativeEvent]                         `json:"native"`
-	ParentEventId ahp.Optional[string]                                   `json:"parentEventId"`
-	Session       ahp.Optional[*ahp.Session]                             `json:"session"`
-	Synthesized   ahp.Optional[bool]                                     `json:"synthesized"`
-	Time          string                                                 `json:"time"`
-	Turn          ahp.Optional[ahp.WorkspaceChangeBeforeEventTurn]       `json:"turn"`
-	Workspace     ahp.WorkspaceChangeBeforeEventWorkspace                `json:"workspace"`
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Gaps          ahp.Optional[[]ahp.WorkspaceChangeBeforeEventGapsItem]
+	ID            ahp.Optional[string]
+	Items         ahp.Optional[[]*ahp.ContentItem]
+	Native        ahp.Optional[*ahp.NativeEvent]
+	ParentEventID ahp.Optional[string]
+	Session       ahp.Optional[*ahp.Session]
+	Synthesized   ahp.Optional[bool]
+	Time          ahp.Optional[string]
+	Turn          ahp.Optional[ahp.WorkspaceChangeBeforeEventTurn]
+	Workspace     ahp.WorkspaceChangeBeforeEventWorkspace
+	ItemsSources  []*content.Source `json:"-"`
 }
 
+// AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
+func (v WorkspaceChangeBeforeInput) AHPContentSources() map[string]*content.Source {
+	sources := map[string]*content.Source{}
+	for index, source := range v.ItemsSources {
+		if source != nil {
+			sources["/items/"+strconv.Itoa(index)+""] = source
+		}
+	}
+	return sources
+}
 func (v WorkspaceChangeBeforeInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
-	if v.Extensions.Present {
-		fields["extensions"] = v.Extensions.Value
+	{
+		if v.Extensions.Present {
+			fields["extensions"] = v.Extensions.Value
+		}
 	}
-	if v.Gaps.Present {
-		fields["gaps"] = v.Gaps.Value
+	{
+		if v.Gaps.Present {
+			fields["gaps"] = v.Gaps.Value
+		}
 	}
-	if v.ID != "" {
-		fields["id"] = v.ID
+	{
+		if v.ID.Present {
+			fields["id"] = v.ID.Value
+		}
 	}
-	if v.Items.Present {
-		fields["items"] = v.Items.Value
+	{
+		if v.Items.Present {
+			fields["items"] = v.Items.Value
+		}
 	}
-	if v.Native.Present {
-		fields["native"] = v.Native.Value
+	{
+		if v.Native.Present {
+			fields["native"] = v.Native.Value
+		}
 	}
-	if v.ParentEventId.Present {
-		fields["parentEventId"] = v.ParentEventId.Value
+	{
+		if v.ParentEventID.Present {
+			fields["parentEventId"] = v.ParentEventID.Value
+		}
 	}
-	if v.Session.Present {
-		fields["session"] = v.Session.Value
+	{
+		if v.Session.Present {
+			fields["session"] = v.Session.Value
+		}
 	}
-	if v.Synthesized.Present {
-		fields["synthesized"] = v.Synthesized.Value
+	{
+		if v.Synthesized.Present {
+			fields["synthesized"] = v.Synthesized.Value
+		}
 	}
-	if v.Time != "" {
-		fields["time"] = v.Time
+	{
+		if v.Time.Present {
+			fields["time"] = v.Time.Value
+		}
 	}
-	if v.Turn.Present {
-		fields["turn"] = v.Turn.Value
+	{
+		if v.Turn.Present {
+			fields["turn"] = v.Turn.Value
+		}
 	}
-	fields["workspace"] = v.Workspace
+	{
+		fields["workspace"] = v.Workspace
+	}
 	return json.Marshal(fields)
 }
+
+const WorkspaceChangeBefore Type = "workspace.change.before"

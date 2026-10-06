@@ -21,6 +21,152 @@ func NewDeny(argReason string, opts ...DenyOption) *ahp.Effect {
 	}
 	return &ahp.Effect{DenyEffect: ahp.Optional[*ahp.DenyEffect]{Present: true, Value: v}}
 }
+func ModifyContentMerge[T any](value T) (*ahp.Effect, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return &ahp.Effect{Variant4: ahp.Some(ahp.EffectVariant4{Type: "modify", Target: "content", Operation: "merge", Value: raw})}, nil
+}
+func ModifyContentReplace[T any](value T) (*ahp.Effect, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return &ahp.Effect{Variant4: ahp.Some(ahp.EffectVariant4{Type: "modify", Target: "content", Operation: "replace", Value: raw})}, nil
+}
+func ModifyInputMerge[T any](value T) (*ahp.Effect, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return &ahp.Effect{Variant4: ahp.Some(ahp.EffectVariant4{Type: "modify", Target: "input", Operation: "merge", Value: raw})}, nil
+}
+func ModifyInputReplace[T any](value T) (*ahp.Effect, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return &ahp.Effect{Variant4: ahp.Some(ahp.EffectVariant4{Type: "modify", Target: "input", Operation: "replace", Value: raw})}, nil
+}
+func ModifyInstructionsMerge[T any](value T) (*ahp.Effect, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return &ahp.Effect{Variant4: ahp.Some(ahp.EffectVariant4{Type: "modify", Target: "instructions", Operation: "merge", Value: raw})}, nil
+}
+func ModifyInstructionsReplace[T any](value T) (*ahp.Effect, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return &ahp.Effect{Variant4: ahp.Some(ahp.EffectVariant4{Type: "modify", Target: "instructions", Operation: "replace", Value: raw})}, nil
+}
+func ModifyOutputMerge[T any](value T) (*ahp.Effect, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return &ahp.Effect{Variant4: ahp.Some(ahp.EffectVariant4{Type: "modify", Target: "output", Operation: "merge", Value: raw})}, nil
+}
+func ModifyOutputReplace[T any](value T) (*ahp.Effect, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return &ahp.Effect{Variant4: ahp.Some(ahp.EffectVariant4{Type: "modify", Target: "output", Operation: "replace", Value: raw})}, nil
+}
+func ModifyPromptMerge[T any](value T) (*ahp.Effect, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return &ahp.Effect{Variant4: ahp.Some(ahp.EffectVariant4{Type: "modify", Target: "prompt", Operation: "merge", Value: raw})}, nil
+}
+func ModifyPromptReplace[T any](value T) (*ahp.Effect, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return &ahp.Effect{Variant4: ahp.Some(ahp.EffectVariant4{Type: "modify", Target: "prompt", Operation: "replace", Value: raw})}, nil
+}
+func ModifyRequestMerge[T any](value T) (*ahp.Effect, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return &ahp.Effect{Variant4: ahp.Some(ahp.EffectVariant4{Type: "modify", Target: "request", Operation: "merge", Value: raw})}, nil
+}
+func ModifyRequestReplace[T any](value T) (*ahp.Effect, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return &ahp.Effect{Variant4: ahp.Some(ahp.EffectVariant4{Type: "modify", Target: "request", Operation: "replace", Value: raw})}, nil
+}
+func ModifyResponseMerge[T any](value T) (*ahp.Effect, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return &ahp.Effect{Variant4: ahp.Some(ahp.EffectVariant4{Type: "modify", Target: "response", Operation: "merge", Value: raw})}, nil
+}
+func ModifyResponseReplace[T any](value T) (*ahp.Effect, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return &ahp.Effect{Variant4: ahp.Some(ahp.EffectVariant4{Type: "modify", Target: "response", Operation: "replace", Value: raw})}, nil
+}
+func ModifySummaryMerge[T any](value T) (*ahp.Effect, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return &ahp.Effect{Variant4: ahp.Some(ahp.EffectVariant4{Type: "modify", Target: "summary", Operation: "merge", Value: raw})}, nil
+}
+func ModifySummaryReplace[T any](value T) (*ahp.Effect, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return &ahp.Effect{Variant4: ahp.Some(ahp.EffectVariant4{Type: "modify", Target: "summary", Operation: "replace", Value: raw})}, nil
+}
+func ModifyWorkspaceMerge[T any](value T) (*ahp.Effect, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return &ahp.Effect{Variant4: ahp.Some(ahp.EffectVariant4{Type: "modify", Target: "workspace", Operation: "merge", Value: raw})}, nil
+}
+func ModifyWorkspaceReplace[T any](value T) (*ahp.Effect, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return &ahp.Effect{Variant4: ahp.Some(ahp.EffectVariant4{Type: "modify", Target: "workspace", Operation: "replace", Value: raw})}, nil
+}
+func Return[T any](value T, opts ...ReturnOption) (*ahp.Effect, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return NewReturn(raw, opts...), nil
+}
+
+type DeliverAt = ahp.EffectVariant9DeliverAt
+
+const NextTurn DeliverAt = "next_turn"
+const Now DeliverAt = "now"
+
+func InjectContextAppend[T any](deliverAt DeliverAt, value T, opts ...InjectAppendOption) (*ahp.Effect, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return NewInjectAppend(deliverAt, raw, opts...), nil
+}
 
 type AllowOption func(*ahp.EffectVariant2)
 

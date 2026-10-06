@@ -81,8 +81,9 @@ func TestPublicElicitationModeAdmission(t *testing.T) {
 					var inputBefore, inputAfter []byte
 					capsBefore := string(sdkJSON(caps))
 					if stage == "request" {
-						var input event.UserElicitationRequestInput
-						if err := json.Unmarshal(sdkJSON(elicitationDispatchInput(stage, mode, original)), &input); err != nil {
+						inputMap := elicitationDispatchInput(stage, mode, original)
+						input := event.UserElicitationRequestInput{ID: ahp.Some("request-id"), Time: ahp.Some("2026-01-01T00:00:00Z"), Session: ahp.Some(&ahp.Session{ID: "session"})}
+						if err := json.Unmarshal(sdkJSON(inputMap["elicitation"]), &input.Elicitation); err != nil {
 							t.Fatal(err)
 						}
 						input.Session = ahp.Optional[*ahp.Session]{Present: true, Value: &ahp.Session{ID: "session"}}
@@ -96,13 +97,12 @@ func TestPublicElicitationModeAdmission(t *testing.T) {
 						if snapshotErr != nil {
 							t.Fatal(snapshotErr)
 						}
-						var input event.UserElicitationResultInput
+						input := event.UserElicitationResultInput{ID: ahp.Some("result-id"), Time: ahp.Some("2026-01-01T00:00:00Z")}
 						inputMap := elicitationDispatchInput(stage, mode, answer)
-						delete(inputMap, "parentEventId")
-						if err := json.Unmarshal(sdkJSON(inputMap), &input); err != nil {
+						if err := json.Unmarshal(sdkJSON(inputMap["elicitation"]), &input.Elicitation); err != nil {
 							t.Fatal(err)
 						}
-						input.ParentEventId = ahp.Optional[string]{Present: true, Value: "request-id"}
+						input.ParentEventID = ahp.Optional[string]{Present: true, Value: "request-id"}
 						input.Session = ahp.Optional[*ahp.Session]{Present: true, Value: &ahp.Session{ID: "session"}}
 						inputBefore = sdkJSON(input)
 						result, err = c.UserElicitationResult(context.Background(), input, WithElicitationRequest(snapshot))
@@ -137,8 +137,8 @@ func TestPublicElicitationInformationalDeliveryWithoutModeGrant(t *testing.T) {
 			setDispatchBoundary(c, "user.elicitation.request", map[string]any{"effects": effects})
 			inputMap := elicitationDispatchInput("request", "form", elicitationForm)
 			delete(sdkObj(inputMap["elicitation"]), "request") // Deliberate metadata-only delivery.
-			var input event.UserElicitationRequestInput
-			if err := json.Unmarshal(sdkJSON(inputMap), &input); err != nil {
+			input := event.UserElicitationRequestInput{ID: ahp.Some("request-id"), Time: ahp.Some("2026-01-01T00:00:00Z"), Session: ahp.Some(&ahp.Session{ID: "session"})}
+			if err := json.Unmarshal(sdkJSON(inputMap["elicitation"]), &input.Elicitation); err != nil {
 				t.Fatal(err)
 			}
 			if len(effects) != 0 {

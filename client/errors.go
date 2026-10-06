@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/agenthooksprotocol/go-sdk/diagnostic"
 	"github.com/agenthooksprotocol/go-sdk/internal/canonical"
 )
 
@@ -20,16 +21,16 @@ func (e *AdmissionError) Unwrap() error { return e.Err }
 
 // DeliveryCode is a stable, payload-free classification of a delivery failure.
 // Stage identifies where it happened; Code identifies the failure category.
-type DeliveryCode string
+type DeliveryCode = diagnostic.Code
 
 const (
-	DeliveryProtocolRejection DeliveryCode = "protocol_rejection"
-	DeliveryRemoteRPC         DeliveryCode = "remote_rpc"
-	DeliveryTransport         DeliveryCode = "transport"
-	DeliveryCancelled         DeliveryCode = "cancelled"
-	DeliveryDeadlineExceeded  DeliveryCode = "deadline_exceeded"
-	DeliveryPreparation       DeliveryCode = "preparation"
-	DeliveryCapacity          DeliveryCode = "capacity"
+	DeliveryProtocolRejection DeliveryCode = diagnostic.ProtocolRejection
+	DeliveryRemoteRPC         DeliveryCode = diagnostic.RemoteRpc
+	DeliveryTransport         DeliveryCode = diagnostic.Transport
+	DeliveryCancelled         DeliveryCode = diagnostic.Cancelled
+	DeliveryDeadlineExceeded  DeliveryCode = diagnostic.DeadlineExceeded
+	DeliveryPreparation       DeliveryCode = diagnostic.Preparation
+	DeliveryCapacity          DeliveryCode = diagnostic.Capacity
 )
 
 var errRemoteRPC = errors.New("backend JSON-RPC error")

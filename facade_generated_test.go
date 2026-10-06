@@ -6,13 +6,18 @@ import (
 	ahp "github.com/agenthooksprotocol/go-sdk"
 	"github.com/agenthooksprotocol/go-sdk/capability"
 	"github.com/agenthooksprotocol/go-sdk/content"
+	"github.com/agenthooksprotocol/go-sdk/diagnostic"
 	"github.com/agenthooksprotocol/go-sdk/effect"
 	"github.com/agenthooksprotocol/go-sdk/event"
+	"github.com/agenthooksprotocol/go-sdk/permission"
 	"github.com/agenthooksprotocol/go-sdk/registration"
+	"github.com/agenthooksprotocol/go-sdk/state"
 	"github.com/agenthooksprotocol/go-sdk/subscription"
 	"github.com/agenthooksprotocol/go-sdk/tool"
 	"github.com/agenthooksprotocol/go-sdk/transport"
+	"io"
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -79,7 +84,7 @@ func TestGeneratedTypedHostProjection(t *testing.T) {
 	type args struct {
 		Path string `json:"path"`
 	}
-	input := event.ToolBeforeInput[args]{Path: "/tools/read", Tool: tool.NewInput("read", "native", args{Path: "file.txt"}, tool.WithInputKind("task")), Call: ahp.ToolBeforeEventCall{ID: "call-1"}}
+	input := event.ToolBeforeInput[args]{Path: "/tools/read", Name: "read", Origin: "native", Input: args{Path: "file.txt"}, ToolKind: ahp.Some("task"), CallID: "call-1"}
 	raw, err := json.Marshal(input)
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +104,7 @@ func TestGeneratedTypedHostProjection(t *testing.T) {
 	if err = json.Unmarshal(object["tool"], &toolValue); err != nil || toolValue.Input.Path != "file.txt" {
 		t.Fatalf("typed input lost: %s %v", raw, err)
 	}
-	raw, err = json.Marshal(event.ToolBeforeInput[json.RawMessage]{Tool: tool.Input[json.RawMessage]{Input: json.RawMessage(`{"dynamic":true}`)}})
+	raw, err = json.Marshal(event.ToolBeforeInput[json.RawMessage]{Input: json.RawMessage(`{"dynamic":true}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,5 +259,156 @@ func TestGeneratedCapabilityHelpers(t *testing.T) {
 	first.Modify.Value.Input.Value[0] = 'x'
 	if second.Modify.Value.Input.Value[0] != '{' {
 		t.Fatal("shared modification backing storage")
+	}
+}
+
+func TestFunctionalCapabilityComposition(t *testing.T) {
+	operations := []capability.ModifyOperation{capability.Replace}
+	grant := capability.ModifyInput(operations...)
+	operations[0] = capability.ModifyOperation("invalid")
+	first, err := capability.Intercept(capability.Deny(), grant, capability.ModifyInput(capability.Merge))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := capability.Intercept(grant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Modes) != 2 || first.Modes[0] != capability.InterceptMode || first.Modes[1] != capability.ObserveMode {
+		t.Fatal(first.Modes)
+	}
+	var combined, independent map[string]bool
+	if err = json.Unmarshal(first.Capabilities.Modify.Value.Input.Value, &combined); err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal(second.Capabilities.Modify.Value.Input.Value, &independent); err != nil {
+		t.Fatal(err)
+	}
+	if !combined["replace"] || !combined["merge"] || !independent["replace"] || independent["merge"] {
+		t.Fatal("reused grant was mutated")
+	}
+	if len(first.Capabilities.Effects) != 2 || len(second.Capabilities.Effects) != 1 {
+		t.Fatal("effect grants not deduplicated")
+	}
+	first.Capabilities.Modify.Value.Input.Value[0] = '!'
+	if !json.Valid(second.Capabilities.Modify.Value.Input.Value) {
+		t.Fatal("compositions alias storage")
+	}
+	for _, invalid := range []capability.Grant{{}, capability.ModifyInput(), capability.ModifyInput("invalid"), capability.InjectContextAppend()} {
+		if _, err := capability.Intercept(invalid); err == nil {
+			t.Fatal("invalid grant accepted")
+		}
+	}
+	if _, err := capability.Intercept(); err == nil {
+		t.Fatal("empty intercept accepted")
+	}
+	observe := capability.Observe()
+	if len(observe.Modes) != 1 || observe.Modes[0] != capability.ObserveMode || observe.Capabilities != nil {
+		t.Fatal(observe)
+	}
+	if _, err := capability.Intercept(capability.FlowStop(), capability.InjectContextAppend(capability.Now), capability.Ask(), capability.ElicitationForm()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInitialAndTypedEffectOperations(t *testing.T) {
+	initial := state.Initial(permission.Allow)
+	raw, err := json.Marshal(initial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		t.Fatal(err)
+	}
+	if string(object["candidate"]) != "null" || string(object["permission"]) != `"allow"` {
+		t.Fatal(string(raw))
+	}
+	type payload struct {
+		Count int `json:"count"`
+	}
+	candidate, err := state.Candidate(payload{Count: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial = state.Initial(permission.Ask, state.WithCandidate(candidate))
+	if string(initial.Candidate.Variant2.Value.Value) != `{"count":3}` {
+		t.Fatal(initial)
+	}
+	if _, err := state.Candidate(make(chan int)); err == nil {
+		t.Fatal("candidate encoding failure hidden")
+	}
+	modification, err := effect.ModifyInputReplace(payload{Count: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err = json.Marshal(modification)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed := ahp.ParseEffect(raw)
+	if !parsed.OK {
+		t.Fatal(parsed.Diagnostics)
+	}
+	if err := json.Unmarshal(raw, &object); err != nil {
+		t.Fatal(err)
+	}
+	if string(object["target"]) != `"input"` || string(object["operation"]) != `"replace"` || string(object["value"]) != `{"count":2}` {
+		t.Fatal(string(raw))
+	}
+	if _, err := effect.ModifyInputMerge(make(chan int)); err == nil {
+		t.Fatal("effect encoding failure hidden")
+	}
+	if _, err := effect.Return(payload{Count: 3}); err != nil {
+		t.Fatal(err)
+	}
+	var _ diagnostic.Code = diagnostic.ProtocolRejection
+	var _ event.Type = event.ToolBefore
+}
+
+func TestNamedContentSourceBindingsAreOutOfBand(t *testing.T) {
+	source := content.NewSource(io.NopCloser(strings.NewReader("owned content")))
+	input := event.ContextCompactBeforeInput{
+		InstructionsSource: source,
+		ItemsSources:       []*content.Source{nil, source},
+	}
+	sources := input.AHPContentSources()
+	if len(sources) != 2 || sources["/instructions"] != source || sources["/items/1"] != source {
+		t.Fatal(sources)
+	}
+	delete(sources, "/instructions")
+	if input.AHPContentSources()["/instructions"] != source {
+		t.Fatal("binding map aliases caller state")
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "owned content") || strings.Contains(string(raw), "Source") {
+		t.Fatal("source serialized into protocol", string(raw))
+	}
+	before := event.ToolBeforeInput[map[string]int]{
+		CallID: "call", Name: "run", Origin: "native", Path: "/tool", Input: map[string]int{"count": 1},
+		ItemsSources: []*content.Source{source},
+	}
+	if before.AHPContentSources()["/items/0"] != source {
+		t.Fatal("generic input lost source binding")
+	}
+	raw, err = json.Marshal(before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &value); err != nil {
+		t.Fatal(err)
+	}
+	var call struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(value["call"], &call); err != nil || call.ID != "call" {
+		t.Fatalf("canonical call mapping: %s %v", raw, err)
+	}
+	if _, exists := value["callId"]; exists {
+		t.Fatal("flat host field leaked onto wire")
 	}
 }

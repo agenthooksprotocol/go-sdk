@@ -13,17 +13,24 @@ import (
 	"github.com/agenthooksprotocol/go-sdk/client"
 	"github.com/agenthooksprotocol/go-sdk/effect"
 	"github.com/agenthooksprotocol/go-sdk/event"
+	"github.com/agenthooksprotocol/go-sdk/permission"
 	"github.com/agenthooksprotocol/go-sdk/server"
-	"github.com/agenthooksprotocol/go-sdk/tool"
+	"github.com/agenthooksprotocol/go-sdk/state"
 )
 
 func ExampleHooks_ToolBefore() {
 	// The receiver is an ordinary http.Handler mounted on an owned server.
 	handler, err := server.NewHandler(server.Handlers{
 		Intercept: func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
+			replacement, err := effect.ModifyInputReplace(struct {
+				Path string `json:"path"`
+			}{Path: "safe.txt"})
+			if err != nil {
+				return ahp.InterceptResponseResult{}, err
+			}
 			version := ahp.ProtocolVersion("draft")
 			return ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: []*ahp.Effect{
-				effect.NewModify("replace", "input", json.RawMessage(`{"path":"safe.txt"}`)),
+				replacement,
 			}}, nil
 		},
 		Observe: func(context.Context, ahp.ObserveNotification) error { return nil },
@@ -46,13 +53,18 @@ func ExampleHooks_ToolBefore() {
 		panic(err)
 	}
 
+	toolCapabilities, err := capability.Intercept(capability.Deny(), capability.ModifyInput(capability.Replace))
+	if err != nil {
+		panic(err)
+	}
+	narrowed, err := capability.Intercept(capability.ModifyInput(capability.Replace))
+	if err != nil {
+		panic(err)
+	}
 	hooks, err := client.New(registration, client.Options{
 		Source: "urn:example:host",
 		Events: map[string]client.EventCapabilities{
-			"tool.before": {
-				Modes:        []client.Mode{client.Intercept, client.Observe},
-				Capabilities: capability.New([]string{"deny", "modify"}, capability.WithInputModification(true, false)),
-			},
+			"tool.before": toolCapabilities,
 		},
 		EventClient: peer.Client(),
 		// Application input disclosure is an explicit host decision, not a grant
@@ -70,16 +82,14 @@ func ExampleHooks_ToolBefore() {
 		Path string `json:"path"`
 	}
 	ctx := context.Background()
-	var initial ahp.InterceptRequestParamsState
-	if err := json.Unmarshal([]byte(`{"permission":"none","candidate":null}`), &initial); err != nil {
-		panic(err)
-	}
+	initial := state.Initial(permission.None)
 	result, err := hooks.ToolBefore(ctx, event.ToolBeforeInput[Arguments]{
-		Call: ahp.ToolBeforeEventCall{ID: "call-1"}, Path: "execute",
-		Tool: tool.NewInput("read_file", ahp.ExecutionEventToolOriginNative, Arguments{Path: "original.txt"}),
+		CallID: "call-1", Path: "execute",
+		Name: "read_file", Origin: ahp.ExecutionEventToolOriginNative,
+		Input: Arguments{Path: "original.txt"},
 	},
-		client.WithInitialState(initial),
-		client.WithCapabilities(*capability.New([]string{"modify"}, capability.WithInputModification(true, false))),
+		client.WithInitialState(*initial),
+		client.WithCapabilities(*narrowed.Capabilities),
 	)
 	if err != nil {
 		var decode *client.DecodeError

@@ -4,6 +4,7 @@ package capability
 import ahp "github.com/agenthooksprotocol/go-sdk"
 import "encoding/json"
 import "strconv"
+import "fmt"
 
 type Option func(*ahp.Capabilities)
 
@@ -787,4 +788,443 @@ func WithWorkspaceModification(argReplace bool, argMerge bool) Option {
 		v.Modify.Present = true
 		v.Modify.Value.Workspace = ahp.Optional[json.RawMessage]{Present: true, Value: json.RawMessage("{" + "\"replace\":" + strconv.FormatBool(argReplace) + ",\"merge\":" + strconv.FormatBool(argMerge) + "}")}
 	}
+}
+
+type Mode = ahp.StaticCapabilityManifestEventsItemModesItem
+
+const (
+	InterceptMode Mode = "intercept"
+	ObserveMode   Mode = "observe"
+)
+
+type Event struct {
+	Modes        []Mode
+	Capabilities *ahp.Capabilities
+}
+type Grant struct{ apply func(*ahp.Capabilities) error }
+type ModifyOperation string
+
+// Intercept advertises both modes. It does not authorize host execution.
+// The SDK must validate event compatibility and per-call narrowing before delivery.
+func Intercept(grants ...Grant) (Event, error) {
+	if len(grants) == 0 {
+		return Event{}, fmt.Errorf("intercept requires explicit grants")
+	}
+	value := New([]string{})
+	for _, grant := range grants {
+		if grant.apply == nil {
+			return Event{}, fmt.Errorf("empty capability grant")
+		}
+		if err := grant.apply(value); err != nil {
+			return Event{}, err
+		}
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return Event{}, err
+	}
+	parsed := ahp.ParseCapabilities(raw)
+	if !parsed.OK {
+		return Event{}, fmt.Errorf("invalid capability declaration: %v", parsed.Diagnostics)
+	}
+	return Event{Modes: []Mode{InterceptMode, ObserveMode}, Capabilities: value}, nil
+}
+func Observe() Event { return Event{Modes: []Mode{ObserveMode}} }
+func addEffect(v *ahp.Capabilities, name string) {
+	for _, effect := range v.Effects {
+		if effect.Variant2.Present && effect.Variant2.Value == name {
+			return
+		}
+		if effect.Variant1.Present && string(effect.Variant1.Value) == name {
+			return
+		}
+	}
+	v.Effects = append(v.Effects, ahp.CapabilitiesEffectsItem{Variant1: ahp.Some(ahp.CapabilitiesEffectsItemVariant1(name))})
+}
+func Allow() Grant {
+	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, "allow"); return nil }}
+}
+func Ask() Grant {
+	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, "ask"); return nil }}
+}
+func Deny() Grant {
+	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, "deny"); return nil }}
+}
+func Message() Grant {
+	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, "message"); return nil }}
+}
+func Return() Grant {
+	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, "return"); return nil }}
+}
+
+const Merge ModifyOperation = "merge"
+const Replace ModifyOperation = "replace"
+
+func ModifyContent(operations ...ModifyOperation) Grant {
+	operations = append([]ModifyOperation(nil), operations...)
+	return Grant{apply: func(v *ahp.Capabilities) error {
+		if len(operations) == 0 {
+			return fmt.Errorf("modification requires an operation")
+		}
+		flags := map[string]bool{"merge": false, "replace": false}
+		for _, operation := range operations {
+			if _, known := flags[string(operation)]; !known {
+				return fmt.Errorf("unknown modify operation %q", operation)
+			}
+			flags[string(operation)] = true
+		}
+		if v.Modify.Present && v.Modify.Value.Content.Present {
+			var previous map[string]bool
+			if err := json.Unmarshal(v.Modify.Value.Content.Value, &previous); err != nil {
+				return err
+			}
+			for operation, enabled := range previous {
+				flags[operation] = flags[operation] || enabled
+			}
+		}
+		raw, err := json.Marshal(flags)
+		if err != nil {
+			return err
+		}
+		v.Modify.Present = true
+		v.Modify.Value.Content = ahp.Some(json.RawMessage(raw))
+		addEffect(v, "modify")
+		return nil
+	}}
+}
+
+func ModifyInput(operations ...ModifyOperation) Grant {
+	operations = append([]ModifyOperation(nil), operations...)
+	return Grant{apply: func(v *ahp.Capabilities) error {
+		if len(operations) == 0 {
+			return fmt.Errorf("modification requires an operation")
+		}
+		flags := map[string]bool{"merge": false, "replace": false}
+		for _, operation := range operations {
+			if _, known := flags[string(operation)]; !known {
+				return fmt.Errorf("unknown modify operation %q", operation)
+			}
+			flags[string(operation)] = true
+		}
+		if v.Modify.Present && v.Modify.Value.Input.Present {
+			var previous map[string]bool
+			if err := json.Unmarshal(v.Modify.Value.Input.Value, &previous); err != nil {
+				return err
+			}
+			for operation, enabled := range previous {
+				flags[operation] = flags[operation] || enabled
+			}
+		}
+		raw, err := json.Marshal(flags)
+		if err != nil {
+			return err
+		}
+		v.Modify.Present = true
+		v.Modify.Value.Input = ahp.Some(json.RawMessage(raw))
+		addEffect(v, "modify")
+		return nil
+	}}
+}
+
+func ModifyInstructions(operations ...ModifyOperation) Grant {
+	operations = append([]ModifyOperation(nil), operations...)
+	return Grant{apply: func(v *ahp.Capabilities) error {
+		if len(operations) == 0 {
+			return fmt.Errorf("modification requires an operation")
+		}
+		flags := map[string]bool{"merge": false, "replace": false}
+		for _, operation := range operations {
+			if _, known := flags[string(operation)]; !known {
+				return fmt.Errorf("unknown modify operation %q", operation)
+			}
+			flags[string(operation)] = true
+		}
+		if v.Modify.Present && v.Modify.Value.Instructions.Present {
+			var previous map[string]bool
+			if err := json.Unmarshal(v.Modify.Value.Instructions.Value, &previous); err != nil {
+				return err
+			}
+			for operation, enabled := range previous {
+				flags[operation] = flags[operation] || enabled
+			}
+		}
+		raw, err := json.Marshal(flags)
+		if err != nil {
+			return err
+		}
+		v.Modify.Present = true
+		v.Modify.Value.Instructions = ahp.Some(json.RawMessage(raw))
+		addEffect(v, "modify")
+		return nil
+	}}
+}
+
+func ModifyOutput(operations ...ModifyOperation) Grant {
+	operations = append([]ModifyOperation(nil), operations...)
+	return Grant{apply: func(v *ahp.Capabilities) error {
+		if len(operations) == 0 {
+			return fmt.Errorf("modification requires an operation")
+		}
+		flags := map[string]bool{"merge": false, "replace": false}
+		for _, operation := range operations {
+			if _, known := flags[string(operation)]; !known {
+				return fmt.Errorf("unknown modify operation %q", operation)
+			}
+			flags[string(operation)] = true
+		}
+		if v.Modify.Present && v.Modify.Value.Output.Present {
+			var previous map[string]bool
+			if err := json.Unmarshal(v.Modify.Value.Output.Value, &previous); err != nil {
+				return err
+			}
+			for operation, enabled := range previous {
+				flags[operation] = flags[operation] || enabled
+			}
+		}
+		raw, err := json.Marshal(flags)
+		if err != nil {
+			return err
+		}
+		v.Modify.Present = true
+		v.Modify.Value.Output = ahp.Some(json.RawMessage(raw))
+		addEffect(v, "modify")
+		return nil
+	}}
+}
+
+func ModifyPrompt(operations ...ModifyOperation) Grant {
+	operations = append([]ModifyOperation(nil), operations...)
+	return Grant{apply: func(v *ahp.Capabilities) error {
+		if len(operations) == 0 {
+			return fmt.Errorf("modification requires an operation")
+		}
+		flags := map[string]bool{"merge": false, "replace": false}
+		for _, operation := range operations {
+			if _, known := flags[string(operation)]; !known {
+				return fmt.Errorf("unknown modify operation %q", operation)
+			}
+			flags[string(operation)] = true
+		}
+		if v.Modify.Present && v.Modify.Value.Prompt.Present {
+			var previous map[string]bool
+			if err := json.Unmarshal(v.Modify.Value.Prompt.Value, &previous); err != nil {
+				return err
+			}
+			for operation, enabled := range previous {
+				flags[operation] = flags[operation] || enabled
+			}
+		}
+		raw, err := json.Marshal(flags)
+		if err != nil {
+			return err
+		}
+		v.Modify.Present = true
+		v.Modify.Value.Prompt = ahp.Some(json.RawMessage(raw))
+		addEffect(v, "modify")
+		return nil
+	}}
+}
+
+func ModifyRequest(operations ...ModifyOperation) Grant {
+	operations = append([]ModifyOperation(nil), operations...)
+	return Grant{apply: func(v *ahp.Capabilities) error {
+		if len(operations) == 0 {
+			return fmt.Errorf("modification requires an operation")
+		}
+		flags := map[string]bool{"merge": false, "replace": false}
+		for _, operation := range operations {
+			if _, known := flags[string(operation)]; !known {
+				return fmt.Errorf("unknown modify operation %q", operation)
+			}
+			flags[string(operation)] = true
+		}
+		if v.Modify.Present && v.Modify.Value.Request.Present {
+			var previous map[string]bool
+			if err := json.Unmarshal(v.Modify.Value.Request.Value, &previous); err != nil {
+				return err
+			}
+			for operation, enabled := range previous {
+				flags[operation] = flags[operation] || enabled
+			}
+		}
+		raw, err := json.Marshal(flags)
+		if err != nil {
+			return err
+		}
+		v.Modify.Present = true
+		v.Modify.Value.Request = ahp.Some(json.RawMessage(raw))
+		addEffect(v, "modify")
+		return nil
+	}}
+}
+
+func ModifyResponse(operations ...ModifyOperation) Grant {
+	operations = append([]ModifyOperation(nil), operations...)
+	return Grant{apply: func(v *ahp.Capabilities) error {
+		if len(operations) == 0 {
+			return fmt.Errorf("modification requires an operation")
+		}
+		flags := map[string]bool{"merge": false, "replace": false}
+		for _, operation := range operations {
+			if _, known := flags[string(operation)]; !known {
+				return fmt.Errorf("unknown modify operation %q", operation)
+			}
+			flags[string(operation)] = true
+		}
+		if v.Modify.Present && v.Modify.Value.Response.Present {
+			var previous map[string]bool
+			if err := json.Unmarshal(v.Modify.Value.Response.Value, &previous); err != nil {
+				return err
+			}
+			for operation, enabled := range previous {
+				flags[operation] = flags[operation] || enabled
+			}
+		}
+		raw, err := json.Marshal(flags)
+		if err != nil {
+			return err
+		}
+		v.Modify.Present = true
+		v.Modify.Value.Response = ahp.Some(json.RawMessage(raw))
+		addEffect(v, "modify")
+		return nil
+	}}
+}
+
+func ModifySummary(operations ...ModifyOperation) Grant {
+	operations = append([]ModifyOperation(nil), operations...)
+	return Grant{apply: func(v *ahp.Capabilities) error {
+		if len(operations) == 0 {
+			return fmt.Errorf("modification requires an operation")
+		}
+		flags := map[string]bool{"merge": false, "replace": false}
+		for _, operation := range operations {
+			if _, known := flags[string(operation)]; !known {
+				return fmt.Errorf("unknown modify operation %q", operation)
+			}
+			flags[string(operation)] = true
+		}
+		if v.Modify.Present && v.Modify.Value.Summary.Present {
+			var previous map[string]bool
+			if err := json.Unmarshal(v.Modify.Value.Summary.Value, &previous); err != nil {
+				return err
+			}
+			for operation, enabled := range previous {
+				flags[operation] = flags[operation] || enabled
+			}
+		}
+		raw, err := json.Marshal(flags)
+		if err != nil {
+			return err
+		}
+		v.Modify.Present = true
+		v.Modify.Value.Summary = ahp.Some(json.RawMessage(raw))
+		addEffect(v, "modify")
+		return nil
+	}}
+}
+
+func ModifyWorkspace(operations ...ModifyOperation) Grant {
+	operations = append([]ModifyOperation(nil), operations...)
+	return Grant{apply: func(v *ahp.Capabilities) error {
+		if len(operations) == 0 {
+			return fmt.Errorf("modification requires an operation")
+		}
+		flags := map[string]bool{"merge": false, "replace": false}
+		for _, operation := range operations {
+			if _, known := flags[string(operation)]; !known {
+				return fmt.Errorf("unknown modify operation %q", operation)
+			}
+			flags[string(operation)] = true
+		}
+		if v.Modify.Present && v.Modify.Value.Workspace.Present {
+			var previous map[string]bool
+			if err := json.Unmarshal(v.Modify.Value.Workspace.Value, &previous); err != nil {
+				return err
+			}
+			for operation, enabled := range previous {
+				flags[operation] = flags[operation] || enabled
+			}
+		}
+		raw, err := json.Marshal(flags)
+		if err != nil {
+			return err
+		}
+		v.Modify.Present = true
+		v.Modify.Value.Workspace = ahp.Some(json.RawMessage(raw))
+		addEffect(v, "modify")
+		return nil
+	}}
+}
+
+func FlowContinue(remaining, count int64) Grant {
+	return Grant{apply: func(v *ahp.Capabilities) error {
+		v.Flow.Present = true
+		v.Flow.Value.RemainingContinuations = ahp.Some(json.Number(strconv.FormatInt(remaining, 10)))
+		v.Flow.Value.ContinuationCount = ahp.Some(json.Number(strconv.FormatInt(count, 10)))
+		for _, operation := range v.Flow.Value.Operations {
+			if string(operation) == "continue" {
+				return nil
+			}
+		}
+		v.Flow.Value.Operations = append(v.Flow.Value.Operations, ahp.CapabilitiesFlowOperationsItem("continue"))
+		addEffect(v, "flow")
+		return nil
+	}}
+}
+func FlowStop() Grant {
+	return Grant{apply: func(v *ahp.Capabilities) error {
+		v.Flow.Present = true
+		for _, operation := range v.Flow.Value.Operations {
+			if string(operation) == "stop" {
+				return nil
+			}
+		}
+		v.Flow.Value.Operations = append(v.Flow.Value.Operations, ahp.CapabilitiesFlowOperationsItem("stop"))
+		addEffect(v, "flow")
+		return nil
+	}}
+}
+
+type DeliverAt = ahp.CapabilitiesInjectContextDeliverAtItem
+
+const NextTurn DeliverAt = "next_turn"
+const Now DeliverAt = "now"
+
+func InjectContextAppend(deliveries ...DeliverAt) Grant {
+	deliveries = append([]DeliverAt(nil), deliveries...)
+	return Grant{apply: func(v *ahp.Capabilities) error {
+		if len(deliveries) == 0 {
+			return fmt.Errorf("injection requires explicit delivery timing")
+		}
+		for _, delivery := range deliveries {
+			switch delivery {
+			case "next_turn", "now":
+			default:
+				return fmt.Errorf("invalid injection delivery %q", delivery)
+			}
+		}
+		v.Inject.Present = true
+		v.Inject.Value.Context.Append = true
+		for _, delivery := range deliveries {
+			found := false
+			for _, existing := range v.Inject.Value.Context.DeliverAt {
+				if existing == delivery {
+					found = true
+				}
+			}
+			if !found {
+				v.Inject.Value.Context.DeliverAt = append(v.Inject.Value.Context.DeliverAt, delivery)
+			}
+		}
+		addEffect(v, "inject")
+		return nil
+	}}
+}
+
+func ElicitationForm() Grant {
+	return Grant{apply: func(v *ahp.Capabilities) error { WithElicitationForm()(v); return nil }}
+}
+func ElicitationURL() Grant {
+	return Grant{apply: func(v *ahp.Capabilities) error { WithElicitationURL()(v); return nil }}
 }

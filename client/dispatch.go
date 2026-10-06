@@ -10,6 +10,14 @@ import (
 	"time"
 )
 
+// Dispatch is the advanced canonical/dynamic boundary entry point. input uses
+// canonical host fields (including nested call/tool envelopes), not flattened
+// generated input fields. Source, type, and manifest remain SDK-owned and must
+// be absent. Prefer named methods and generated inputs for ordinary callers.
+func (c *Hooks) Dispatch(ctx context.Context, name string, input any, options ...InterceptOption) (*Result, error) {
+	return c.intercept(ctx, name, input, options...)
+}
+
 func (c *Hooks) intercept(ctx context.Context, name string, input any, options ...InterceptOption) (*Result, error) {
 	result, err := c.dispatch(ctx, name, input, options...)
 	if result == nil && err != nil {
