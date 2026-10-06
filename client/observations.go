@@ -8,8 +8,9 @@ import (
 	"sync"
 )
 
-// Observations tracks best-effort deliveries without delaying boundary settlement.
-// Wait does not cancel delivery when its own context expires. Use Cancel explicitly.
+// Observations retains completed best-effort delivery outcomes for compatibility.
+// Boundary calls own and finish all deliveries before returning. Hosts may run the
+// entire boundary call in their own goroutine; settlement never authorizes early execution.
 type Observations struct {
 	done   chan struct{}
 	cancel context.CancelFunc
@@ -36,14 +37,18 @@ type observationDelivery struct {
 	index   int
 }
 
-func (c *Hooks) scheduleObservations(event map[string]any, pending []observationDelivery, prepared ...*preparedBoundary) *Observations {
-	ctx, cancel := context.WithCancel(c.life)
+func (c *Hooks) scheduleObservations(parent context.Context, event map[string]any, pending []observationDelivery, prepared ...*preparedBoundary) *Observations {
+	ctx, cancel := context.WithCancel(parent)
 	if len(prepared) > 0 && prepared[0] != nil {
 		ctx = context.WithValue(ctx, preparedContextKey{}, prepared[0])
 	}
 	o := &Observations{done: make(chan struct{}), cancel: cancel}
 	var wg sync.WaitGroup
 	for _, delivery := range pending {
+		// Interruption retires owned work, never starts best-effort follow-up.
+		if ctx.Err() != nil {
+			break
+		}
 		select {
 		case c.observations <- struct{}{}:
 		default:
@@ -54,13 +59,14 @@ func (c *Hooks) scheduleObservations(event map[string]any, pending []observation
 		}
 		snapshot, _ := sdkMap(event)
 		wg.Add(1)
-		c.active.Add(1)
 		go func(d observationDelivery) {
 			defer wg.Done()
-			defer c.active.Done()
 			defer func() { <-c.observations }()
 			task, done := context.WithTimeout(ctx, c.opts.ObservationTimeout)
 			defer done()
+			if task.Err() != nil {
+				return
+			}
 			stage := "prepare"
 			projected, err := c.projectContent(task, snapshot, d.sub, d.backend.id)
 			if err == nil {
@@ -74,11 +80,13 @@ func (c *Hooks) scheduleObservations(event map[string]any, pending []observation
 			}
 			if err != nil {
 				o.mu.Lock()
-				o.errors = append(o.errors, DeliveryError{BackendID: d.backend.id, Subscription: d.index, Stage: "observation", Code: deliveryCode(stage, err), Err: err})
+				o.errors = append(o.errors, DeliveryError{BackendID: d.backend.id, Subscription: d.index, Stage: stage, Code: deliveryCode(stage, err), Err: err})
 				o.mu.Unlock()
 			}
 		}(delivery)
 	}
-	go func() { wg.Wait(); cancel(); close(o.done) }()
+	wg.Wait()
+	cancel()
+	close(o.done)
 	return o
 }

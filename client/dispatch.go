@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/content"
 	"github.com/agenthooksprotocol/go-sdk/internal/canonical"
 	"time"
 )
@@ -18,6 +19,24 @@ func (c *Hooks) intercept(ctx context.Context, name string, input any, options .
 }
 
 func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ...InterceptOption) (*Result, error) {
+	// Generated inputs expose named source slots without serializing streams.
+	if bound, ok := input.(interface {
+		AHPContentSources() map[string]*content.Source
+	}); ok {
+		var bindings []InterceptOption
+		for path, source := range bound.AHPContentSources() {
+			bindings = append(bindings, WithContentSource(path, source))
+		}
+		options = append(bindings, options...)
+	}
+	cfg := contentSourceConfig(options)
+	admitted := false
+	defer func() {
+		cfg.closeSources()
+		if admitted {
+			c.active.Done()
+		}
+	}()
 	if ctx == nil {
 		return nil, errors.New("nil context")
 	}
@@ -27,8 +46,8 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 		return nil, errors.New("client closed")
 	}
 	c.active.Add(1)
+	admitted = true
 	c.mu.Unlock()
-	defer c.active.Done()
 	ctx, cancel := context.WithCancel(ctx)
 	stop := context.AfterFunc(c.life, cancel)
 	defer stop()
@@ -80,12 +99,6 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 	if err != nil {
 		return nil, err
 	}
-	cfg := interceptConfig{}
-	for _, opt := range options {
-		if opt != nil {
-			opt(&cfg)
-		}
-	}
 	if cfg.instructions != nil {
 		if name != "context.compact.before" {
 			return nil, errors.New("instructions template requires compaction before")
@@ -117,7 +130,7 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 		}
 
 	} else {
-		if len(options) > 0 {
+		if cfg.initial != nil || cfg.capabilities != nil || cfg.instructions != nil || cfg.elicitation != nil || len(cfg.targets) != 0 {
 			return nil, errors.New("intercept options on observation-only boundary")
 		}
 		note := map[string]any{"jsonrpc": "2.0", "method": "hooks/observe", "params": map[string]any{"protocolVersion": "draft", "event": event}}
@@ -137,6 +150,10 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 	}
 	version := ahp.ProtocolVersion("draft")
 	if err := validateElicitationMetadata(event, cfg.elicitation); err != nil {
+		return nil, err
+	}
+	ctx, err = cfg.bindSources(ctx, event)
+	if err != nil {
 		return nil, err
 	}
 	prepared, err := c.prepareBoundary(ctx, event, caps, cfg)
@@ -249,6 +266,15 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 	result.content = preparedContent(event, prepared)
 	result.prepared = prepared
 	result.Snapshot = prepared.snapshot
+	result.Event = sdkJSON(event)
+	if tool := sdkObj(event["tool"]); tool != nil {
+		result.EffectiveInput = sdkJSON(tool["input"])
+	}
+	if err = json.Unmarshal(sdkJSON(state), &result.State); err != nil {
+		return nil, err
+	}
+	result.Permission = result.State.Permission
+	result.Diagnostics = append([]DeliveryError(nil), result.Errors...)
 	if result.EffectiveValues == nil {
 		values, e := prepared.values(event)
 		if e != nil {
@@ -259,14 +285,18 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 			result.EffectiveValues[k] = sdkJSON(v)
 		}
 	}
-	result.Event = sdkJSON(event)
-	if tool := sdkObj(event["tool"]); tool != nil {
-		result.EffectiveInput = sdkJSON(tool["input"])
+	result.Snapshot = prepared.snapshot
+	result.Observations = c.scheduleObservations(ctx, event, pending, prepared)
+	result.content = preparedContent(event, prepared)
+	// Observer preparation can make original request bytes available, but a
+	// failed observer must never reopen settlement or publish an invalid snapshot.
+	if prepared.materializeElicitation(event) == nil {
+		result.Snapshot = prepared.snapshot
 	}
-	if err = json.Unmarshal(sdkJSON(state), &result.State); err != nil {
-		return nil, err
+	result.Diagnostics = append(append([]DeliveryError(nil), result.Errors...), result.Observations.errors...)
+	if ctx.Err() != nil {
+		result.Interrupted = true
 	}
-	result.Observations = c.scheduleObservations(event, pending, prepared)
 	if result.Interrupted {
 		return result, ctx.Err()
 	}

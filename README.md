@@ -79,7 +79,10 @@ compaction changes. The host remains responsible for those operations.
   occurrence. `WithCapabilities` can only narrow the manifest. Neither option
   proves execution or grants authority.
 - A protocol denial is a result, not a Go error. Operational failures appear in
-  `Result.Errors`; fail-closed failures are distinguishable from backend effects.
+  `Result.Diagnostics`; fail-closed failures are distinguishable from backend effects.
+  `Result.Errors` remains a compatibility view of interception failures.
+  `Result.Permission` is the canonical settled permission: `none` is not approval,
+  `ask` requires host approval, and interruption always prevents execution.
   Each `DeliveryError.Code` is a typed `DeliveryCode`: `protocol_rejection`,
   `remote_rpc`, `transport`, `cancelled`, `deadline_exceeded`, `preparation`, or
   `capacity`. `Stage` still identifies the phase, and `FailClosed` identifies
@@ -91,10 +94,19 @@ compaction changes. The host remains responsible for those operations.
   cannot be represented by the application's type. The non-nil result retains
   accepted effects and raw `EffectiveInput`; `InputAvailable` is false. Do not
   treat this as a rejected backend response or use the typed zero value.
-- Observations are bounded best-effort background work. Their completion handle
-  supports `Wait`, `Cancel`, and `Done`. `Wait` only bounds the caller's wait;
-  it does not cancel delivery. Close the client to stop owned background work
-  and subprocesses, without closing borrowed HTTP transports.
+- Each boundary call owns its bounded observation deliveries and finishes them
+  before returning. Observation failures appear in `Diagnostics` but never change
+  the settled decision. `Observations` remains an already-completed compatibility
+  handle. Hosts own concurrency: run the whole call in a goroutine and retain its
+  result; never execute a gated operation before obtaining its decision.
+- The call's `context.Context` bounds queue waits, content preparation/uploads,
+  authentication, event delivery, retries and observations with one remaining
+  budget. Backend deadlines can shorten that budget, never reset it. Cancellation
+  stops new work and retires owned I/O; safety cleanup may outlast the deadline.
+- `Close` rejects new work, cancels active calls, waits for owned resource retirement
+  and reaps subprocesses. Concurrent/repeated calls wait for the same completion
+  and return the same outcome. Await calls before closing for graceful completion.
+  Borrowed HTTP clients and harness-owned auth providers are never closed.
 
 Generated semantic packages (`registration`, `transport`, `subscription`,
 `effect`, `content`, `capability`, `event`, and `tool`) construct the existing
@@ -208,10 +220,24 @@ replies.
 
 ### Content and authentication
 
-Event and upload HTTP clients are separate dependencies. The `auth` package
-provides separately scoped event/upload transports, with exact endpoint matching
-and no credential forwarding across redirects. Custom TLS, proxy, and credential
-acquisition remain standard-library/application responsibilities.
+Configure one harness-owned `Options.AuthProvider` implementing `auth.Provider`.
+`Credential` receives the full selected authentication binding, backend identity,
+exact destination, event/upload purpose, and operation context. `Challenge` receives
+actual 401 response headers and the opaque `Credential.Attempt` identity; secrets
+never appear in diagnostics. The provider owns discovery/trust, login/consent,
+exchange, refresh/rotation, coordination and persistence. Hooks neither starts
+a browser nor closes the provider. Without a provider, only bearer `tokenEnv`
+resolution is built in; missing secrets and unsupported configured mechanisms
+fail closed. An absent binding starts anonymously; an explicitly supplied provider
+may authorize recovery from an actual challenge according to host trust policy.
+
+Event and upload bindings remain independent: uploads never inherit event
+credentials. Authenticated interceptor delivery permits one challenge retry with
+the same request identity/body and remaining context budget. Notifications and
+uploads are not replayed. Redirects are never followed. Existing separately scoped
+`auth` transports and `EventTransportResolver` remain advanced compatibility paths;
+deployment-specific TLS/workload mechanisms stay transport-owned. Borrowed HTTP
+clients are never closed.
 
 Content selection does not grant access. `client.ContentOptions` supplies
 receiver-scoped disclosure decisions and host-owned content resolution. The
@@ -223,6 +249,16 @@ delivery does not itself read bodies; preparing advertised descriptor-backed
 modifications or validating an elicitation exchange can require verified host
 bodies regardless of receiver selection. Upload credentials are never inferred
 from event credentials.
+
+For an unread stream, `content.NewSource(io.ReadCloser)` (also
+`client.NewContentSource`) transfers ownership when bound to a boundary. Construction
+performs no reads. Only an authorized selected body snapshots bytes, within the
+configured limit, computes actual size/SHA-256 and uploads independently to each
+receiver before publishing its event. Fan-out reuses the immutable snapshot. Unused,
+failed and cancelled sources are closed, and a source cannot be reused across
+occurrences. Reader `Close` must unblock a pending `Read`. Advanced callers may
+bind canonical slots with `client.WithContentSource`; wire references/resolvers
+remain available for already prepared content.
 
 On the receiver, upload parsing verifies declared size and digest only at
 successful EOF. Early close or a failed read cannot yield a verified reference.

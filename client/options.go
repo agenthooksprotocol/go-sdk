@@ -9,6 +9,8 @@ import (
 )
 
 type interceptConfig struct {
+	sources            map[string]*ContentSource
+	ownedSources       []*ContentSource
 	instructionsAbsent bool
 	targets            map[string]ModificationTarget
 	elicitation        *ElicitationRequest

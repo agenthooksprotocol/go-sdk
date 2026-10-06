@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/auth"
 	"io"
 	"mime"
 	"net"
@@ -130,14 +131,16 @@ func (c *backendCredential) resolve(ctx context.Context) (string, error) {
 }
 
 type httpBackend struct {
-	resolver   EventTransportResolver
-	snapshot   []byte
-	gate       chan struct{}
-	credential *backendCredential
-	url        string
-	client     *http.Client
-	ctx        context.Context
-	cancel     context.CancelFunc
+	provider    auth.Provider
+	authRequest *auth.Request
+	resolver    EventTransportResolver
+	snapshot    []byte
+	gate        chan struct{}
+	credential  *backendCredential
+	url         string
+	client      *http.Client
+	ctx         context.Context
+	cancel      context.CancelFunc
 }
 
 func (t *httpBackend) Close() error { t.cancel(); t.gate <- struct{}{}; <-t.gate; return nil }
@@ -165,7 +168,7 @@ func (t *httpBackend) Exchange(ctx context.Context, body []byte, notification bo
 		return nil, errors.New("invalid HTTP request")
 	}
 	client := t.client
-	if t.credential != nil && t.resolver != nil {
+	if t.credential != nil && t.resolver != nil && t.provider == nil {
 		var backend ahp.Backend
 		if err := json.Unmarshal(t.snapshot, &backend); err != nil {
 			return nil, errors.New("invalid backend authentication configuration")
@@ -180,7 +183,7 @@ func (t *httpBackend) Exchange(ctx context.Context, body []byte, notification bo
 		copied := *resolved
 		copied.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 		client = &copied
-	} else {
+	} else if t.authRequest == nil {
 		token, err := t.credential.resolve(ctx)
 		if err != nil {
 			return nil, err
@@ -190,7 +193,12 @@ func (t *httpBackend) Exchange(ctx context.Context, body []byte, notification bo
 		}
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
+	var resp *http.Response
+	if t.authRequest != nil && (t.provider != nil || t.resolver == nil) {
+		resp, err = auth.Do(client, req, *t.authRequest, t.provider, !notification)
+	} else {
+		resp, err = client.Do(req)
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()

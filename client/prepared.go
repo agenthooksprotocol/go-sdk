@@ -17,6 +17,7 @@ import (
 // preparedBoundary is occurrence-owned. Staging clones its indexes; backing byte
 // slices are immutable and never exposed to callers or application resolvers.
 type preparedBoundary struct {
+	sources  map[string]*ContentSource
 	bodies   map[string][]byte
 	slots    map[string][]string
 	limit    int64
@@ -27,7 +28,7 @@ type preparedBoundary struct {
 type preparedContextKey struct{}
 
 func (p *preparedBoundary) clone() *preparedBoundary {
-	q := &preparedBoundary{bodies: map[string][]byte{}, slots: map[string][]string{}, limit: p.limit, snapshot: p.snapshot, bindings: map[string]ModificationTarget{}, absent: map[string]bool{}}
+	q := &preparedBoundary{sources: p.sources, bodies: map[string][]byte{}, slots: map[string][]string{}, limit: p.limit, snapshot: p.snapshot, bindings: map[string]ModificationTarget{}, absent: map[string]bool{}}
 	for k, v := range p.absent {
 		q.absent[k] = v
 	}
@@ -75,7 +76,7 @@ func preparedItemPaths(event map[string]any, target string) ([]string, error) {
 	return nil, errors.New("ambiguous native target requires WithModificationTarget")
 }
 func (c *Hooks) prepareBoundary(ctx context.Context, event, caps map[string]any, cfg interceptConfig) (*preparedBoundary, error) {
-	p := &preparedBoundary{bodies: map[string][]byte{}, slots: map[string][]string{}, limit: c.opts.MaxContentBytes, bindings: map[string]ModificationTarget{}, absent: map[string]bool{}}
+	p := &preparedBoundary{sources: cfg.sources, bodies: map[string][]byte{}, slots: map[string][]string{}, limit: c.opts.MaxContentBytes, bindings: map[string]ModificationTarget{}, absent: map[string]bool{}}
 	if p.limit == 0 {
 		p.limit = 4 << 20
 	}
@@ -142,6 +143,12 @@ func (c *Hooks) prepareBoundary(ctx context.Context, event, caps map[string]any,
 				p.absent[path] = true
 				continue
 			}
+			if cfg.sources[path] != nil {
+				if !preparedMedia(item) {
+					return nil, errors.New("modifiable body requires a text or JSON descriptor")
+				}
+				continue
+			}
 			if err := p.resolve(ctx, c, item); err != nil {
 				return nil, err
 			}
@@ -164,7 +171,7 @@ func (c *Hooks) prepareBoundary(ctx context.Context, event, caps map[string]any,
 			return nil, err
 		}
 		p.snapshot = snapshot
-		if compositionContains(caps["effects"], "return") && (snapshot == nil || snapshot.request == "") {
+		if compositionContains(caps["effects"], "return") && (snapshot == nil || snapshot.request == "") && cfg.sources["/elicitation/request"] == nil {
 			return nil, errors.New("elicitation answers require an original request body")
 		}
 	}
@@ -255,7 +262,11 @@ func preparedDecode(item map[string]any, raw []byte) (any, error) {
 	return nil, errors.New("modifiable body requires a text or JSON descriptor")
 }
 func (p *preparedBoundary) values(event map[string]any) (map[string]any, error) {
+	if err := p.materializeElicitation(event); err != nil {
+		return nil, err
+	}
 	values := map[string]any{}
+targets:
 	for target, paths := range p.slots {
 		if target == "input" {
 			continue
@@ -275,7 +286,18 @@ func (p *preparedBoundary) values(event map[string]any) (map[string]any, error) 
 				vs = append(vs, nil)
 				continue
 			}
-			v, err := preparedDecode(item, p.bodies[compositionString(sdkObj(item["body"])["ref"])])
+			raw := p.bodies[compositionString(sdkObj(item["body"])["ref"])]
+			if item["body"] == nil && p.sources[path] != nil {
+				var available bool
+				raw, available = p.sources[path].Available()
+				if !available {
+					continue targets
+				}
+				if err := contentMatches(item, raw); err != nil {
+					return nil, err
+				}
+			}
+			v, err := preparedDecode(item, raw)
 			if err != nil {
 				return nil, err
 			}
@@ -370,4 +392,49 @@ func (p *preparedBoundary) apply(event map[string]any, target string, value any)
 	}
 	p.prune(event)
 	return p.bound()
+}
+
+// sourceElicitation validates a lazy original body against the same pinned MCP
+// schema used by reference-backed preparation. The canonical host event is not
+// changed, and no receiver reference is fabricated or published.
+func (p *preparedBoundary) sourceElicitation(event map[string]any, path string, raw []byte) (*ElicitationRequest, error) {
+	detached := contentClone(event).(map[string]any)
+	item := preparedAt(detached, path)
+	if item == nil {
+		return nil, errors.New("elicitation content is absent")
+	}
+	if err := contentMatches(item, raw); err != nil {
+		return nil, err
+	}
+	ref := "ahp-internal:lazy-elicitation"
+	item["selection"] = "body"
+	item["body"] = map[string]any{"ref": ref, "size": len(raw), "sha256": fmt.Sprintf("%x", sha256.Sum256(raw))}
+	delete(item, "gap")
+	original := p.snapshot
+	if event["type"] == "user.elicitation.request" && original != nil && original.request == "" {
+		original = nil
+	}
+	return prepareElicitation(detached, original, map[string][]byte{ref: raw})
+}
+
+func (p *preparedBoundary) materializeElicitation(event map[string]any) error {
+	path := "/elicitation/request"
+	if event["type"] == "user.elicitation.result" {
+		path = "/elicitation/result"
+	} else if event["type"] != "user.elicitation.request" {
+		return nil
+	}
+	// Accepted replacements are validated against the original snapshot, never
+	// against stale original descriptor expectations after the item is rewritten.
+	if item := preparedAt(event, path); item != nil && item["body"] != nil {
+		return nil
+	}
+	if raw, ok := p.sources[path].Available(); ok {
+		snapshot, err := p.sourceElicitation(event, path, raw)
+		if err != nil {
+			return err
+		}
+		p.snapshot = snapshot
+	}
+	return nil
 }

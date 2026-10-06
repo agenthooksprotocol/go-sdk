@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/auth"
 	"github.com/agenthooksprotocol/go-sdk/internal/canonical"
 	"math/big"
 	"net/http"
@@ -26,8 +27,10 @@ type Options struct {
 	Source string
 	// Events explicitly advertises boundary modes and capabilities.
 	// Use Events for ordinary configuration or Manifest for advanced metadata, not both.
-	Events                 map[string]EventCapabilities
-	Manifest               ahp.StaticCapabilityManifest
+	Events   map[string]EventCapabilities
+	Manifest ahp.StaticCapabilityManifest
+	// AuthProvider is harness-owned; Hooks never closes it.
+	AuthProvider           auth.Provider
 	EventClient            *http.Client
 	EventTransportResolver EventTransportResolver
 	UploadClient           *http.Client
@@ -45,6 +48,8 @@ type Hooks struct {
 	backends     []registeredBackend
 	mu           sync.Mutex
 	closed       bool
+	closeDone    chan struct{}
+	closeErr     error
 	active       sync.WaitGroup
 	cancel       context.CancelFunc
 	life         context.Context
@@ -85,10 +90,15 @@ type Result struct {
 	Event           json.RawMessage
 	EffectiveInput  json.RawMessage
 	State           ahp.InterceptRequestParamsState
-	Response        ahp.InterceptResponseResult
-	Errors          []DeliveryError
-	Observations    *Observations
-	Interrupted     bool
+	// Permission is the settled canonical permission, not proof of execution.
+	// None and Ask are not grants; Interrupted always gates execution.
+	Permission ahp.InterceptRequestParamsStatePermission
+	// Diagnostics includes interception and completed observation delivery failures.
+	Diagnostics  []DeliveryError
+	Response     ahp.InterceptResponseResult
+	Errors       []DeliveryError
+	Observations *Observations
+	Interrupted  bool
 }
 
 // New validates and snapshots configuration before opening any transport.
@@ -140,7 +150,7 @@ func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
 	}
 	// Retain only the detached normalized advertisement, not the caller's map.
 	opts.Events = nil
-	c := &Hooks{opts: opts, manifest: manifest, observations: make(chan struct{}, opts.MaxPendingObservations)}
+	c := &Hooks{opts: opts, manifest: manifest, observations: make(chan struct{}, opts.MaxPendingObservations), closeDone: make(chan struct{})}
 	c.life, c.cancel = context.WithCancel(context.Background())
 	ids := map[string]bool{}
 	for _, backend := range parsed.Value.Hooks {
@@ -169,7 +179,7 @@ func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
 			}
 			b.subscriptions = append(b.subscriptions, sub)
 		}
-		tr, err := newBackendTransport(backend, opts.EventClient, opts.EventTransportResolver)
+		tr, err := newAuthenticatedBackendTransport(backend, opts.EventClient, opts.EventTransportResolver, opts.AuthProvider)
 		if err != nil {
 			c.Close()
 			return nil, err
@@ -185,8 +195,10 @@ func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
 func (c *Hooks) Close() error {
 	c.mu.Lock()
 	if c.closed {
+		done := c.closeDone
 		c.mu.Unlock()
-		return nil
+		<-done
+		return c.closeErr
 	}
 	c.closed = true
 	c.cancel()
@@ -198,7 +210,9 @@ func (c *Hooks) Close() error {
 		}
 	}
 	c.active.Wait()
-	return errors.Join(errs...)
+	c.closeErr = errors.Join(errs...)
+	close(c.closeDone)
+	return c.closeErr
 }
 
 func validateSubscription(manifest, sub map[string]any) error {

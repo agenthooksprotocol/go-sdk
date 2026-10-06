@@ -90,16 +90,14 @@ func ExampleHooks_ToolBefore() {
 		}
 		panic(err)
 	}
-	if result.Interrupted || !result.InputAvailable || result.State.Permission == "deny" || len(result.Errors) != 0 {
+	if result.Interrupted || !result.InputAvailable || result.Permission == "deny" || len(result.Diagnostics) != 0 {
 		return
 	}
-	// Apply native permission and application validation before actual execution.
+	// None is not approval; Ask requires host approval. Apply native permission
+	// policy and application validation before actual execution. Printing is not execution.
 	fmt.Println(result.Input.Path)
-	deliveryErrors, err := result.Observations.Wait(ctx)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(len(deliveryErrors))
+	// All observation delivery is already complete when ToolBefore returns.
+	fmt.Println(len(result.Diagnostics))
 	// Output:
 	// safe.txt
 	// 0

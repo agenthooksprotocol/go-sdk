@@ -14,7 +14,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
+
+	"github.com/agenthooksprotocol/go-sdk/auth"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -51,7 +52,20 @@ func (c *Hooks) projectContent(ctx context.Context, event map[string]any, subscr
 				if !id || !kind || !media {
 					return nil, errors.New("malformed normalized content item")
 				}
-				return c.projectContentItem(ctx, v, selection, subscription, scope)
+				item := v
+				if sources, ok := ctx.Value(contentSourcesContextKey{}).(map[string]*ContentSource); ok {
+					if source := sources[path]; source != nil && v["body"] == nil {
+						item = contentClone(v).(map[string]any)
+						item["body"] = source
+					}
+				}
+				var verify func([]byte) error
+				if item != nil && (path == "/elicitation/request" || path == "/elicitation/result") {
+					if p, ok := ctx.Value(preparedContextKey{}).(*preparedBoundary); ok {
+						verify = func(raw []byte) error { _, err := p.sourceElicitation(event, path, raw); return err }
+					}
+				}
+				return c.projectContentItem(ctx, item, selection, subscription, scope, verify)
 			}
 			out := make(map[string]any, len(v))
 			for key, child := range v {
@@ -161,7 +175,7 @@ func contentCategory(item map[string]any) string {
 	}
 }
 
-func (c *Hooks) projectContentItem(ctx context.Context, item, selection, subscription map[string]any, scope ContentAuthorization) (map[string]any, error) {
+func (c *Hooks) projectContentItem(ctx context.Context, item, selection, subscription map[string]any, scope ContentAuthorization, validators ...func([]byte) error) (map[string]any, error) {
 	out := map[string]any{}
 	// Only canonical descriptor fields survive. Payload permission flags, inline
 	// aliases and arbitrary duplicate bytes are never forwarded as metadata.
@@ -224,6 +238,35 @@ func (c *Hooks) projectContentItem(ctx context.Context, item, selection, subscri
 	}
 	var raw []byte
 	switch source := body.(type) {
+	case *ContentSource:
+		var err error
+		timeout, valid := contentInt(upload["timeoutMs"])
+		if !valid || timeout < 1 || timeout > math.MaxInt64/int64(time.Millisecond) {
+			return nil, errors.New("invalid upload timeout")
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
+		defer cancel()
+		total := c.opts.MaxContentBytes
+		if total == 0 {
+			total = 4 << 20
+		}
+		if total == math.MaxInt64 {
+			total--
+		}
+		if budget, ok := ctx.Value(contentSourceBudgetKey{}).(*contentSourceBudget); ok {
+			raw, err = budget.snapshot(ctx, source, total, total)
+		} else {
+			raw, err = source.Snapshot(ctx, total)
+		}
+		if err != nil {
+			return nil, err
+		}
+		// Destination-specific limits do not poison the immutable occurrence
+		// snapshot for independently authorized receivers with larger limits.
+		if int64(len(raw)) > limit {
+			return nil, errors.New("content exceeds upload byte limit")
+		}
 	case []byte:
 		if int64(len(source)) > limit {
 			return nil, errors.New("content exceeds byte limit")
@@ -279,11 +322,22 @@ func (c *Hooks) projectContentItem(ctx context.Context, item, selection, subscri
 	if err := contentMatches(item, raw); err != nil {
 		return nil, err
 	}
-	descriptor, err := c.uploadContent(ctx, upload, raw)
+	for _, validate := range validators {
+		if validate != nil {
+			if err := validate(raw); err != nil {
+				return nil, err
+			}
+		}
+	}
+	descriptor, err := c.uploadContent(ctx, upload, raw, scope.BackendID)
 	if err != nil {
 		return nil, err
 	}
 	out["body"] = descriptor
+	if _, owned := body.(*ContentSource); owned {
+		out["size"] = int64(len(raw))
+		out["sha256"] = fmt.Sprintf("%x", sha256.Sum256(raw))
+	}
 	return out, nil
 }
 
@@ -303,7 +357,7 @@ func contentMatches(metadata map[string]any, raw []byte) error {
 	return nil
 }
 
-func (c *Hooks) uploadContent(ctx context.Context, config map[string]any, raw []byte) (map[string]any, error) {
+func (c *Hooks) uploadContent(ctx context.Context, config map[string]any, raw []byte, backendIDs ...string) (map[string]any, error) {
 	endpoint, ok := config["endpoint"].(string)
 	if !ok || strings.ContainsAny(endpoint, "\r\n") {
 		return nil, errors.New("invalid upload endpoint")
@@ -337,22 +391,15 @@ func (c *Hooks) uploadContent(ctx context.Context, config map[string]any, raw []
 	request.ContentLength = int64(len(raw))
 	request.Header.Set("Content-Type", "application/octet-stream")
 	request.Header.Set("AHP-Content-SHA256", fmt.Sprintf("%x", sha256.Sum256(raw)))
-	if authValue, present := config["auth"]; present {
-		auth, ok := authValue.(map[string]any)
-		if !ok || auth["type"] != "bearer" {
-			return nil, errors.New("invalid upload authentication")
-		}
-		env, ok := auth["tokenEnv"].(string)
-		if !ok || env == "" || strings.ContainsAny(env, "\r\n") {
-			return nil, errors.New("invalid upload token environment name")
-		}
-		token := os.Getenv(env)
-		if token == "" || strings.ContainsAny(token, "\r\n") {
-			return nil, errors.New("upload token unavailable or invalid")
-		}
-		request.Header.Set("Authorization", "Bearer "+token)
+	var binding json.RawMessage
+	if value, present := config["auth"]; present {
+		binding = sdkJSON(value)
 	}
-	response, err := client.Do(request)
+	backendID := ""
+	if len(backendIDs) > 0 {
+		backendID = backendIDs[0]
+	}
+	response, err := auth.Do(&client, request, auth.Request{Binding: binding, BackendID: backendID, Destination: endpoint, Purpose: auth.Upload}, c.opts.AuthProvider, false)
 	if err != nil {
 		return nil, errors.New("content upload failed")
 	}

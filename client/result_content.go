@@ -24,6 +24,11 @@ func preparedContent(event map[string]any, p *preparedBoundary) map[string][]byt
 		switch v := value.(type) {
 		case map[string]any:
 			if contentItemPath(path) {
+				if v["body"] == nil {
+					if raw, ok := p.sources[path].Available(); ok {
+						out[path] = raw
+					}
+				}
 				if raw, ok := p.bodies[compositionString(sdkObj(v["body"])["ref"])]; ok {
 					out[path] = raw
 				}
