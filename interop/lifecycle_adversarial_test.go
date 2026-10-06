@@ -18,7 +18,7 @@ import (
 
 func adversarialLifecycleScenarios(t *testing.T) []lifecycleScenario {
 	t.Helper()
-	all, err := lifecycleFixtures("../../agent-hooks-protocol/interop/lifecycle-scenarios.json")
+	all, err := lifecycleFixtures(interopFixturePath("lifecycle-scenarios.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +209,7 @@ func TestLifecycleAdversarialSettledReport(t *testing.T) {
 		result := obj(raw)
 		// Compare all canonical outcome fields, not only decision/permission.
 		var fixture Object
-		if err := Load("../../agent-hooks-protocol/interop/lifecycle-scenarios.json", &fixture); err != nil {
+		if err := Load(interopFixturePath("lifecycle-scenarios.json"), &fixture); err != nil {
 			t.Fatal(err)
 		}
 		var expected any
@@ -247,7 +247,7 @@ func TestLifecycleAdversarialSettledReport(t *testing.T) {
 }
 
 func TestLifecycleAdversarialFailurePolicySequence(t *testing.T) {
-	all, err := lifecycleFixtures("../../agent-hooks-protocol/interop/lifecycle-scenarios.json")
+	all, err := lifecycleFixtures(interopFixturePath("lifecycle-scenarios.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

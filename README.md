@@ -341,14 +341,17 @@ go test ./...
 ```
 
 The interoperability adapters and tests use the sibling protocol checkout's
-canonical schemas, shared scenarios, and public test certificates. CI pins the
+canonical schemas, shared scenarios, and public test certificates. During
+coordinated changes, `AHP_INTEROP_FIXTURE_ROOT` can point lifecycle/observation
+tests at the pinned protocol checkout's `interop` directory; its expectations
+are used unchanged. CI pins the
 generator and fixture revision and checks this SDK's bundled schema snapshot. See
 [the adapter guide](interop/README.md) and [lifecycle guide](interop/LIFECYCLE.md)
 for transport, authentication, upload, and synthetic-host boundaries.
 
 Generated code lives in `generated.go`, semantic-package `generated.go` files, and `client/boundaries_generated.go`. Its provenance is recorded in `ahp-codegen.lock.json`; schema changes are made in the [protocol repository](https://github.com/agenthooksprotocol/agent-hooks-protocol), not by editing the generated file.
 
-The generator source is protocol commit `472c16e97cfd456d98cefa0c2a3d23df2f57dbcf`. From a protocol checkout at that commit, regenerate and verify with:
+The generator source is protocol commit `7a3353d92c14514215cc092a930685b0947f0bc1`. From a protocol checkout at that commit, regenerate and verify with:
 
 ```sh
 python3 tools/generate_sdk.py --go-sdk ../go-sdk

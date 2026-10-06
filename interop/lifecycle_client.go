@@ -33,6 +33,7 @@ type lifecyclePipe struct {
 	writer    io.Writer
 	pending   map[string][]chan lifecycleResult
 	discarded map[string]int
+	retired   map[string]bool // canceled IDs cannot be rebound to a late reply
 	changed   chan struct{}
 	err       error
 }
@@ -45,10 +46,41 @@ func (p *lifecyclePipe) send(m Object, ch chan lifecycleResult) error {
 	}
 	if ch != nil {
 		id := lifecycleID(m)
+		if p.retired[id] {
+			return fmt.Errorf("retired stdio request identity")
+		}
 		p.pending[id] = append(p.pending[id], ch)
 	}
 	return json.NewEncoder(p.writer).Encode(m)
 }
+
+// retire removes the exact canceled subscription while holding the same lock
+// as reply routing. Refuse later reuse of its wire identity: without a generation
+// on the wire an old reply cannot safely be distinguished from a new one.
+func (p *lifecyclePipe) retire(id string, ch chan lifecycleResult) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	q := p.pending[id]
+	for i, pending := range q {
+		if pending != ch {
+			continue
+		}
+		copy(q[i:], q[i+1:])
+		q[len(q)-1] = nil
+		q = q[:len(q)-1]
+		if len(q) == 0 {
+			delete(p.pending, id)
+		} else {
+			p.pending[id] = q
+		}
+		if p.retired == nil {
+			p.retired = make(map[string]bool)
+		}
+		p.retired[id] = true
+		return
+	}
+}
+
 func (p *lifecyclePipe) read(r io.Reader) {
 	scan := bufio.NewScanner(r)
 	scan.Buffer(make([]byte, 4096), 16<<20)
@@ -180,18 +212,18 @@ func LifecycleClient(ctx context.Context, c LifecycleConfig) error {
 	observed := map[string]int{}
 	for _, sc := range fixtures {
 		if sc.Chain != nil {
-			result, observationDiagnostics, err := runObservationChain(sc, func(request Object) (<-chan lifecycleResult, error) {
+			result, observationDiagnostics, err := runObservationChain(ctx, sc, func(callContext context.Context, request Object) (<-chan lifecycleResult, error) {
 				done := make(chan lifecycleResult, 1)
 				go func() {
-					response, err := lifecyclePublicCall(ctx, request, pipe, eventHTTP, eventToken, c.Endpoint)
+					response, err := lifecycleWireCall(callContext, request, pipe, eventHTTP, eventToken, c.Endpoint)
 					done <- lifecycleResult{response: response, err: err}
 				}()
 				return done, nil
 			}, func(path string, value Object) error {
 				_, err := lifecycleControl(ctx, c.ControlEndpoint, path, value)
 				return err
-			}, func(note Object) error {
-				_, err := lifecyclePublicCall(ctx, note, pipe, eventHTTP, eventToken, c.Endpoint)
+			}, func(callContext context.Context, note Object) error {
+				_, err := lifecycleWireCall(callContext, note, pipe, eventHTTP, eventToken, c.Endpoint)
 				return err
 			}, v.validate)
 			if err != nil {

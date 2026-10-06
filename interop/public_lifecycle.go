@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	hooks "github.com/agenthooksprotocol/go-sdk/client"
 	"io"
@@ -22,54 +23,14 @@ func lifecyclePublicCall(ctx context.Context, request Object, pipe *lifecyclePip
 		if err := json.Unmarshal(data, &sent); err != nil {
 			return nil, err
 		}
-		if pipe != nil {
-			if method == "hooks/observe" {
-				return nil, pipe.send(sent, nil)
-			}
-			pipe.mu.Lock()
-			if pipe.ordinary == nil {
-				pipe.ordinary = make(chan struct{}, 1)
-				pipe.ordinary <- struct{}{}
-			}
-			slot := pipe.ordinary
-			pipe.mu.Unlock()
-			select {
-			case <-slot:
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-			defer func() { slot <- struct{}{} }()
-			done := make(chan lifecycleResult, 1)
-			if err := pipe.send(sent, done); err != nil {
-				return nil, err
-			}
-			select {
-			case reply := <-done:
-				return jsonBytes(reply.response), reply.err
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}
-		path := "/intercept"
-		if method == "hooks/observe" {
-			path = "/observe"
-		}
-		reply, status, err := lifecycleCallWith(ctx, httpClient, token, endpoint+path, sent)
+		reply, err := lifecycleWireCall(ctx, sent, pipe, httpClient, token, endpoint)
 		if err != nil {
+			// PublicBoundary deliberately redacts transport errors. Retain only
+			// this fixture-specific, typed acknowledgement evidence out of band.
+			errors.As(err, &invalidAcknowledgement)
 			return nil, err
 		}
-		if method == "hooks/intercept" && status != http.StatusOK {
-			return nil, fmt.Errorf("intercept HTTP %d", status)
-		}
-		if method == "hooks/observe" && status != http.StatusAccepted && status != http.StatusNoContent {
-			invalidAcknowledgement = &lifecycleObservationAcknowledgementError{Status: status, Response: reply}
-			return nil, invalidAcknowledgement
-		}
 		if method == "hooks/observe" {
-			if reply != nil {
-				invalidAcknowledgement = &lifecycleObservationAcknowledgementError{Status: status, Response: reply}
-				return nil, invalidAcknowledgement
-			}
 			return nil, nil
 		}
 		return jsonBytes(reply), nil
@@ -93,6 +54,69 @@ func lifecyclePublicCall(ctx context.Context, request Object, pipe *lifecyclePip
 		return nil, invalidAcknowledgement
 	}
 	return response, err
+}
+
+// lifecycleWireCall owns one raw transport exchange, not a Hooks operation. The
+// caller supplies the operation context and owns any surrounding test barriers.
+// Chain composition must invoke this helper from its one public SDK operation.
+func lifecycleWireCall(ctx context.Context, request Object, pipe *lifecyclePipe, httpClient *http.Client, token, endpoint string) (Object, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	method := str(request["method"])
+	if pipe != nil {
+		if method == "hooks/observe" {
+			return nil, pipe.send(request, nil)
+		}
+		pipe.mu.Lock()
+		if pipe.ordinary == nil {
+			pipe.ordinary = make(chan struct{}, 1)
+			pipe.ordinary <- struct{}{}
+		}
+		slot := pipe.ordinary
+		pipe.mu.Unlock()
+		select {
+		case <-slot:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		defer func() { slot <- struct{}{} }()
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		done := make(chan lifecycleResult, 1)
+		if err := pipe.send(request, done); err != nil {
+			pipe.retire(lifecycleID(request), done)
+			return nil, err
+		}
+		select {
+		case reply := <-done:
+			return reply.response, reply.err
+		case <-ctx.Done():
+			// Remove only this subscription. An eventual frame is discarded by
+			// the shared reader, never left on an abandoned per-call goroutine.
+			pipe.retire(lifecycleID(request), done)
+			return nil, ctx.Err()
+		}
+	}
+	path := "/intercept"
+	if method == "hooks/observe" {
+		path = "/observe"
+	}
+	reply, status, err := lifecycleCallWith(ctx, httpClient, token, endpoint+path, request)
+	if err != nil {
+		return nil, err
+	}
+	if method == "hooks/intercept" && status != http.StatusOK {
+		return nil, fmt.Errorf("intercept HTTP %d", status)
+	}
+	if method == "hooks/observe" {
+		if (status != http.StatusAccepted && status != http.StatusNoContent) || reply != nil {
+			return nil, &lifecycleObservationAcknowledgementError{Status: status, Response: reply}
+		}
+		return nil, nil
+	}
+	return reply, nil
 }
 
 // Snapshot only the authorized subscription's confirmed immutable uploads.

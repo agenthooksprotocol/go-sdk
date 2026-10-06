@@ -1159,6 +1159,9 @@ func ModifyWorkspace(operations ...ModifyOperation) Grant {
 
 func FlowContinue(remaining, count int64) Grant {
 	return Grant{apply: func(v *ahp.Capabilities) error {
+		if remaining < 0 || count < 0 || remaining > 9007199254740991 || count > 9007199254740991 {
+			return fmt.Errorf("continuation counts must be nonnegative safe integers")
+		}
 		v.Flow.Present = true
 		v.Flow.Value.RemainingContinuations = ahp.Some(json.Number(strconv.FormatInt(remaining, 10)))
 		v.Flow.Value.ContinuationCount = ahp.Some(json.Number(strconv.FormatInt(count, 10)))

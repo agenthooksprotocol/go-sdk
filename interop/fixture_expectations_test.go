@@ -1,6 +1,8 @@
 package interop
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -78,4 +80,13 @@ func expectedChainRequests(scenario Object) []Object {
 		}
 	}
 	return requests
+}
+
+// Interop fixtures come from the pinned protocol checkout, or an explicit
+// integration checkout during coordinated cross-repository development.
+func interopFixturePath(name string) string {
+	if root := os.Getenv("AHP_INTEROP_FIXTURE_ROOT"); root != "" {
+		return filepath.Join(root, name)
+	}
+	return filepath.Join("../../agent-hooks-protocol/interop", name)
 }

@@ -17,7 +17,7 @@ func TestLifecycleAuthParity(t *testing.T) {
 	t.Setenv("AHP_GO_LIFE_UPLOAD", "independent-upload-test-token")
 	t.Setenv("AHP_INTEROP_UNAUTHORIZED_UPLOAD_TOKEN", "unauthorized-upload-test-token")
 	var all Object
-	if e := Load("../../agent-hooks-protocol/interop/lifecycle-scenarios.json", &all); e != nil {
+	if e := Load(interopFixturePath("lifecycle-scenarios.json"), &all); e != nil {
 		t.Fatal(e)
 	}
 	for _, mode := range []string{"none", "bearer", "oauth", "workload", "mtls", "stdio"} {

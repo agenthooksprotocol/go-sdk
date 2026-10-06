@@ -412,3 +412,16 @@ func TestNamedContentSourceBindingsAreOutOfBand(t *testing.T) {
 		t.Fatal("flat host field leaked onto wire")
 	}
 }
+
+func TestContinuationCountsRejectInvalidComposition(t *testing.T) {
+	for _, pair := range [][2]int64{{-1, 0}, {0, -1}, {9007199254740992, 0}, {0, 9007199254740992}} {
+		if _, err := capability.Intercept(capability.FlowContinue(pair[0], pair[1])); err == nil {
+			t.Fatalf("invalid continuation counts accepted: %v", pair)
+		}
+	}
+	for _, pair := range [][2]int64{{0, 0}, {1, 2}, {9007199254740991, 9007199254740991}} {
+		if _, err := capability.Intercept(capability.FlowContinue(pair[0], pair[1])); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

@@ -54,7 +54,7 @@ func TestObservationChainCarriesAcceptedPermission(t *testing.T) {
 		req := request("permission-prefix")
 		scenario := lifecycleScenario{ID: "permission-prefix", Requests: map[string]Object{"a": req}, Chain: Object{"subscriptions": []any{Object{"id": "first", "mode": "intercept", "failurePolicy": "fail-open", "content": "metadata"}, Object{"id": "second", "mode": "intercept", "failurePolicy": "fail-open", "content": "metadata"}}}}
 		calls := 0
-		_, _, err := runObservationChain(scenario, func(sent Object) (<-chan lifecycleResult, error) {
+		_, _, err := runObservationChain(context.Background(), scenario, func(_ context.Context, sent Object) (<-chan lifecycleResult, error) {
 			permission := obj(obj(sent["params"])["state"])["permission"]
 			expected := "none"
 			if calls > 0 && !reject {
@@ -71,7 +71,7 @@ func TestObservationChainCarriesAcceptedPermission(t *testing.T) {
 			done := make(chan lifecycleResult, 1)
 			done <- lifecycleResult{response: response("permission-prefix", effects...)}
 			return done, nil
-		}, func(string, Object) error { return nil }, func(Object) error { return nil }, func(string, Object) error { return nil })
+		}, func(string, Object) error { return nil }, func(context.Context, Object) error { return nil }, func(string, Object) error { return nil })
 		if err != nil || calls != 2 {
 			t.Fatalf("chain result: calls=%d err=%v", calls, err)
 		}
@@ -82,7 +82,7 @@ func TestObservationChainCarriesAcceptedPermission(t *testing.T) {
 }
 
 func TestObservationChainRejectedAcknowledgementsReport(t *testing.T) {
-	all, err := lifecycleFixtures("../../agent-hooks-protocol/interop/lifecycle-scenarios.json")
+	all, err := lifecycleFixtures(interopFixturePath("observation-chain-scenarios.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestObservationChainRejectedAcknowledgementsReport(t *testing.T) {
 	if err := Load(cfg.ReportFile, &report); err != nil {
 		t.Fatal(err)
 	}
-	if err := Load("../../agent-hooks-protocol/interop/lifecycle-scenarios.json", &fixture); err != nil {
+	if err := Load(interopFixturePath("observation-chain-scenarios.json"), &fixture); err != nil {
 		t.Fatal(err)
 	}
 	expected := map[string]Object{}
@@ -182,15 +182,18 @@ func TestObservationChainUnrelatedFailuresRemainFatal(t *testing.T) {
 	for _, source := range []string{"observe", "control", "validate"} {
 		t.Run(source, func(t *testing.T) {
 			sc := lifecycleScenario{ID: "ordinary", Requests: map[string]Object{"a": request("ordinary")}, Chain: Object{"subscriptions": []any{Object{"id": "observer", "mode": "observe"}}}}
-			actual, diagnostics, err := runObservationChain(sc,
-				func(Object) (<-chan lifecycleResult, error) { t.Error("unexpected interception"); return nil, failure },
+			actual, diagnostics, err := runObservationChain(context.Background(), sc,
+				func(context.Context, Object) (<-chan lifecycleResult, error) {
+					t.Error("unexpected interception")
+					return nil, failure
+				},
 				func(string, Object) error {
 					if source == "control" {
 						return failure
 					}
 					return nil
 				},
-				func(Object) error {
+				func(context.Context, Object) error {
 					if source == "observe" {
 						return failure
 					}
@@ -211,19 +214,19 @@ func TestObservationChainUnrelatedFailuresRemainFatal(t *testing.T) {
 
 func TestObservationChainDiagnosticsFollowSubscriptionOrder(t *testing.T) {
 	req := request("ordered-diagnostics")
-	obj(obj(req["params"])["event"])["items"] = []any{Object{"selection": "metadata"}}
+	obj(obj(req["params"])["event"])["items"] = []any{Object{"id": "item-1", "kind": "text", "mediaType": "text/plain", "selection": "metadata"}}
 	sc := lifecycleScenario{ID: "ordered-diagnostics", Requests: map[string]Object{"a": req}, Chain: Object{"subscriptions": []any{
 		Object{"id": "first", "mode": "observe", "content": "omit"},
 		Object{"id": "second", "mode": "observe", "content": "metadata"},
 	}}}
 	secondReturned := make(chan struct{})
-	actual, diagnostics, err := runObservationChain(sc,
-		func(Object) (<-chan lifecycleResult, error) {
+	actual, diagnostics, err := runObservationChain(context.Background(), sc,
+		func(context.Context, Object) (<-chan lifecycleResult, error) {
 			t.Error("unexpected interception")
 			return nil, errors.New("unexpected interception")
 		},
 		func(string, Object) error { return nil },
-		func(note Object) error {
+		func(_ context.Context, note Object) error {
 			if len(array(obj(obj(note["params"])["event"])["items"])) == 0 {
 				<-secondReturned
 				return &lifecycleObservationAcknowledgementError{Status: 202, Response: Object{"from": "first"}}
@@ -240,5 +243,47 @@ func TestObservationChainDiagnosticsFollowSubscriptionOrder(t *testing.T) {
 		if d["subscription"] != subscription || d["eventId"] != "ordered-diagnostics" || obj(d["response"])["from"] != subscription {
 			t.Fatalf("misattributed diagnostic: %#v", d)
 		}
+	}
+}
+
+func TestObservationChainCancellationRetiresBeforeReceiverRelease(t *testing.T) {
+	req := request("interrupt-owned")
+	sc := lifecycleScenario{ID: "interrupt-owned", Requests: map[string]Object{"a": req}, Chain: Object{"interrupt": true, "subscriptions": []any{
+		Object{"id": "first", "mode": "intercept", "failurePolicy": "fail-open", "content": "metadata"},
+		Object{"id": "remaining", "mode": "intercept", "failurePolicy": "fail-open", "content": "metadata"},
+		Object{"id": "audit", "mode": "observe", "content": "metadata"},
+	}}}
+	retired := make(chan struct{})
+	settled, released := false, false
+	actual, diagnostics, err := runObservationChain(context.Background(), sc,
+		func(ctx context.Context, _ Object) (<-chan lifecycleResult, error) {
+			done := make(chan lifecycleResult, 1)
+			go func() { <-ctx.Done(); close(retired); done <- lifecycleResult{err: ctx.Err()} }()
+			return done, nil
+		},
+		func(path string, value Object) error {
+			if path == "/mark" && value["kind"] == "chain-settled" {
+				select {
+				case <-retired:
+				default:
+					t.Error("operation returned before wire retirement")
+				}
+				settled = true
+			}
+			if path == "/release" {
+				if !settled {
+					t.Error("interruption waited for receiver processing")
+				}
+				released = true
+			}
+			return nil
+		},
+		func(context.Context, Object) error { t.Error("interruption started an observation"); return nil },
+		func(string, Object) error { return nil })
+	if err != nil || len(diagnostics) != 0 || !settled || !released {
+		t.Fatalf("actual=%v diagnostics=%v error=%v", actual, diagnostics, err)
+	}
+	if !reflect.DeepEqual(actual["called"], []any{"first"}) || len(array(actual["observations"])) != 0 || !reflect.DeepEqual(actual["input"], obj(obj(req["params"])["event"])["tool"].(map[string]any)["input"]) {
+		t.Fatal(actual)
 	}
 }
