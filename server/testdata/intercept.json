@@ -1,0 +1,35 @@
+{
+  "jsonrpc": "2.0",
+  "id": "evt_http_001",
+  "method": "hooks/intercept",
+  "params": {
+    "protocolVersion": "draft",
+    "event": {
+      "id": "evt_http_001",
+      "source": "https://harness.example/runtime/42",
+      "type": "tool.before",
+      "time": "2026-08-24T08:51:14Z",
+      "session": {
+        "id": "sess_http_123"
+      },
+      "tool": {
+        "name": "write_file",
+        "kind": "file_write",
+        "input": {
+          "path": "README.md",
+          "content": "example"
+        },
+        "origin": "native"
+      },
+      "call": {
+        "id": "call_http_456"
+      },
+      "path": "example"
+    },
+    "capabilities": {
+      "effects": [
+        "deny"
+      ]
+    }
+  }
+}

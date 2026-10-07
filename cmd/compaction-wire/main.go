@@ -4,10 +4,12 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	hooks "github.com/agenthooksprotocol/go-sdk/client"
 	ahp "github.com/agenthooksprotocol/go-sdk/interop"
 	"io"
 	"net"
@@ -38,6 +40,35 @@ func validate(v *ahp.Validator, kind string, value any) error {
 	return e
 }
 func receive(request O, sub string, config O, store string, v *ahp.Validator) O {
+	var proposed O
+	response, err := ahp.ReceiveBoundary(context.Background(), request, func(canonical ahp.Object) (ahp.Object, error) {
+		response := receiveAccepted(canonical, sub, config, store, v)
+		proposed = response
+		if response["error"] != nil {
+			return nil, fmt.Errorf("host content rejected")
+		}
+		return response, nil
+	})
+	if err != nil {
+		// Only deliberate wrong-target atomicity probes bypass response acceptance.
+		// The request has still crossed public server admission before this point.
+		if proposed != nil && proposed["error"] == nil {
+			target := "instructions"
+			if obj(obj(request["params"])["event"])["type"] == "context.compact.after" {
+				target = "summary"
+			}
+			for _, raw := range arr(obj(proposed["result"])["effects"]) {
+				effect := obj(raw)
+				if effect["type"] == "modify" && effect["target"] != target {
+					return proposed
+				}
+			}
+		}
+		return O{"jsonrpc": "2.0", "id": request["id"], "error": O{"code": -32602, "message": "Invalid compaction request"}}
+	}
+	return response
+}
+func receiveAccepted(request O, sub string, config O, store string, v *ahp.Validator) O {
 	failure := O{"jsonrpc": "2.0", "id": request["id"], "error": O{"code": -32602, "message": "Invalid compaction request"}}
 	if validate(v, "intercept-request", request) != nil {
 		return failure
@@ -114,19 +145,14 @@ func exchange(plan O, sub, name string, snapshot O, v *ahp.Validator, trace *[]a
 	credential := obj(obj(plan["credentials"])[sub])
 	boundary := str(snapshot["boundary"])
 	event := O{"id": name + ":" + boundary, "source": "urn:ahp:compaction-host", "time": "2026-09-15T12:00:00Z", "session": O{"id": name}, "type": "context.compact." + boundary}
+	bodies := map[string][]byte{}
 	item := func(id, kind, text, role string) (O, error) {
 		raw := []byte(text)
-		hash := digest(raw)
-		reply, status, e := post(str(plan["endpoint"])+"/upload", str(credential["uploadToken"]), raw, map[string]string{"Content-Type": "application/octet-stream", "AHP-Content-SHA256": hash})
-		if e != nil {
-			return nil, e
-		}
-		var ref O
-		if status != 201 || json.Unmarshal(reply, &ref) != nil || len(ref) != 3 || str(ref["ref"]) == "" || ref["size"] != float64(len(raw)) || ref["sha256"] != hash {
-			return nil, fmt.Errorf("invalid upload confirmation %d", status)
-		}
-		return O{"id": id, "kind": kind, "mediaType": "text/plain", "role": role, "selection": "body", "body": ref}, nil
+		ref := "urn:host:" + id
+		bodies[ref] = raw
+		return O{"id": id, "kind": kind, "mediaType": "text/plain", "role": role, "selection": "body", "body": O{"ref": ref, "size": len(raw), "sha256": digest(raw)}}, nil
 	}
+
 	if boundary == "before" {
 		context, e := item(name+":context", "user", "conversation", "user")
 		if e != nil {
@@ -156,51 +182,61 @@ func exchange(plan O, sub, name string, snapshot O, v *ahp.Validator, trace *[]a
 		}
 	}
 	request := O{"jsonrpc": "2.0", "id": event["id"], "method": "hooks/intercept", "params": O{"protocolVersion": "draft", "event": event, "capabilities": snapshot["capabilities"]}}
-	if e := validate(v, "intercept-request", request); e != nil {
-		return nil, e
-	}
-	raw, _ := json.Marshal(request)
-	var reply []byte
-	if plan["transport"] == "http" {
-		out, status, e := post(str(plan["endpoint"])+"/hooks/intercept", str(credential["token"]), raw, map[string]string{"Content-Type": "application/json"})
-		if e != nil {
+	response, _, err := ahp.PublicBoundary(context.Background(), request, func(ctx context.Context, _ string, raw []byte) ([]byte, error) {
+		var reply []byte
+		if plan["transport"] == "http" {
+			out, status, e := post(str(plan["endpoint"])+"/hooks/intercept", str(credential["token"]), raw, map[string]string{"Content-Type": "application/json"})
+			if e != nil {
+				return nil, e
+			}
+			if status != 200 {
+				return nil, fmt.Errorf("HTTP %d", status)
+			}
+			reply = out
+		} else {
+			command := arr(plan["receiverCommand"])
+			args := []string{}
+			for _, a := range command[1:] {
+				args = append(args, str(a))
+			}
+			args = append(args, "stdio", sub)
+			cmd := exec.CommandContext(ctx, str(command[0]), args...)
+			cmd.Stdin = bytes.NewReader(append(raw, '\n'))
+			cmd.Stderr = os.Stderr
+			var e error
+			reply, e = cmd.Output()
+			if e != nil {
+				return nil, e
+			}
+		}
+		var sent, received O
+		if e := json.Unmarshal(raw, &sent); e != nil {
 			return nil, e
 		}
-		if status != 200 {
-			return nil, fmt.Errorf("HTTP %d", status)
-		}
-		reply = out
-	} else {
-		command := arr(plan["receiverCommand"])
-		args := []string{}
-		for _, a := range command[1:] {
-			args = append(args, str(a))
-		}
-		args = append(args, "stdio", sub)
-		cmd := exec.Command(str(command[0]), args...)
-		cmd.Stdin = bytes.NewReader(append(raw, '\n'))
-		cmd.Stderr = os.Stderr
-		out, e := cmd.Output()
-		if e != nil {
+		if e := json.Unmarshal(reply, &received); e != nil {
 			return nil, e
 		}
-		reply = out
-	}
-	var response O
-	if e := json.Unmarshal(reply, &response); e != nil {
-		return nil, e
-	}
-	*trace = append(*trace, O{"subscription": sub, "request": request, "response": response})
-	if e := validate(v, "intercept-response", response); e != nil {
-		return nil, e
-	}
-	if response["id"] != request["id"] {
-		return nil, fmt.Errorf("correlation")
+		*trace = append(*trace, O{"subscription": sub, "request": sent, "response": received})
+		return reply, nil
+	}, ahp.PublicBoundaryOptions{
+		Content: hooks.ContentOptions{Resolver: func(_ context.Context, ref string) (io.ReadCloser, error) {
+			raw, ok := bodies[ref]
+			if !ok {
+				return nil, fmt.Errorf("unknown host body")
+			}
+			return io.NopCloser(bytes.NewReader(raw)), nil
+		}, AuthorizeContent: func(context.Context, hooks.ContentAuthorization) (bool, error) { return true, nil }, AllowLoopbackHTTP: true},
+		Upload:       O{"endpoint": str(plan["endpoint"]) + "/upload", "timeoutMs": 20000, "maxBytes": 4 << 20},
+		UploadClient: &http.Client{Timeout: 20 * time.Second, Transport: uploadTransport{token: str(credential["uploadToken"])}},
+	})
+	if err != nil {
+		return nil, err
 	}
 	effects, ok := obj(response["result"])["effects"].([]any)
 	if !ok {
 		return nil, fmt.Errorf("effects")
 	}
+
 	out := []ahp.Object{}
 	for _, e := range effects {
 		out = append(out, obj(e))
@@ -286,7 +322,11 @@ func run() error {
 		return e
 	}
 	fmt.Printf("{\"endpoint\":\"http://%s\"}\n", listener.Addr())
-	return http.Serve(listener, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return http.Serve(listener, compactionHTTPHandler(config, store, v))
+}
+
+func compactionHTTPHandler(config O, store string, v *ahp.Validator) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upload := r.URL.Path == "/upload"
 		name := "AHP_COMPACTION_TOKENS"
 		if upload {
@@ -340,6 +380,16 @@ func run() error {
 			w.WriteHeader(400)
 			return
 		}
+		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(receive(request, sub, config, store, v))
-	}))
+	})
+}
+
+// Upload credentials are scoped independently from hook event credentials.
+type uploadTransport struct{ token string }
+
+func (t uploadTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set("Authorization", "Bearer "+t.token)
+	return http.DefaultTransport.RoundTrip(r)
 }

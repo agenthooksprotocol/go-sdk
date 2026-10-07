@@ -3,6 +3,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -48,47 +49,17 @@ func correlatedEvent(message, event O) bool {
 
 func main() {
 	if os.Args[1] == "client" {
-		var p struct {
-			Endpoint, Token, UploadToken string
-			Steps                        []struct {
-				Path, Bytes string
-				Headers     map[string]string
-			}
+		var plan senderPlan
+		if err := json.NewDecoder(io.LimitReader(os.Stdin, 24<<20)).Decode(&plan); err != nil {
+			panic(err)
 		}
-		if e := json.NewDecoder(os.Stdin).Decode(&p); e != nil {
-			panic(e)
+		results, err := runSender(context.Background(), plan, &http.Client{Timeout: 10 * time.Second})
+		if err != nil {
+			panic(err)
 		}
-		client := http.Client{Timeout: 10 * time.Second}
-		results := []any{}
-		for _, step := range p.Steps {
-			b, e := base64.StdEncoding.DecodeString(step.Bytes)
-			if e != nil {
-				panic(e)
-			}
-			req, e := http.NewRequest("POST", p.Endpoint+step.Path, bytes.NewReader(b))
-			if e != nil {
-				panic(e)
-			}
-			token := p.Token
-			if step.Path == "/upload" && p.UploadToken != "" {
-				token = p.UploadToken
-			}
-			req.Header.Set("Authorization", "Bearer "+token)
-			for k, v := range step.Headers {
-				req.Header.Set(k, v)
-			}
-			r, e := client.Do(req)
-			if e != nil {
-				panic(e)
-			}
-			raw, e := io.ReadAll(r.Body)
-			r.Body.Close()
-			if e != nil {
-				panic(e)
-			}
-			results = append(results, O{"status": r.StatusCode, "body": string(raw)})
+		if err = json.NewEncoder(os.Stdout).Encode(results); err != nil {
+			panic(err)
 		}
-		json.NewEncoder(os.Stdout).Encode(results)
 		return
 	}
 	compiler := jsonschema.NewCompiler()
@@ -241,60 +212,66 @@ func main() {
 			if json.Unmarshal(raw, &message) != nil || validate("intercept-request", message) != nil {
 				return 400, nil
 			}
-			event := obj(obj(message["params"])["event"])
-			meta := obj(event["elicitation"])
-			parent := str(event["id"])
-			if event["type"] != "user.elicitation.request" {
-				parent = str(event["parentEventId"])
-			}
-			key := requestKey{str(event["source"]), parent}
-			if !correlatedEvent(message, event) || parent == "" {
-				return 400, nil
-			}
-			var body []byte
-			var summary O
-			switch event["type"] {
-			case "user.elicitation.request":
-				if _, exists := pending[key]; exists {
-					return 400, nil
+			accepted, err := sdk.ReceiveBoundary(context.Background(), message, func(message sdk.Object) (sdk.Object, error) {
+				event := obj(obj(message["params"])["event"])
+				meta := obj(event["elicitation"])
+				parent := str(event["id"])
+				if event["type"] != "user.elicitation.request" {
+					parent = str(event["parentEventId"])
 				}
-				if _, err = sdk.ValidateElicitationMode(str(meta["mode"]), O{"form": O{}, "url": O{}}, "ahp"); err != nil {
-					return 400, nil
+				key := requestKey{str(event["source"]), parent}
+				if !correlatedEvent(message, event) || parent == "" {
+					return nil, fmt.Errorf("host elicitation rejected")
 				}
-				payload, e := sdk.ReadSelectedElicitation(meta, "request", resolve, validate)
-				if e != nil {
-					return 400, nil
-				}
-				if payload != nil {
-					body, _ = resolve(obj(obj(meta["request"])["body"]))
-					summary = O{"request": payload}
-				} else {
-					selection := str(obj(meta["request"])["selection"])
-					if selection == "" {
-						selection = "omit"
+				var body []byte
+				var summary O
+				switch event["type"] {
+				case "user.elicitation.request":
+					if _, exists := pending[key]; exists {
+						return nil, fmt.Errorf("host elicitation rejected")
 					}
-					summary = O{"selection": selection}
-				}
-				pending[key] = message
+					if _, err = sdk.ValidateElicitationMode(str(meta["mode"]), O{"form": O{}, "url": O{}}, "ahp"); err != nil {
+						return nil, fmt.Errorf("host elicitation rejected")
+					}
+					payload, e := sdk.ReadSelectedElicitation(meta, "request", resolve, validate)
+					if e != nil {
+						return nil, fmt.Errorf("host elicitation rejected")
+					}
+					if payload != nil {
+						body, _ = resolve(obj(obj(meta["request"])["body"]))
+						summary = O{"request": payload}
+					} else {
+						selection := str(obj(meta["request"])["selection"])
+						if selection == "" {
+							selection = "omit"
+						}
+						summary = O{"selection": selection}
+					}
+					pending[key] = message
 
-			case "user.elicitation.result":
-				req, ok := pending[key]
-				if !ok {
-					return 400, nil
+				case "user.elicitation.result":
+					req, ok := pending[key]
+					if !ok {
+						return nil, fmt.Errorf("host elicitation rejected")
+					}
+					summary, err = sdk.ValidateElicitationExchange(req, message, resolve, validate, principal, nil)
+					if err != nil {
+						return nil, fmt.Errorf("host elicitation rejected")
+					}
+					if item := obj(meta["result"]); obj(item["body"]) != nil {
+						body, _ = resolve(obj(item["body"]))
+					}
+					delete(pending, key)
+				default:
+					return nil, fmt.Errorf("host elicitation rejected")
 				}
-				summary, err = sdk.ValidateElicitationExchange(req, message, resolve, validate, principal, nil)
-				if err != nil {
-					return 400, nil
-				}
-				if item := obj(meta["result"]); obj(item["body"]) != nil {
-					body, _ = resolve(obj(item["body"]))
-				}
-				delete(pending, key)
-			default:
+				receipts = append(receipts, O{"message": message, "bytes": base64.StdEncoding.EncodeToString(body), "summary": summary})
+				return O{"jsonrpc": "2.0", "id": message["id"], "result": O{"protocolVersion": "draft", "effects": []any{}}}, nil
+			})
+			if err != nil {
 				return 400, nil
 			}
-			receipts = append(receipts, O{"message": message, "bytes": base64.StdEncoding.EncodeToString(body), "summary": summary})
-			return 200, O{"jsonrpc": "2.0", "id": message["id"], "result": O{"protocolVersion": "draft", "effects": []any{}}}
+			return 200, accepted
 		}()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
@@ -314,4 +291,12 @@ func main() {
 	if e = http.Serve(listener, handler); e != nil {
 		panic(e)
 	}
+}
+
+type elicitationUploadTransport struct{ token string }
+
+func (t elicitationUploadTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set("Authorization", "Bearer "+t.token)
+	return http.DefaultTransport.RoundTrip(r)
 }

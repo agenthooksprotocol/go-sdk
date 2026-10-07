@@ -1,8 +1,17 @@
 package interop
 
 import (
+	"bytes"
+	"context"
+	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	ahp "github.com/agenthooksprotocol/go-sdk"
+	hooks "github.com/agenthooksprotocol/go-sdk/client"
+	"github.com/agenthooksprotocol/go-sdk/server"
+	"io"
+	"net/http"
 )
 
 // CompactionHook is a serial host-owned subscription. Run receives a detached
@@ -32,7 +41,7 @@ func CompactionCapabilities(boundary string, observeOnly bool) (Object, error) {
 
 // RunCompaction runs the before pipeline, generation/substitution, then after
 // controls. Only applied=true permits downstream use. Returned bodies are
-// immutable UTF-8 content; upload them before exposing their references on wire.
+// immutable UTF-8 content; upload them before exposing their references on ahp.
 // Observe-only after callbacks run on detached goroutines after settlement; their
 // results, errors and panics cannot change settlement or delay downstream use.
 func RunCompaction(instructions, itemID string, before, after []CompactionHook, generate func(string) (string, error), observeOnly bool) (Object, error) {
@@ -62,6 +71,9 @@ func RunCompaction(instructions, itemID string, before, after []CompactionHook, 
 			snapshot["capabilities"] = caps
 			seen = append(seen, clone(snapshot))
 			effects, err := h.Run(obj(clone(snapshot)))
+			if err == nil {
+				err = acceptCompactionEffects(snapshot, effects)
+			}
 			staged := obj(clone(state))
 			if err == nil {
 				for _, e := range effects {
@@ -184,3 +196,104 @@ func RunCompaction(instructions, itemID string, before, after []CompactionHook, 
 	}
 	return state, nil
 }
+
+// ReceiveBoundary runs a fixture callback behind the public server's canonical
+// admission and response acceptance. Authentication and host effects stay with
+// the adapter. The in-memory HTTP exchange also serves owned stdio fixtures.
+func ReceiveBoundary(ctx context.Context, request Object, callback func(Object) (Object, error)) (Object, error) {
+	h, err := server.NewHandler(server.Handlers{Intercept: func(_ context.Context, req ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
+		var canonical Object
+		raw, err := json.Marshal(req)
+		if err != nil {
+			return ahp.InterceptResponseResult{}, err
+		}
+		if err = json.Unmarshal(raw, &canonical); err != nil {
+			return ahp.InterceptResponseResult{}, err
+		}
+		response, err := callback(canonical)
+		if err != nil {
+			return ahp.InterceptResponseResult{}, err
+		}
+		var result ahp.InterceptResponseResult
+		raw, err = json.Marshal(response["result"])
+		if err == nil {
+			err = json.Unmarshal(raw, &result)
+		}
+		return result, err
+	}}, server.Options{})
+	if err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(request)
+	if err != nil {
+		return nil, err
+	}
+	output := &boundaryOutput{}
+	if err = server.ServeStdio(ctx, io.NopCloser(bytes.NewReader(append(raw, '\n'))), output, h); err != nil {
+		return nil, err
+	}
+	var result Object
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		return nil, err
+	}
+	if result["error"] != nil {
+		return nil, fmt.Errorf("public receiver rejected boundary: %v", result["error"])
+	}
+	return result, nil
+}
+
+// memoryUpload implements the public upload exchange for offline host fixtures.
+// It does not bypass client hashing, size bounds, confirmation or projection.
+// No resulting reference leaves this isolated boundary.
+type memoryUpload struct{}
+
+func (memoryUpload) RoundTrip(req *http.Request) (*http.Response, error) {
+	raw, err := io.ReadAll(io.LimitReader(req.Body, 4<<20+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > 4<<20 {
+		return nil, fmt.Errorf("fixture upload limit")
+	}
+	sum := fmt.Sprintf("%x", sha256.Sum256(raw))
+	reply := jsonBytes(Object{"ref": "urn:fixture:" + sum, "size": len(raw), "sha256": sum})
+	return &http.Response{StatusCode: 201, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(bytes.NewReader(reply)), Request: req}, nil
+}
+
+func acceptCompactionEffects(snapshot Object, effects []Object) error {
+	boundary := str(snapshot["boundary"])
+	target, body, role := "instructions", str(snapshot["instructions"]), "system"
+	if boundary == "after" {
+		target = "summary"
+		role = "assistant"
+		body = str(obj(snapshot["bodies"])[str(obj(snapshot["summary"])["ref"])])
+	}
+	raw := []byte(body)
+	descriptor := Object{"id": "fixture-" + target, "kind": target, "role": role, "mediaType": "text/plain", "selection": "body", "body": Object{"ref": "urn:host:body", "size": len(raw), "sha256": fmt.Sprintf("%x", sha256.Sum256(raw))}}
+	ev := Object{"id": "fixture-" + boundary, "source": "urn:fixture:compaction", "time": "2026-09-15T12:00:00Z", "type": "context.compact." + boundary, target: descriptor}
+	if boundary == "before" {
+		ev["trigger"] = "manual"
+		ev["items"] = []any{}
+	} else {
+		ev["removed"] = []any{}
+		ev["execution"] = Object{"status": "executed"}
+		if snapshot["candidate"] != nil {
+			ev["execution"] = Object{"status": "skipped", "reason": "supplied_result"}
+		}
+		ev["parentEventId"] = "fixture-before"
+	}
+	request := Object{"jsonrpc": "2.0", "id": ev["id"], "method": "hooks/intercept", "params": Object{"protocolVersion": "draft", "event": ev, "capabilities": snapshot["capabilities"]}}
+	_, _, err := PublicBoundary(context.Background(), request, func(_ context.Context, _ string, sent []byte) ([]byte, error) {
+		var req Object
+		if err := json.Unmarshal(sent, &req); err != nil {
+			return nil, err
+		}
+		return jsonBytes(Object{"jsonrpc": "2.0", "id": req["id"], "result": Object{"protocolVersion": "draft", "effects": effects}}), nil
+	}, PublicBoundaryOptions{Content: hooks.ContentOptions{Resolver: func(context.Context, string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(raw)), nil }}, Upload: Object{"endpoint": "https://fixture.invalid/upload", "timeoutMs": 1000, "maxBytes": 4 << 20}, UploadClient: &http.Client{Transport: memoryUpload{}}})
+	return err
+}
+
+// boundaryOutput captures the public stdio adapter's single bounded response.
+type boundaryOutput struct{ bytes.Buffer }
+
+func (*boundaryOutput) Close() error { return nil }

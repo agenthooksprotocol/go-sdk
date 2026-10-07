@@ -1,8 +1,14 @@
 package interop
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	ahp "github.com/agenthooksprotocol/go-sdk"
+	hooks "github.com/agenthooksprotocol/go-sdk/client"
+	"io"
+	"net/http"
 )
 
 // ValidateElicitationExchange binds complete uploaded MCP objects to normalized
@@ -28,6 +34,17 @@ func ValidateElicitationExchange(request, result Object, resolve func(Object) ([
 	}
 	if err := ValidateElicitationCorrelation(request, result); err != nil {
 		return nil, err
+	}
+	if effect != nil {
+		// Legacy single-effect checks share public admission with atomic apply.
+		// Return/deny belong to the request; only modify dispatches the result.
+		var effectResult Object
+		if effect["type"] == "modify" {
+			effectResult = result
+		}
+		if err := acceptElicitationEffects(request, effectResult, resolve, []any{effect}); err != nil {
+			return nil, err
+		}
 	}
 	req, res := obj(re["elicitation"]), obj(se["elicitation"])
 	payload, err := ReadSelectedElicitation(req, "request", resolve, validate)
@@ -149,6 +166,10 @@ func ApplyElicitationEffects(request, result Object, resolve func(Object) ([]byt
 		if err := ValidateElicitationCorrelation(request, result); err != nil {
 			return nil, err
 		}
+	}
+	// Admission belongs to the public runtime, before fixture body resolution.
+	if err := acceptElicitationEffects(request, result, resolve, effects); err != nil {
+		return nil, err
 	}
 	meta := obj(event["elicitation"])
 	payload, err := ReadSelectedElicitation(meta, "request", resolve, validate)
@@ -298,6 +319,92 @@ func ValidateElicitationCorrelation(request, result Object) error {
 	parent, ok := res["parentEventId"].(string)
 	if !ok || parent != req["id"] || res["source"] != req["source"] || obj(res["session"])["id"] != obj(req["session"])["id"] {
 		return fmt.Errorf("elicitation parent/source/session mismatch")
+	}
+	return nil
+}
+
+// acceptElicitationEffects uses the same public typed dispatch as wire adapters.
+// The offline fixture owns the isolated upload sink and candidate effects only;
+// pinned MCP validation, atomic acceptance and snapshots belong to the runtime.
+func acceptElicitationEffects(request, result Object, resolve func(Object) ([]byte, error), effects []any) error {
+	return acceptElicitationEffectsObserved(request, result, resolve, effects, nil)
+}
+
+// The optional observer records actual hook deliveries for admission regressions.
+func acceptElicitationEffectsObserved(request, result Object, resolve func(Object) ([]byte, error), effects []any, delivered func(string)) error {
+	boundaries := []Object{request}
+	if result != nil {
+		boundaries = append(boundaries, result)
+	}
+	events := []any{}
+	names := []any{}
+	refs := map[string]Object{}
+	for _, req := range boundaries {
+		p := obj(req["params"])
+		e := obj(p["event"])
+		name := str(e["type"])
+		caps := obj(clone(p["capabilities"]))
+		events = append(events, Object{"event": name, "modes": []any{"intercept"}, "capabilities": caps})
+		names = append(names, name)
+		for _, field := range []string{"request", "result"} {
+			ref := obj(obj(obj(e["elicitation"])[field])["body"])
+			if ref != nil {
+				refs[str(ref["ref"])] = ref
+			}
+		}
+	}
+	reg := ahp.ParseRegistration(jsonBytes(Object{"protocolVersion": "draft", "hooks": []any{Object{"id": "org.agenthooks.elicitation-fixture", "transport": Object{"type": "http", "url": "https://fixture.invalid/hooks"}, "subscriptions": []any{Object{"events": names, "mode": "intercept", "timeoutMs": 1000, "failurePolicy": "fail-closed", "content": Object{"default": "body"}, "upload": Object{"endpoint": "https://fixture.invalid/upload", "timeoutMs": 1000, "maxBytes": 4 << 20}}}}}}))
+	if !reg.OK {
+		return fmt.Errorf("invalid elicitation fixture registration")
+	}
+	var manifest ahp.StaticCapabilityManifest
+	if err := json.Unmarshal(jsonBytes(Object{"events": events, "gaps": []any{}, "transports": []any{"http"}, "authentication": []any{}, "toolPaths": []any{"execute"}, "contentCategories": []any{"text"}, "limits": Object{"maxContinuations": 4}, "managedPolicy": Object{"scopes": []any{"user"}, "disableable": true}, "correlationIdentityFields": []any{"event.id"}}), &manifest); err != nil {
+		return err
+	}
+	transport := &fixtureTransport{exchange: func(_ context.Context, _ string, raw []byte) ([]byte, error) {
+		var req Object
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, err
+		}
+		if delivered != nil {
+			delivered(str(obj(obj(req["params"])["event"])["type"]))
+		}
+		selected := []any{}
+		if result == nil || obj(obj(req["params"])["event"])["type"] == "user.elicitation.result" {
+			selected = effects
+		}
+		return jsonBytes(Object{"jsonrpc": "2.0", "id": req["id"], "result": Object{"protocolVersion": "draft", "effects": selected}}), nil
+	}}
+	c, err := hooks.New(reg.Value, hooks.Options{Source: str(obj(obj(request["params"])["event"])["source"]), Manifest: manifest, EventClient: &http.Client{Transport: transport}, UploadClient: &http.Client{Transport: memoryUpload{}}, Content: hooks.ContentOptions{Resolver: func(_ context.Context, ref string) (io.ReadCloser, error) {
+		descriptor, ok := refs[ref]
+		if !ok {
+			return nil, fmt.Errorf("unknown original body")
+		}
+		raw, err := resolve(descriptor)
+		if err != nil {
+			return nil, err
+		}
+		return io.NopCloser(bytes.NewReader(raw)), nil
+	}, AuthorizeContent: func(context.Context, hooks.ContentAuthorization) (bool, error) { return true, nil }}})
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	var snapshot *hooks.ElicitationRequest
+	for _, req := range boundaries {
+		e := obj(obj(req["params"])["event"])
+		var opts []hooks.InterceptOption
+		if snapshot != nil {
+			opts = append(opts, hooks.WithElicitationRequest(snapshot))
+		}
+		accepted, err := dispatchPublicBoundary(context.Background(), c, str(e["type"]), e, opts)
+		if err != nil {
+			return err
+		}
+		if len(accepted.Errors) > 0 {
+			return accepted.Errors[0]
+		}
+		snapshot = accepted.Snapshot
 	}
 	return nil
 }

@@ -7,7 +7,8 @@ import (
 )
 
 // Apply stages a whole response in private memory, committing no partial state
-// on structural, capability, input-contract, or flow-admission failure.
+// on structural, capability, or flow-admission failure. Host input validation
+// runs after protocol acceptance and can refuse execution without rejection.
 func Apply(request, response Object) (Object, error) {
 	if !reflect.DeepEqual(request["id"], response["id"]) {
 		return nil, fmt.Errorf("response correlation mismatch")
@@ -122,13 +123,7 @@ func Apply(request, response Object) (Object, error) {
 				input[k] = x
 			}
 		}
-		// The shared synthetic complete_task tool requires a positive integral task.
-		if _, present := obj(initial)["task"]; present {
-			n, ok := input["task"].(float64)
-			if !ok || n <= 0 || math.Trunc(n) != n {
-				return nil, fmt.Errorf("invalid effective tool input")
-			}
-		}
+
 	}
 	if !reflect.DeepEqual(initial, input) {
 		candidate = nil
@@ -185,6 +180,16 @@ func Apply(request, response Object) (Object, error) {
 		candidate = nil
 	}
 	result := Object{"decision": decision, "executed": decision == "allow" && candidate == nil && flow != "stop" && event["type"] == "tool.before", "input": input, "messages": messages}
+	// Tool schema validation is host policy, not protocol response validation.
+	// Preserve accepted modifications and messages even when execution is refused.
+	if _, required := obj(initial)["task"]; required {
+		n, ok := input["task"].(float64)
+		if !ok || n <= 0 || math.Trunc(n) != n {
+			result["executed"] = false
+			result["hostInputRejected"] = true
+		}
+	}
+
 	if candidate != nil && decision == "allow" && flow != "stop" {
 		result["result"] = obj(candidate)["value"]
 	}

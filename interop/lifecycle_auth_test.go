@@ -17,7 +17,7 @@ func TestLifecycleAuthParity(t *testing.T) {
 	t.Setenv("AHP_GO_LIFE_UPLOAD", "independent-upload-test-token")
 	t.Setenv("AHP_INTEROP_UNAUTHORIZED_UPLOAD_TOKEN", "unauthorized-upload-test-token")
 	var all Object
-	if e := Load("../../agent-hooks-protocol/interop/lifecycle-scenarios.json", &all); e != nil {
+	if e := Load(interopFixturePath("lifecycle-scenarios.json"), &all); e != nil {
 		t.Fatal(e)
 	}
 	for _, mode := range []string{"none", "bearer", "oauth", "workload", "mtls", "stdio"} {
@@ -27,7 +27,16 @@ func TestLifecycleAuthParity(t *testing.T) {
 			scenarios := []any{}
 			for _, raw := range array(all["scenarios"]) {
 				s := obj(raw)
-				if mode != "stdio" && s["transports"] != nil && !has(s["transports"], "http") {
+				// The older sibling fixture predates the shared runner's stdio
+				// applicability annotations for schedules requiring two in flight.
+				if mode == "stdio" && (s["id"] == "late-old-while-next-pending" || s["id"] == "request-specific-acceptance" || s["id"] == "two-staged-reverse-acceptance") {
+					continue
+				}
+				applicableTransport := "http"
+				if mode == "stdio" {
+					applicableTransport = "stdio"
+				}
+				if s["transports"] != nil && !has(s["transports"], applicableTransport) {
 					continue
 				}
 				scenarios = append(scenarios, s)
@@ -148,8 +157,7 @@ func TestLifecycleAuthParity(t *testing.T) {
 						t.Fatalf("%s %s: got %v want %v", sc["id"], key, actual[key], want)
 					}
 				}
-				for _, raw := range array(obj(sc["chainProof"])["requests"]) {
-					req := obj(raw)
+				for _, req := range expectedChainRequests(sc) {
 					id := lifecycleID(req)
 					chainRequests[id] = append(chainRequests[id], req)
 				}

@@ -1,7 +1,6 @@
 package interop
 
 import (
-	"bufio"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -12,6 +11,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/agenthooksprotocol/go-sdk/server"
 )
 
 func Capabilities() Object {
@@ -33,7 +34,7 @@ type serverState struct {
 	lineage   TaskLineage
 }
 
-func (s *serverState) intercept(ctx context.Context, b []byte) ([]byte, error) {
+func (s *serverState) fixtureIntercept(ctx context.Context, b []byte) ([]byte, error) {
 	req, e := s.validator.Validate("intercept-request", b)
 	if e != nil {
 		return nil, e
@@ -172,25 +173,16 @@ func Server(ctx context.Context, c Config) error {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(Capabilities())
 		})
+		publicHandler, err := state.publicHandler(nil)
+		if err != nil {
+			return err
+		}
 		m.HandleFunc("POST /intercept", func(w http.ResponseWriter, r *http.Request) {
 			if !c.Auth.authorize(r) {
 				http.Error(w, "unauthorized", 401)
 				return
 			}
-			b, e := io.ReadAll(io.LimitReader(r.Body, (4<<20)+1))
-			if e != nil || len(b) > 4<<20 {
-				http.Error(w, "invalid body", 400)
-				return
-			}
-			ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
-			defer cancel()
-			out, e := state.intercept(ctx, b)
-			if e != nil {
-				http.Error(w, "request rejected", 400)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.Write(out)
+			publicHandler.ServeHTTP(w, r)
 		})
 		ahpServer = &http.Server{Handler: m, ReadHeaderTimeout: 5 * time.Second}
 		defer ahpServer.Close()
@@ -200,73 +192,15 @@ func Server(ctx context.Context, c Config) error {
 		return e
 	}
 	if c.Transport == "stdio" {
-		done := make(chan error, 1)
-		go func() {
-			scanner := bufio.NewScanner(os.Stdin)
-			scanner.Buffer(make([]byte, 4096), 4<<20)
-			for scanner.Scan() {
-				b := append([]byte(nil), scanner.Bytes()...)
-				var req Object
-				if json.Unmarshal(b, &req) != nil {
-					json.NewEncoder(os.Stdout).Encode(rpcError(nil))
-					continue
-				}
-				if req["method"] == "hooks/capabilities" {
-					if _, err := v.Validate("capabilities-request", b); err != nil {
-						json.NewEncoder(os.Stdout).Encode(rpcError(req["id"]))
-						continue
-					}
-					response := Object{"jsonrpc": "2.0", "id": req["id"], "result": Object{"protocolVersion": "draft", "manifest": Object{
-						"events":     []any{Object{"event": "tool.before", "modes": []any{"intercept"}, "capabilities": ToolCapabilities()}, Object{"event": "turn.finish.before", "modes": []any{"intercept"}, "capabilities": Object{"effects": []any{"flow", "message"}, "flow": obj(Capabilities()["flow"])}}},
-						"gaps":       []any{Object{"path": "events.other", "reason": "Synthetic tool.before and turn.finish.before application only"}},
-						"transports": []any{"http", "stdio"}, "authentication": []any{"bearer", "oauth"},
-						"toolPaths": []any{"native"}, "contentCategories": []any{}, "limits": Object{"maxContinuations": 4},
-						"managedPolicy": Object{"scopes": []any{"user"}, "disableable": true}, "correlationIdentityFields": []any{"event.id", "call.id"},
-					}}}
-					encoded, err := json.Marshal(response)
-					if err == nil {
-						_, err = v.Validate("capabilities-response", encoded)
-					}
-					if err != nil {
-						json.NewEncoder(os.Stdout).Encode(rpcError(req["id"]))
-						continue
-					}
-					frame, err := ndjson(encoded)
-					if err != nil {
-						done <- err
-						return
-					}
-					if _, err = os.Stdout.Write(frame); err != nil {
-						done <- err
-						return
-					}
-					continue
-				}
-				call, cancel := context.WithTimeout(ctx, 20*time.Second)
-				out, e := state.intercept(call, b)
-				cancel()
-				if e != nil {
-					json.NewEncoder(os.Stdout).Encode(rpcError(req["id"]))
-				} else {
-					frame, err := ndjson(out)
-					if err != nil {
-						json.NewEncoder(os.Stdout).Encode(rpcError(req["id"]))
-						continue
-					}
-					if _, err = os.Stdout.Write(frame); err != nil {
-						done <- err
-						return
-					}
-				}
-			}
-			done <- scanner.Err()
-		}()
-		select {
-		case e := <-done:
-			return e
-		case <-ctx.Done():
+		handler, err := state.publicHandler(os.Stdout)
+		if err != nil {
+			return err
+		}
+		err = server.ServeStdio(ctx, os.Stdin, os.Stdout, handler)
+		if ctx.Err() != nil {
 			return nil
 		}
+		return err
 	}
 	<-ctx.Done()
 	return nil

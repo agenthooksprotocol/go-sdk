@@ -1,0 +1,123 @@
+{
+  "provenance": {
+    "source": "Reviewed shared interop/scenarios.json from /tmp/ahp-shared-runners, five hostExpected entries",
+    "authority": "spec/draft/base/composition.md; host application schemas are execution policy, not protocol-response validity",
+    "scope": "Test-only overlay for sibling fixtures lacking hostExpected. Requests, responses, expectError, and protocol rejection expectations are unchanged.",
+    "sourceSHA256": "0c78f59d85ba9fe18ed64012cab334e022dd95ac971a265272e3ade4961475eb"
+  },
+  "scenarios": {
+    "invalid-task-zero-rejects-staged-message": {
+      "tags": [
+        "state",
+        "modify",
+        "negative",
+        "application-invalid",
+        "atomic-rejection"
+      ],
+      "hostExpected": {
+        "decision": "allow",
+        "executed": false,
+        "input": {
+          "task": 0,
+          "options": {
+            "recursive": true,
+            "limit": 20
+          },
+          "keep": "yes"
+        },
+        "messages": [
+          "Visible only after acceptance"
+        ]
+      }
+    },
+    "invalid-task-fraction-rejects-staged-message": {
+      "tags": [
+        "state",
+        "modify",
+        "negative",
+        "application-invalid",
+        "atomic-rejection"
+      ],
+      "hostExpected": {
+        "decision": "allow",
+        "executed": false,
+        "input": {
+          "task": 1.5,
+          "options": {
+            "recursive": true,
+            "limit": 20
+          },
+          "keep": "yes"
+        },
+        "messages": [
+          "Visible only after acceptance"
+        ]
+      }
+    },
+    "invalid-task-boolean-rejects-staged-message": {
+      "tags": [
+        "state",
+        "modify",
+        "negative",
+        "application-invalid",
+        "atomic-rejection"
+      ],
+      "hostExpected": {
+        "decision": "allow",
+        "executed": false,
+        "input": {
+          "task": true,
+          "options": {
+            "recursive": true,
+            "limit": 20
+          },
+          "keep": "yes"
+        },
+        "messages": [
+          "Visible only after acceptance"
+        ]
+      }
+    },
+    "invalid-task-missing-rejects-staged-message": {
+      "tags": [
+        "state",
+        "modify",
+        "negative",
+        "application-invalid",
+        "atomic-rejection"
+      ],
+      "hostExpected": {
+        "decision": "allow",
+        "executed": false,
+        "input": {},
+        "messages": [
+          "Visible only after acceptance"
+        ]
+      }
+    },
+    "later-invalid-modify-rolls-back-earlier-modify": {
+      "tags": [
+        "state",
+        "modify",
+        "negative",
+        "application-invalid",
+        "atomic-rejection"
+      ],
+      "hostExpected": {
+        "decision": "allow",
+        "executed": false,
+        "input": {
+          "task": -1,
+          "options": {
+            "recursive": true,
+            "limit": 20
+          },
+          "keep": "yes"
+        },
+        "messages": [
+          "Visible only after acceptance"
+        ]
+      }
+    }
+  }
+}

@@ -21,24 +21,15 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: agenthooksprotocol/agent-hooks-protocol
-          ref: 67d30b4a409d06796e141483171877b791cb9abc
+          ref: 7a3353d92c14514215cc092a930685b0947f0bc1
           path: agent-hooks-protocol
-      - name: Use the SDK schema snapshot
-        run: |
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          lock = json.loads(Path('ahp-codegen.lock.json').read_text())
-          schemas = json.loads(Path('schemas.json').read_text())
-          assert len(lock['documents']) == len(schemas)
-          for document, schema in zip(lock['documents'], schemas):
-              path = Path('../agent-hooks-protocol') / document['path']
-              path.write_text(json.dumps(schema))
-          PY
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.24.x"
+          go-version: "1.27.x"
           cache-dependency-path: go-sdk/go.sum
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - name: Check generated artifacts
+        run: python3 ../agent-hooks-protocol/tools/generate_sdk.py --go-sdk . --check
       - name: Check formatting
         run: test -z "$(gofmt -l .)"
       - run: go vet ./...

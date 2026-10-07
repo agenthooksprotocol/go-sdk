@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	ahp "github.com/agenthooksprotocol/go-sdk/interop"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -45,7 +48,7 @@ func TestUploadFailureSuppressesEvent(t *testing.T) {
 			}))
 			defer server.Close()
 			trace := []any{}
-			_, err := exchange(O{"endpoint": server.URL, "transport": "http", "credentials": O{"scope": O{"token": "event-secret", "uploadToken": "upload-secret"}}}, "scope", "case", O{"boundary": "before"}, nil, &trace)
+			_, err := exchange(O{"endpoint": server.URL, "transport": "http", "credentials": O{"scope": O{"token": "event-secret", "uploadToken": "upload-secret"}}}, "scope", "case", O{"boundary": "before", "instructions": "base", "capabilities": compactionTestCaps()}, nil, &trace)
 			if err == nil || calls != 1 || len(trace) != 0 {
 				t.Fatalf("err=%v calls=%d trace=%v", err, calls, trace)
 			}
@@ -58,3 +61,58 @@ func TestStorageScopeIsIndependentOfReference(t *testing.T) {
 		t.Fatal("cross-principal storage collision")
 	}
 }
+
+func TestCompactionHTTPRepliesUseJSON(t *testing.T) {
+	validator, err := ahp.NewValidator("../../../agent-hooks-protocol/schema/draft")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AHP_COMPACTION_TOKENS", `{"event-token":"scope"}`)
+	handler := compactionHTTPHandler(O{"scope": O{"effects": []any{}}}, t.TempDir(), validator)
+	peer := httptest.NewServer(handler)
+	defer peer.Close()
+	for _, invalid := range []bool{false, true} {
+		name := "success"
+		if invalid {
+			name = "rpc-error"
+		}
+		t.Run(name, func(t *testing.T) {
+			eventID := "compact"
+			if invalid {
+				eventID = "mismatched-event"
+			}
+			request := O{"jsonrpc": "2.0", "id": "compact", "method": "hooks/intercept", "params": O{"protocolVersion": "draft", "event": O{"id": eventID, "source": "urn:test:host", "time": "2026-09-15T12:00:00Z", "type": "context.compact.before", "trigger": "manual", "items": []any{}}, "capabilities": O{"effects": []any{}}}}
+			raw, err := json.Marshal(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req, err := http.NewRequest(http.MethodPost, peer.URL+"/hooks/intercept", bytes.NewReader(raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", "Bearer event-token")
+			req.Header.Set("Content-Type", "application/json")
+			reply, err := peer.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reply.Body.Close()
+			media, _, err := mime.ParseMediaType(reply.Header.Get("Content-Type"))
+			if err != nil || media != "application/json" {
+				t.Fatalf("JSON-RPC reply media type=%q error=%v", reply.Header.Get("Content-Type"), err)
+			}
+			var envelope O
+			if err := json.NewDecoder(reply.Body).Decode(&envelope); err != nil {
+				t.Fatal(err)
+			}
+			if reply.StatusCode != http.StatusOK || envelope["jsonrpc"] != "2.0" || envelope["id"] != "compact" {
+				t.Fatalf("invalid response status=%d envelope=%v", reply.StatusCode, envelope)
+			}
+			if (envelope["error"] != nil) != invalid {
+				t.Fatalf("invalid=%v envelope=%v", invalid, envelope)
+			}
+		})
+	}
+}
+
+func compactionTestCaps() O { caps, _ := ahp.CompactionCapabilities("before", false); return caps }

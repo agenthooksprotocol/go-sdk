@@ -28,7 +28,7 @@ func TestAcceptedPrefixSurvivesLaterResponses(t *testing.T) {
 		t.Fatal("later effects revived stopped operation", got, e)
 	}
 	// The staged append and replacement are discarded together on failure.
-	bad := response("serial", Object{"type": "inject", "target": "context", "operation": "append", "deliverAt": "now", "value": "discard"}, Object{"type": "modify", "target": "input", "operation": "merge", "value": Object{"task": float64(0)}})
+	bad := response("serial", Object{"type": "inject", "target": "context", "operation": "append", "deliverAt": "now", "value": "discard"}, Object{"type": "modify", "target": "input", "operation": "merge", "value": []any{}})
 	if state, e := Apply(req, bad); e == nil || state != nil {
 		t.Fatal("partial publication", state, e)
 	}
