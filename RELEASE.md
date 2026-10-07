@@ -11,13 +11,17 @@ version file or registry publishing job is needed.
    workflows. Enable **Allow GitHub Actions to create and approve pull requests**
    under **Settings → Actions → General → Workflow permissions** where permitted
    by organization policy.
-2. Create an organization-approved fine-grained personal access token scoped only
-   to this repository, with **Contents: Read and write** and **Pull requests: Read
-   and write**. Store it as the Actions repository secret `RELEASE_PLEASE_TOKEN`.
-   Its owner must retain repository access; renew the token before it expires.
-   A PAT, rather than `GITHUB_TOKEN`, allows release PRs to trigger normal CI.
+2. Use the existing **Agent Hooks Protocol Bot** GitHub App. Install it on this
+   repository with **Contents: read/write** and **Pull requests: read/write**.
+   Set Actions variable **`RELEASE_APP_ID`** to its App ID and Actions secret
+   **`RELEASE_APP_PRIVATE_KEY`** to a PEM private key generated in its settings.
+   Organization-level values may be shared with just the four SDK repositories.
+   The workflow mints a short-lived installation token scoped to this repository
+   and those two permissions; it is revoked when the job ends. Release PRs,
+   tags, and GitHub releases use the bot identity and trigger normal PR CI.
+   No personal access token is needed. Keep branch protection enabled.
 3. Retain required CI checks and normal review rules for `main`. Ensure repository
-   rules allow the token owner to create release PR branches, `v*` tags, and GitHub
+   rules allow the App installation to create release PR branches, `v*` tags, and GitHub
    releases. The existing CI toolchains and pinned canonical fixtures must be
    available; release creation is blocked if that CI fails.
 
