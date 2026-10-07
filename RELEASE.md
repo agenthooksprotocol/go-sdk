@@ -27,11 +27,10 @@ version file or registry publishing job is needed.
   existing CI through `workflow_call`; only after it succeeds does Release Please
   create/update a release PR or create the GitHub release for a merged release PR.
   The ordinary CI workflow remains enabled as well.
-- Review and merge the generated release PR normally. The manifest and explicit
-  `release-as: 0.1.0` bootstrap pin agree on the first intended release. **After the
-  first release, remove `release-as` from `release-please-config.json` before
-  preparing another release.** Leave the manifest at the last released version;
-  Release Please maintains it thereafter.
+- Review and merge the generated release PR normally. The manifest starts at
+  `0.0.0`, a sentinel indicating no previous release. `initial-version: 0.1.0`
+  affects only the first release; subsequent versions follow conventional commits.
+  Release Please maintains the manifest at the last released version thereafter.
 - A merged release PR is tagged by Release Please directly in this workflow.
   There is no separate tag-triggered workflow, registry upload, registry probe,
   automated install check, or post-release verification job.
