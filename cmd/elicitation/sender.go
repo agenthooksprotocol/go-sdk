@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 
 	hooks "github.com/agenthooksprotocol/go-sdk/client"
+	"github.com/agenthooksprotocol/go-sdk/internal/canonical"
 	sdk "github.com/agenthooksprotocol/go-sdk/interop"
 )
 
@@ -45,13 +47,21 @@ func senderSources(p senderPlan) (map[string][]byte, error) {
 		if len(raw) > 4<<20 {
 			return nil, fmt.Errorf("source body exceeds limit")
 		}
-		ref := str(source.Descriptor["ref"])
-		if ref == "" || source.Descriptor["sha256"] != hash(raw) {
-			return nil, fmt.Errorf("invalid host source descriptor")
+		// Local contentSources retain receipt evidence. This metadata verifies
+		// supplied bytes; it is never copied into an event reference.
+		evidence, err := json.Marshal(source.Descriptor)
+		if err != nil || canonical.Validate("content-upload-receipt", evidence) != nil {
+			return nil, fmt.Errorf("invalid host source receipt")
 		}
-		if size, ok := source.Descriptor["size"].(float64); !ok || size != float64(len(raw)) {
-			return nil, fmt.Errorf("invalid host source size")
+		var receipt struct {
+			Ref    string
+			Size   float64
+			Sha256 string
 		}
+		if json.Unmarshal(evidence, &receipt) != nil || receipt.Size != float64(len(raw)) || receipt.Sha256 != hash(raw) {
+			return nil, fmt.Errorf("host source receipt does not match bytes")
+		}
+		ref := receipt.Ref
 		if prior, ok := sources[ref]; ok {
 			if !bytes.Equal(prior, raw) {
 				return nil, fmt.Errorf("mutable source reference")
@@ -122,7 +132,8 @@ func sendOrdinary(ctx context.Context, p senderPlan, step senderStep, message O,
 	defer state.Close()
 	event := obj(obj(message["params"])["event"])
 	stage := "request"
-	options := sdk.PublicBoundaryOptions{Content: hooks.ContentOptions{Resolver: resolver(sources), AllowLoopbackHTTP: true}, Upload: O{"endpoint": p.Endpoint + "/upload", "timeoutMs": 10000, "maxBytes": 4 << 20}, UploadClient: &http.Client{Transport: elicitationUploadTransport{token: p.UploadToken}}}
+	receipts := &elicitationReceiptTransport{base: elicitationUploadTransport{token: p.UploadToken}, receipts: map[string]O{}}
+	options := sdk.PublicBoundaryOptions{Content: hooks.ContentOptions{Resolver: resolver(sources), AllowLoopbackHTTP: true}, Upload: O{"endpoint": p.Endpoint + "/upload", "timeoutMs": 10000, "maxBytes": 4 << 20}, UploadClient: &http.Client{Transport: receipts}}
 	if event["type"] == "user.elicitation.result" {
 		stage = "result"
 		var pin pinnedRequest
@@ -151,7 +162,14 @@ func sendOrdinary(ctx context.Context, p senderPlan, step senderStep, message O,
 		originalItem := obj(obj(event["elicitation"])[stage])
 		projectedItem := obj(obj(obj(obj(projected["params"])["event"])["elicitation"])[stage])
 		if ref := obj(projectedItem["body"]); ref != nil {
-			confirmations = append(confirmations, O{"sourceRef": obj(originalItem["body"])["ref"], "descriptor": ref})
+			// The SDK calls this exchange only after verifying the upload receipt
+			// against the actual sent bytes. Preserve that receiver evidence,
+			// not the intentionally ref-only projected event body.
+			receipt, ok := receipts.receipt(str(ref["ref"]))
+			if !ok {
+				return nil, fmt.Errorf("missing verified upload receipt")
+			}
+			confirmations = append(confirmations, O{"sourceRef": obj(originalItem["body"])["ref"], "descriptor": receipt})
 		}
 		request, err := http.NewRequestWithContext(ctx, "POST", p.Endpoint+step.Path, bytes.NewReader(raw))
 		if err != nil {
@@ -248,4 +266,49 @@ func runSender(ctx context.Context, p senderPlan, client *http.Client) ([]any, e
 		results = append(results, O{"status": reply.StatusCode, "body": string(raw)})
 	}
 	return results, nil
+}
+
+// elicitationReceiptTransport retains exact receiver-provided confirmation fields
+// for one boundary. These are candidates until the SDK accepts the unchanged
+// response and invokes its event exchange; no local descriptor synthesizes them.
+type elicitationReceiptTransport struct {
+	base     http.RoundTripper
+	mu       sync.Mutex
+	receipts map[string]O
+}
+
+func (t *elicitationReceiptTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	response, err := t.base.RoundTrip(request)
+	if err != nil {
+		return nil, err
+	}
+	encoded, err := io.ReadAll(io.LimitReader(response.Body, (64<<10)+1))
+	closeErr := response.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	if len(encoded) > 64<<10 {
+		return nil, fmt.Errorf("upload receipt exceeds limit")
+	}
+	response.Body = io.NopCloser(bytes.NewReader(encoded))
+	if response.StatusCode == http.StatusCreated && canonical.Validate("content-upload-receipt", encoded) == nil {
+		var receipt O
+		if err := json.Unmarshal(encoded, &receipt); err != nil {
+			return nil, err
+		}
+		t.mu.Lock()
+		t.receipts[str(receipt["ref"])] = receipt
+		t.mu.Unlock()
+	}
+	return response, nil
+}
+
+func (t *elicitationReceiptTransport) receipt(ref string) (O, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	receipt, ok := t.receipts[ref]
+	return receipt, ok
 }

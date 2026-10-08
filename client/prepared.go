@@ -3,7 +3,6 @@ package client
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -187,7 +186,7 @@ func (p *preparedBoundary) resolve(ctx context.Context, c *Hooks, item map[strin
 	}
 	body := sdkObj(item["body"])
 	ref := compositionString(body["ref"])
-	if ref == "" {
+	if ref == "" || len(body) != 1 || item["size"] != nil || item["sha256"] != nil {
 		return errors.New("modification requires an available content body")
 	}
 	raw, ok := p.bodies[ref]
@@ -210,12 +209,6 @@ func (p *preparedBoundary) resolve(ctx context.Context, c *Hooks, item map[strin
 		if int64(len(raw)) > p.limit {
 			return errors.New("prepared content exceeds byte limit")
 		}
-	}
-	if err := contentMatches(body, raw); err != nil {
-		return err
-	}
-	if err := contentMatches(item, raw); err != nil {
-		return err
 	}
 	if _, err := preparedDecode(item, raw); err != nil {
 		return err
@@ -377,14 +370,9 @@ func (p *preparedBoundary) apply(event map[string]any, target string, value any)
 			return err
 		}
 		ref := "ahp-internal:" + id
-		hash := fmt.Sprintf("%x", sha256.Sum256(raw))
-		item["body"] = map[string]any{"ref": ref, "size": len(raw), "sha256": hash}
-		if _, ok := item["size"]; ok {
-			item["size"] = len(raw)
-		}
-		if _, ok := item["sha256"]; ok {
-			item["sha256"] = hash
-		}
+		item["body"] = map[string]any{"ref": ref}
+		delete(item, "size")
+		delete(item, "sha256")
 		delete(p.absent, path)
 		item["selection"] = "body"
 		delete(item, "gap")
@@ -408,7 +396,9 @@ func (p *preparedBoundary) sourceElicitation(event map[string]any, path string, 
 	}
 	ref := "ahp-internal:lazy-elicitation"
 	item["selection"] = "body"
-	item["body"] = map[string]any{"ref": ref, "size": len(raw), "sha256": fmt.Sprintf("%x", sha256.Sum256(raw))}
+	item["body"] = map[string]any{"ref": ref}
+	delete(item, "size")
+	delete(item, "sha256")
 	delete(item, "gap")
 	original := p.snapshot
 	if event["type"] == "user.elicitation.request" && original != nil && original.request == "" {

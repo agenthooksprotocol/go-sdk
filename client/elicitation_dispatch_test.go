@@ -3,7 +3,6 @@ package client
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -133,7 +132,7 @@ func TestElicitationResultSerialReceiverUploads(t *testing.T) {
 	}
 	input := elicitationDispatchInput("result", "form", initial)
 	item := sdkObj(sdkObj(input["elicitation"])["result"])
-	item["body"] = map[string]any{"ref": "result-ref", "size": len(initial), "sha256": fmt.Sprintf("%x", sha256.Sum256([]byte(initial)))}
+	item["body"] = map[string]any{"ref": "result-ref"}
 	result, err := c.intercept(context.Background(), "user.elicitation.result", input, WithElicitationRequest(before.Snapshot))
 	if err != nil || result == nil || len(result.Errors) != 0 {
 		t.Fatalf("result: %+v %v", result, err)

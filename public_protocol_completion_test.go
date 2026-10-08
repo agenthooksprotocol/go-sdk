@@ -3,7 +3,6 @@ package ahp_test
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,7 +31,7 @@ func TestPublicResolvedInstructionsAcrossReceivers(t *testing.T) {
 	original := []byte("original instructions\n")
 	const hostRef = "urn:test:host:instructions"
 	var instruction ahp.ContentItem
-	if err := json.Unmarshal(completionJSON(map[string]any{"id": "instructions-1", "kind": "text", "mediaType": "text/plain", "selection": "body", "body": map[string]any{"ref": hostRef, "size": len(original), "sha256": fmt.Sprintf("%x", sha256.Sum256(original))}}), &instruction); err != nil {
+	if err := json.Unmarshal(completionJSON(map[string]any{"id": "instructions-1", "kind": "text", "mediaType": "text/plain", "selection": "body", "body": map[string]any{"ref": hostRef}}), &instruction); err != nil {
 		t.Fatal(err)
 	}
 	var mu sync.Mutex
@@ -58,7 +57,7 @@ func TestPublicResolvedInstructionsAcrossReceivers(t *testing.T) {
 			stored[refName] = append([]byte(nil), raw...)
 			uploaded = append(uploaded, refName)
 			mu.Unlock()
-			ref, err := upload.Reference(refName)
+			ref, err := upload.Receipt(refName)
 			if err != nil {
 				t.Error(err)
 				http.Error(w, "unverified", 500)

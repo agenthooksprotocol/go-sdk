@@ -4,10 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -236,4 +239,62 @@ func writeLifecycleReply(w http.ResponseWriter, reply Object) {
 		return
 	}
 	_ = json.NewEncoder(w).Encode(reply)
+}
+
+func TestLifecycleHTTPRejectsDeprecatedContentMetadataBeforeAdmission(t *testing.T) {
+	for _, suite := range []string{"", "catalogue"} {
+		t.Run("suite-"+suite, func(t *testing.T) {
+			s := publicLifecycleReceiver()
+			s.suite = suite
+			s.eventScopes = []string{"authorized"}
+			s.uploads[contentKey("authorized", "stored")] = "abc"
+			h, err := s.publicHandler()
+			if err != nil {
+				t.Fatal(err)
+			}
+			peer := httptest.NewServer(h)
+			defer peer.Close()
+			for _, mode := range []string{"valid", "reference-size", "reference-hash", "reference-null-size", "reference-null-hash", "outer-size", "outer-hash", "outer-null-size", "outer-null-hash"} {
+				t.Run(mode, func(t *testing.T) {
+					body := Object{"ref": "stored"}
+					item := Object{"id": "item", "kind": "text", "mediaType": "text/plain", "role": "user", "selection": "body", "body": body}
+					target := body
+					if strings.HasPrefix(mode, "outer-") {
+						target = item
+					}
+					switch mode {
+					case "reference-size", "outer-size":
+						target["size"] = 3
+					case "reference-hash", "outer-hash":
+						target["sha256"] = fmt.Sprintf("%x", sha256.Sum256([]byte("abc")))
+					case "reference-null-size", "outer-null-size":
+						target["size"] = nil
+					case "reference-null-hash", "outer-null-hash":
+						target["sha256"] = nil
+					}
+					message := Object{"jsonrpc": "2.0", "method": "hooks/observe", "params": Object{"protocolVersion": "draft", "event": Object{"id": mode, "source": "urn:test:host", "time": "2026-09-15T12:00:00Z", "type": "user.message.inbound", "session": Object{"id": "session"}, "message": Object{"channel": "chat", "sender": "user", "text": []any{item}}}}}
+					response, err := peer.Client().Post(peer.URL+"/observe", "application/json", bytes.NewReader(jsonBytes(message)))
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer response.Body.Close()
+					wire, err := io.ReadAll(response.Body)
+					want := http.StatusBadRequest
+					if mode == "valid" {
+						want = http.StatusNoContent
+					}
+					if err != nil || response.StatusCode != want || len(wire) != 0 {
+						t.Fatalf("status=%d want=%d body=%q error=%v", response.StatusCode, want, wire, err)
+					}
+					s.mu.Lock()
+					defer s.mu.Unlock()
+					for _, entry := range s.entries {
+						if obj(entry)["kind"] == "observed" && obj(entry)["eventId"] == mode && mode != "valid" {
+							t.Fatal("invalid original bytes reached callback")
+						}
+					}
+				})
+			}
+		})
+	}
 }

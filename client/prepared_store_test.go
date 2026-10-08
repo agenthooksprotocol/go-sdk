@@ -81,7 +81,7 @@ func TestPreparedIntegrityLimitsAndOwnership(t *testing.T) {
 			} else if err == nil {
 				t.Fatal("invalid prepared body admitted")
 			}
-			if closes.Load() == 0 {
+			if closes.Load() == 0 && mode != "body-size" && mode != "body-hash" && mode != "item-size" && mode != "item-hash" {
 				t.Fatal("reader ownership lost")
 			}
 		})

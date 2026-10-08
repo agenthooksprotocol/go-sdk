@@ -124,6 +124,13 @@ type lifecycleStatusWriter struct {
 }
 
 func (w lifecycleStatusWriter) WriteHeader(status int) {
+	// The SDK suppresses JSON-RPC error bodies for notifications, including
+	// rejected ones. Preserve that silence, but do not acknowledge an invalid
+	// lifecycle HTTP observation as accepted. Admission has already run on the
+	// original bytes; only an admitted request can enter our callback.
+	if status == http.StatusNoContent && !w.acceptance.entered {
+		status = http.StatusBadRequest
+	}
 	if status == http.StatusInternalServerError && w.acceptance.rejection != "" {
 		status = http.StatusConflict
 		if w.acceptance.rejection == "schema" {

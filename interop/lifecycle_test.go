@@ -3,9 +3,7 @@ package interop
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
-	"fmt"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -20,7 +18,7 @@ func TestLifecycleObserveValidationAndAuthorization(t *testing.T) {
 	s := &lifecycleReceiver{validator: v, eventScopes: []string{"body"}, changed: make(chan struct{}), uploads: map[string]string{}, entries: []any{}}
 	event := obj(clone(obj(request("observe-test")["params"])["event"]))
 	text := "immutable bytes"
-	ref := Object{"ref": "urn:test:body", "size": float64(len(text)), "sha256": fmt.Sprintf("%x", sha256.Sum256([]byte(text)))}
+	ref := Object{"ref": "urn:test:body"}
 	event["items"] = []any{Object{"id": "item", "kind": "text", "mediaType": "text/plain", "selection": "body", "body": ref}}
 	notification := Object{"jsonrpc": "2.0", "method": "hooks/observe", "params": Object{"protocolVersion": "draft", "event": event}}
 	if _, e = s.dispatch(context.Background(), notification); e == nil {
@@ -43,7 +41,7 @@ func TestLifecycleObserveValidationAndAuthorization(t *testing.T) {
 	if _, e = s.dispatch(context.Background(), notification); e == nil {
 		t.Fatal("wrong metadata accepted")
 	}
-	ref["size"] = float64(len(text))
+	delete(ref, "size")
 	obj(array(event["items"])[0])["unexpected"] = true
 	if _, e = s.dispatch(context.Background(), notification); e == nil {
 		t.Fatal("invalid content item accepted")

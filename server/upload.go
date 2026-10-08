@@ -122,26 +122,26 @@ func (u *Upload) Close() error {
 }
 func (u *Upload) Verified() bool { return u.verified }
 
-// Reference returns a detached descriptor only after EOF verification. It does
+// Receipt returns a detached upload confirmation only after EOF verification. It does
 // not publish bytes or prove storage availability. Allocate an immutable ref in
 // the authenticated scope and commit staging storage before responding.
-func (u *Upload) Reference(ref string) (ahp.ContentReference, error) {
+func (u *Upload) Receipt(ref string) (ahp.ContentUploadReceipt, error) {
 	if !u.verified {
-		return ahp.ContentReference{}, ErrUploadUnverified
+		return ahp.ContentUploadReceipt{}, ErrUploadUnverified
 	}
-	result := ahp.ContentReference{Ref: ref, Size: json.Number(strconv.FormatInt(u.size, 10)), Sha256: u.digest}
-	b, err := ahp.EncodeContentReference(result)
-	if err != nil || !canonical("content-reference", b) {
-		return ahp.ContentReference{}, ErrUploadFraming
+	result := ahp.ContentUploadReceipt{Ref: ref, Size: json.Number(strconv.FormatInt(u.size, 10)), Sha256: u.digest}
+	b, err := ahp.EncodeContentUploadReceipt(result)
+	if err != nil || !canonical("content-upload-receipt", b) {
+		return ahp.ContentUploadReceipt{}, ErrUploadFraming
 	}
 	return result, nil
 }
 
-// WriteUploadResponse validates a descriptor and writes the canonical 201
+// WriteUploadResponse validates a receipt and writes the canonical 201
 // confirmation. The application must first atomically publish verified bytes.
-func WriteUploadResponse(w http.ResponseWriter, ref ahp.ContentReference) error {
-	b, err := ahp.EncodeContentReference(ref)
-	if err != nil || !ahp.ParseContentReference(b).OK || !canonical("content-reference", b) {
+func WriteUploadResponse(w http.ResponseWriter, ref ahp.ContentUploadReceipt) error {
+	b, err := ahp.EncodeContentUploadReceipt(ref)
+	if err != nil || !ahp.ParseContentUploadReceipt(b).OK || !canonical("content-upload-receipt", b) {
 		return ErrUploadFraming
 	}
 	w.Header().Set("Content-Type", "application/json")

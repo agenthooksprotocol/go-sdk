@@ -84,7 +84,7 @@ func TestContentSourceConcurrentFanoutSnapshotsOnce(t *testing.T) {
 				return
 			}
 			item := contentTestBody(t, out)
-			if item["size"] != int64(6) || item["sha256"] == nil {
+			if item["size"] != nil || item["sha256"] != nil {
 				t.Errorf("missing actual metadata: %#v", item)
 			}
 		}()

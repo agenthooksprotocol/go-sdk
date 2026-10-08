@@ -3,7 +3,6 @@ package client
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,7 +14,7 @@ import (
 
 func targetTestItem(id, media, raw string) (map[string]any, map[string][]byte) {
 	ref := "urn:test:" + id
-	item := contentTestItem(map[string]any{"ref": ref, "size": len(raw), "sha256": fmt.Sprintf("%x", sha256.Sum256([]byte(raw)))})
+	item := contentTestItem(map[string]any{"ref": ref})
 	item["id"], item["mediaType"], item["selection"] = id, media, "body"
 	return item, map[string][]byte{ref: []byte(raw)}
 }

@@ -39,7 +39,7 @@ var schemas = sync.OnceValues(func() (map[string]*jsonschema.Schema, error) {
 			return nil, err
 		}
 	}
-	roots := []string{"registration", "capabilities", "intercept-request", "intercept-response", "observe-notification", "capabilities-request", "capabilities-response", "content-reference", "content-upload", "content-item", "common"}
+	roots := []string{"registration", "capabilities", "intercept-request", "intercept-response", "observe-notification", "capabilities-request", "capabilities-response", "content-reference", "content-upload-receipt", "content-upload", "content-item", "common"}
 	out := make(map[string]*jsonschema.Schema, len(roots)+5)
 	for _, name := range roots {
 		s, err := compiler.Compile("https://agenthooksprotocol.org/schemas/draft/" + name + ".schema.json")

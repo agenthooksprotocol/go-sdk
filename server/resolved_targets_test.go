@@ -3,7 +3,7 @@ package server
 import "testing"
 
 func TestDescriptorIsNotAMergeBase(t *testing.T) {
-	request := []byte(`{"params":{"event":{"elicitation":{"result":{"id":"answer","kind":"json","mediaType":"application/json","selection":"body","body":{"ref":"receiver-answer","size":2,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}},"capabilities":{"effects":["modify"],"modify":{"content":{"merge":true,"replace":true}}}}}`)
+	request := []byte(`{"params":{"event":{"elicitation":{"result":{"id":"answer","kind":"json","mediaType":"application/json","selection":"body","body":{"ref":"receiver-answer"}}}},"capabilities":{"effects":["modify"],"modify":{"content":{"merge":true,"replace":true}}}}}`)
 	if !validEffects(request, []byte(`{"result":{"effects":[{"type":"modify","target":"content","operation":"merge","value":{"field":1}}]}}`)) {
 		t.Fatal("unresolved descriptor incorrectly treated as an absent/scalar merge base")
 	}

@@ -363,10 +363,18 @@ bind canonical slots with `client.WithContentSource`; wire references/resolvers
 remain available for already prepared content.
 
 On the receiver, upload parsing verifies declared size and digest only at
-successful EOF. Early close or a failed read cannot yield a verified reference.
+successful EOF. Early close or a failed read cannot yield a verified receipt.
 The application authorizes scope, stages and commits immutable storage, allocates
 the receiver reference, and only then writes the upload response. The SDK does
 not provide a content store or infer publication from verification.
+
+`upload.Receipt(ref)` returns a `ContentUploadReceipt` with `ref`, `size`, and
+`sha256` for `server.WriteUploadResponse`. Use `content.ReferenceFromReceipt(receipt)`
+to explicitly construct the ref-only `ContentReference` carried by events. Body-selected
+items do not carry outer size or digest metadata; metadata-only items and gaps may
+disclose it. Resolve references within authenticated storage scope, not by trusting
+event-provided lengths or hashes. Upload framing and receipt verification still
+check the exact bytes sent.
 
 ## Development
 
