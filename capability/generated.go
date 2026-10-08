@@ -31,7 +31,7 @@ func WithEffects(values ...string) Option {
 		v.Effects = func() []ahp.CapabilitiesEffectsItem {
 			items := make([]ahp.CapabilitiesEffectsItem, len(values))
 			for i, value := range values {
-				items[i] = ahp.CapabilitiesEffectsItem{Variant2: ahp.Optional[string]{Present: true, Value: value}}
+				items[i] = ahp.CapabilitiesEffectsItem{Custom: ahp.Optional[string]{Present: true, Value: value}}
 			}
 			return items
 		}()
@@ -41,7 +41,7 @@ func New(argEffects []string, opts ...Option) *ahp.Capabilities {
 	v := &ahp.Capabilities{Effects: func() []ahp.CapabilitiesEffectsItem {
 		items := make([]ahp.CapabilitiesEffectsItem, len(argEffects))
 		for i, value := range argEffects {
-			items[i] = ahp.CapabilitiesEffectsItem{Variant2: ahp.Optional[string]{Present: true, Value: value}}
+			items[i] = ahp.CapabilitiesEffectsItem{Custom: ahp.Optional[string]{Present: true, Value: value}}
 		}
 		return items
 	}()}
@@ -832,14 +832,14 @@ func Intercept(grants ...Grant) (Event, error) {
 func Observe() Event { return Event{Modes: []Mode{ObserveMode}} }
 func addEffect(v *ahp.Capabilities, name string) {
 	for _, effect := range v.Effects {
-		if effect.Variant2.Present && effect.Variant2.Value == name {
+		if effect.Custom.Present && effect.Custom.Value == name {
 			return
 		}
-		if effect.Variant1.Present && string(effect.Variant1.Value) == name {
+		if effect.Known.Present && string(effect.Known.Value) == name {
 			return
 		}
 	}
-	v.Effects = append(v.Effects, ahp.CapabilitiesEffectsItem{Variant1: ahp.Some(ahp.CapabilitiesEffectsItemVariant1(name))})
+	v.Effects = append(v.Effects, ahp.CapabilitiesEffectsItem{Known: ahp.Some(ahp.CapabilitiesEffectsItemKnown(name))})
 }
 func Allow() Grant {
 	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, "allow"); return nil }}

@@ -332,7 +332,7 @@ func TestInitialAndTypedEffectOperations(t *testing.T) {
 		t.Fatal(err)
 	}
 	initial = state.Initial(permission.Ask, state.WithCandidate(candidate))
-	if string(initial.Candidate.Variant2.Value.Value) != `{"count":3}` {
+	if string(initial.Candidate.ValueObject.Value.Value) != `{"count":3}` {
 		t.Fatal(initial)
 	}
 	if _, err := state.Candidate(make(chan int)); err == nil {

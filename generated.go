@@ -67,80 +67,80 @@ type ParseResult[T any] struct {
 	Diagnostics []ParseDiagnostic
 }
 
-// AuthenticationVariant2Flow is a generated schema value.
-type AuthenticationVariant2Flow string
+// AuthenticationOauthFlow is a generated schema value.
+type AuthenticationOauthFlow string
 
-const AuthenticationVariant2FlowAuthorizationCodePkce AuthenticationVariant2Flow = "authorization_code_pkce"
-const AuthenticationVariant2FlowClientCredentials AuthenticationVariant2Flow = "client_credentials"
+const AuthenticationOauthFlowAuthorizationCodePkce AuthenticationOauthFlow = "authorization_code_pkce"
+const AuthenticationOauthFlowClientCredentials AuthenticationOauthFlow = "client_credentials"
 
-// AuthenticationVariant2Type is a generated schema value.
-type AuthenticationVariant2Type string
+// AuthenticationOauthType is a generated schema value.
+type AuthenticationOauthType string
 
-const AuthenticationVariant2TypeOauth AuthenticationVariant2Type = "oauth"
+const AuthenticationOauthTypeOauth AuthenticationOauthType = "oauth"
 
-// AuthenticationVariant2 is a generated nested model.
-type AuthenticationVariant2 struct {
+// AuthenticationOauth is a generated nested model.
+type AuthenticationOauth struct {
 	ClientId             string
 	ClientSecretRef      Optional[string]
-	Flow                 AuthenticationVariant2Flow
+	Flow                 AuthenticationOauthFlow
 	Issuer               string
 	Resource             string
 	Scopes               Optional[[]string]
-	Type                 AuthenticationVariant2Type
+	Type                 AuthenticationOauthType
 	AdditionalProperties map[string]json.RawMessage
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *AuthenticationVariant2) UnmarshalJSON(data []byte) error {
+func (value *AuthenticationOauth) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("AuthenticationVariant2 must be a JSON object")
+		return fmt.Errorf("AuthenticationOauth must be a JSON object")
 	}
-	var decoded AuthenticationVariant2
+	var decoded AuthenticationOauth
 	if raw, ok := fields["clientId"]; ok {
 		if err := json.Unmarshal(raw, &decoded.ClientId); err != nil {
-			return fmt.Errorf("AuthenticationVariant2.clientId: %w", err)
+			return fmt.Errorf("AuthenticationOauth.clientId: %w", err)
 		}
 		delete(fields, "clientId")
 	}
 	if raw, ok := fields["clientSecretRef"]; ok {
 		decoded.ClientSecretRef.Present = true
 		if err := json.Unmarshal(raw, &decoded.ClientSecretRef.Value); err != nil {
-			return fmt.Errorf("AuthenticationVariant2.clientSecretRef: %w", err)
+			return fmt.Errorf("AuthenticationOauth.clientSecretRef: %w", err)
 		}
 		delete(fields, "clientSecretRef")
 	}
 	if raw, ok := fields["flow"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Flow); err != nil {
-			return fmt.Errorf("AuthenticationVariant2.flow: %w", err)
+			return fmt.Errorf("AuthenticationOauth.flow: %w", err)
 		}
 		delete(fields, "flow")
 	}
 	if raw, ok := fields["issuer"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Issuer); err != nil {
-			return fmt.Errorf("AuthenticationVariant2.issuer: %w", err)
+			return fmt.Errorf("AuthenticationOauth.issuer: %w", err)
 		}
 		delete(fields, "issuer")
 	}
 	if raw, ok := fields["resource"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Resource); err != nil {
-			return fmt.Errorf("AuthenticationVariant2.resource: %w", err)
+			return fmt.Errorf("AuthenticationOauth.resource: %w", err)
 		}
 		delete(fields, "resource")
 	}
 	if raw, ok := fields["scopes"]; ok {
 		decoded.Scopes.Present = true
 		if err := json.Unmarshal(raw, &decoded.Scopes.Value); err != nil {
-			return fmt.Errorf("AuthenticationVariant2.scopes: %w", err)
+			return fmt.Errorf("AuthenticationOauth.scopes: %w", err)
 		}
 		delete(fields, "scopes")
 	}
 	if raw, ok := fields["type"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Type); err != nil {
-			return fmt.Errorf("AuthenticationVariant2.type: %w", err)
+			return fmt.Errorf("AuthenticationOauth.type: %w", err)
 		}
 		delete(fields, "type")
 	}
@@ -150,7 +150,7 @@ func (value *AuthenticationVariant2) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value AuthenticationVariant2) MarshalJSON() ([]byte, error) {
+func (value AuthenticationOauth) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+7)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -158,49 +158,49 @@ func (value AuthenticationVariant2) MarshalJSON() ([]byte, error) {
 	{
 		raw, err := json.Marshal(value.ClientId)
 		if err != nil {
-			return nil, fmt.Errorf("AuthenticationVariant2.clientId: %w", err)
+			return nil, fmt.Errorf("AuthenticationOauth.clientId: %w", err)
 		}
 		fields["clientId"] = raw
 	}
 	if value.ClientSecretRef.Present {
 		raw, err := json.Marshal(value.ClientSecretRef.Value)
 		if err != nil {
-			return nil, fmt.Errorf("AuthenticationVariant2.clientSecretRef: %w", err)
+			return nil, fmt.Errorf("AuthenticationOauth.clientSecretRef: %w", err)
 		}
 		fields["clientSecretRef"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Flow)
 		if err != nil {
-			return nil, fmt.Errorf("AuthenticationVariant2.flow: %w", err)
+			return nil, fmt.Errorf("AuthenticationOauth.flow: %w", err)
 		}
 		fields["flow"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Issuer)
 		if err != nil {
-			return nil, fmt.Errorf("AuthenticationVariant2.issuer: %w", err)
+			return nil, fmt.Errorf("AuthenticationOauth.issuer: %w", err)
 		}
 		fields["issuer"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Resource)
 		if err != nil {
-			return nil, fmt.Errorf("AuthenticationVariant2.resource: %w", err)
+			return nil, fmt.Errorf("AuthenticationOauth.resource: %w", err)
 		}
 		fields["resource"] = raw
 	}
 	if value.Scopes.Present {
 		raw, err := json.Marshal(value.Scopes.Value)
 		if err != nil {
-			return nil, fmt.Errorf("AuthenticationVariant2.scopes: %w", err)
+			return nil, fmt.Errorf("AuthenticationOauth.scopes: %w", err)
 		}
 		fields["scopes"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Type)
 		if err != nil {
-			return nil, fmt.Errorf("AuthenticationVariant2.type: %w", err)
+			return nil, fmt.Errorf("AuthenticationOauth.type: %w", err)
 		}
 		fields["type"] = raw
 	}
@@ -209,9 +209,9 @@ func (value AuthenticationVariant2) MarshalJSON() ([]byte, error) {
 
 // Authentication is generated from schema/draft/registration.schema.json#/$defs/authentication.
 type Authentication struct {
-	Variant1 Optional[json.RawMessage]
-	Variant2 Optional[AuthenticationVariant2]
-	Unknown  json.RawMessage
+	Bearer  Optional[json.RawMessage]
+	Oauth   Optional[AuthenticationOauth]
+	Unknown json.RawMessage
 }
 
 func (value *Authentication) UnmarshalJSON(data []byte) error {
@@ -232,9 +232,9 @@ func (value *Authentication) UnmarshalJSON(data []byte) error {
 		if !hasErrors(attempt) {
 			var candidate json.RawMessage
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("Authentication.Variant1: %w", err)
+				return fmt.Errorf("Authentication.Bearer: %w", err)
 			}
-			decoded.Variant1 = Some(candidate)
+			decoded.Bearer = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -243,11 +243,11 @@ func (value *Authentication) UnmarshalJSON(data []byte) error {
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[1], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate AuthenticationVariant2
+			var candidate AuthenticationOauth
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("Authentication.Variant2: %w", err)
+				return fmt.Errorf("Authentication.Oauth: %w", err)
 			}
-			decoded.Variant2 = Some(candidate)
+			decoded.Oauth = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -259,10 +259,10 @@ func (value *Authentication) UnmarshalJSON(data []byte) error {
 
 func (value Authentication) MarshalJSON() ([]byte, error) {
 	selected := 0
-	if value.Variant1.Present {
+	if value.Bearer.Present {
 		selected++
 	}
-	if value.Variant2.Present {
+	if value.Oauth.Present {
 		selected++
 	}
 	if len(value.Unknown) != 0 {
@@ -271,11 +271,11 @@ func (value Authentication) MarshalJSON() ([]byte, error) {
 	if selected != 1 {
 		return nil, fmt.Errorf("Authentication: exactly one variant must be selected")
 	}
-	if value.Variant1.Present {
-		return json.Marshal(value.Variant1.Value)
+	if value.Bearer.Present {
+		return json.Marshal(value.Bearer.Value)
 	}
-	if value.Variant2.Present {
-		return json.Marshal(value.Variant2.Value)
+	if value.Oauth.Present {
+		return json.Marshal(value.Oauth.Value)
 	}
 	return json.Marshal(value.Unknown)
 }
@@ -512,23 +512,23 @@ func (value Backend) MarshalJSON() ([]byte, error) {
 	return json.Marshal(fields)
 }
 
-// CapabilitiesEffectsItemVariant1 is a generated schema value.
-type CapabilitiesEffectsItemVariant1 string
+// CapabilitiesEffectsItemKnown is a generated schema value.
+type CapabilitiesEffectsItemKnown string
 
-const CapabilitiesEffectsItemVariant1Deny CapabilitiesEffectsItemVariant1 = "deny"
-const CapabilitiesEffectsItemVariant1Allow CapabilitiesEffectsItemVariant1 = "allow"
-const CapabilitiesEffectsItemVariant1Ask CapabilitiesEffectsItemVariant1 = "ask"
-const CapabilitiesEffectsItemVariant1Modify CapabilitiesEffectsItemVariant1 = "modify"
-const CapabilitiesEffectsItemVariant1Message CapabilitiesEffectsItemVariant1 = "message"
-const CapabilitiesEffectsItemVariant1Return CapabilitiesEffectsItemVariant1 = "return"
-const CapabilitiesEffectsItemVariant1Flow CapabilitiesEffectsItemVariant1 = "flow"
-const CapabilitiesEffectsItemVariant1Inject CapabilitiesEffectsItemVariant1 = "inject"
+const CapabilitiesEffectsItemKnownDeny CapabilitiesEffectsItemKnown = "deny"
+const CapabilitiesEffectsItemKnownAllow CapabilitiesEffectsItemKnown = "allow"
+const CapabilitiesEffectsItemKnownAsk CapabilitiesEffectsItemKnown = "ask"
+const CapabilitiesEffectsItemKnownModify CapabilitiesEffectsItemKnown = "modify"
+const CapabilitiesEffectsItemKnownMessage CapabilitiesEffectsItemKnown = "message"
+const CapabilitiesEffectsItemKnownReturn CapabilitiesEffectsItemKnown = "return"
+const CapabilitiesEffectsItemKnownFlow CapabilitiesEffectsItemKnown = "flow"
+const CapabilitiesEffectsItemKnownInject CapabilitiesEffectsItemKnown = "inject"
 
 // CapabilitiesEffectsItem is a generated union model.
 type CapabilitiesEffectsItem struct {
-	Variant1 Optional[CapabilitiesEffectsItemVariant1]
-	Variant2 Optional[string]
-	Unknown  json.RawMessage
+	Known   Optional[CapabilitiesEffectsItemKnown]
+	Custom  Optional[string]
+	Unknown json.RawMessage
 }
 
 func (value *CapabilitiesEffectsItem) UnmarshalJSON(data []byte) error {
@@ -547,11 +547,11 @@ func (value *CapabilitiesEffectsItem) UnmarshalJSON(data []byte) error {
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[0], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate CapabilitiesEffectsItemVariant1
+			var candidate CapabilitiesEffectsItemKnown
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("CapabilitiesEffectsItem.Variant1: %w", err)
+				return fmt.Errorf("CapabilitiesEffectsItem.Known: %w", err)
 			}
-			decoded.Variant1 = Some(candidate)
+			decoded.Known = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -562,9 +562,9 @@ func (value *CapabilitiesEffectsItem) UnmarshalJSON(data []byte) error {
 		if !hasErrors(attempt) {
 			var candidate string
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("CapabilitiesEffectsItem.Variant2: %w", err)
+				return fmt.Errorf("CapabilitiesEffectsItem.Custom: %w", err)
 			}
-			decoded.Variant2 = Some(candidate)
+			decoded.Custom = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -576,10 +576,10 @@ func (value *CapabilitiesEffectsItem) UnmarshalJSON(data []byte) error {
 
 func (value CapabilitiesEffectsItem) MarshalJSON() ([]byte, error) {
 	selected := 0
-	if value.Variant1.Present {
+	if value.Known.Present {
 		selected++
 	}
-	if value.Variant2.Present {
+	if value.Custom.Present {
 		selected++
 	}
 	if len(value.Unknown) != 0 {
@@ -588,11 +588,11 @@ func (value CapabilitiesEffectsItem) MarshalJSON() ([]byte, error) {
 	if selected != 1 {
 		return nil, fmt.Errorf("CapabilitiesEffectsItem: exactly one variant must be selected")
 	}
-	if value.Variant1.Present {
-		return json.Marshal(value.Variant1.Value)
+	if value.Known.Present {
+		return json.Marshal(value.Known.Value)
 	}
-	if value.Variant2.Present {
-		return json.Marshal(value.Variant2.Value)
+	if value.Custom.Present {
+		return json.Marshal(value.Custom.Value)
 	}
 	return json.Marshal(value.Unknown)
 }
@@ -4048,13 +4048,13 @@ func (value ConfigChangeBeforeEvent) MarshalJSON() ([]byte, error) {
 	return json.Marshal(fields)
 }
 
-// ContentItemVariant1Selection is a generated schema value.
-type ContentItemVariant1Selection string
+// ContentItemBodySelection is a generated schema value.
+type ContentItemBodySelection string
 
-const ContentItemVariant1SelectionBody ContentItemVariant1Selection = "body"
+const ContentItemBodySelectionBody ContentItemBodySelection = "body"
 
-// ContentItemVariant1 is a generated nested model.
-type ContentItemVariant1 struct {
+// ContentItemBody is a generated nested model.
+type ContentItemBody struct {
 	Body                 *ContentReference
 	Category             Optional[string]
 	ID                   string
@@ -4062,7 +4062,7 @@ type ContentItemVariant1 struct {
 	MediaType            string
 	ParentItemId         Optional[string]
 	Role                 Optional[string]
-	Selection            ContentItemVariant1Selection
+	Selection            ContentItemBodySelection
 	Sha256               Optional[string]
 	Size                 Optional[json.Number]
 	Synthesized          Optional[bool]
@@ -4070,84 +4070,84 @@ type ContentItemVariant1 struct {
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *ContentItemVariant1) UnmarshalJSON(data []byte) error {
+func (value *ContentItemBody) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("ContentItemVariant1 must be a JSON object")
+		return fmt.Errorf("ContentItemBody must be a JSON object")
 	}
-	var decoded ContentItemVariant1
+	var decoded ContentItemBody
 	if raw, ok := fields["body"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Body); err != nil {
-			return fmt.Errorf("ContentItemVariant1.body: %w", err)
+			return fmt.Errorf("ContentItemBody.body: %w", err)
 		}
 		delete(fields, "body")
 	}
 	if raw, ok := fields["category"]; ok {
 		decoded.Category.Present = true
 		if err := json.Unmarshal(raw, &decoded.Category.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant1.category: %w", err)
+			return fmt.Errorf("ContentItemBody.category: %w", err)
 		}
 		delete(fields, "category")
 	}
 	if raw, ok := fields["id"]; ok {
 		if err := json.Unmarshal(raw, &decoded.ID); err != nil {
-			return fmt.Errorf("ContentItemVariant1.id: %w", err)
+			return fmt.Errorf("ContentItemBody.id: %w", err)
 		}
 		delete(fields, "id")
 	}
 	if raw, ok := fields["kind"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Kind); err != nil {
-			return fmt.Errorf("ContentItemVariant1.kind: %w", err)
+			return fmt.Errorf("ContentItemBody.kind: %w", err)
 		}
 		delete(fields, "kind")
 	}
 	if raw, ok := fields["mediaType"]; ok {
 		if err := json.Unmarshal(raw, &decoded.MediaType); err != nil {
-			return fmt.Errorf("ContentItemVariant1.mediaType: %w", err)
+			return fmt.Errorf("ContentItemBody.mediaType: %w", err)
 		}
 		delete(fields, "mediaType")
 	}
 	if raw, ok := fields["parentItemId"]; ok {
 		decoded.ParentItemId.Present = true
 		if err := json.Unmarshal(raw, &decoded.ParentItemId.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant1.parentItemId: %w", err)
+			return fmt.Errorf("ContentItemBody.parentItemId: %w", err)
 		}
 		delete(fields, "parentItemId")
 	}
 	if raw, ok := fields["role"]; ok {
 		decoded.Role.Present = true
 		if err := json.Unmarshal(raw, &decoded.Role.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant1.role: %w", err)
+			return fmt.Errorf("ContentItemBody.role: %w", err)
 		}
 		delete(fields, "role")
 	}
 	if raw, ok := fields["selection"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Selection); err != nil {
-			return fmt.Errorf("ContentItemVariant1.selection: %w", err)
+			return fmt.Errorf("ContentItemBody.selection: %w", err)
 		}
 		delete(fields, "selection")
 	}
 	if raw, ok := fields["sha256"]; ok {
 		decoded.Sha256.Present = true
 		if err := json.Unmarshal(raw, &decoded.Sha256.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant1.sha256: %w", err)
+			return fmt.Errorf("ContentItemBody.sha256: %w", err)
 		}
 		delete(fields, "sha256")
 	}
 	if raw, ok := fields["size"]; ok {
 		decoded.Size.Present = true
 		if err := json.Unmarshal(raw, &decoded.Size.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant1.size: %w", err)
+			return fmt.Errorf("ContentItemBody.size: %w", err)
 		}
 		delete(fields, "size")
 	}
 	if raw, ok := fields["synthesized"]; ok {
 		decoded.Synthesized.Present = true
 		if err := json.Unmarshal(raw, &decoded.Synthesized.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant1.synthesized: %w", err)
+			return fmt.Errorf("ContentItemBody.synthesized: %w", err)
 		}
 		delete(fields, "synthesized")
 	}
@@ -4157,7 +4157,7 @@ func (value *ContentItemVariant1) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value ContentItemVariant1) MarshalJSON() ([]byte, error) {
+func (value ContentItemBody) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+11)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -4165,110 +4165,110 @@ func (value ContentItemVariant1) MarshalJSON() ([]byte, error) {
 	{
 		raw, err := json.Marshal(value.Body)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant1.body: %w", err)
+			return nil, fmt.Errorf("ContentItemBody.body: %w", err)
 		}
 		fields["body"] = raw
 	}
 	if value.Category.Present {
 		raw, err := json.Marshal(value.Category.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant1.category: %w", err)
+			return nil, fmt.Errorf("ContentItemBody.category: %w", err)
 		}
 		fields["category"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.ID)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant1.id: %w", err)
+			return nil, fmt.Errorf("ContentItemBody.id: %w", err)
 		}
 		fields["id"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Kind)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant1.kind: %w", err)
+			return nil, fmt.Errorf("ContentItemBody.kind: %w", err)
 		}
 		fields["kind"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.MediaType)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant1.mediaType: %w", err)
+			return nil, fmt.Errorf("ContentItemBody.mediaType: %w", err)
 		}
 		fields["mediaType"] = raw
 	}
 	if value.ParentItemId.Present {
 		raw, err := json.Marshal(value.ParentItemId.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant1.parentItemId: %w", err)
+			return nil, fmt.Errorf("ContentItemBody.parentItemId: %w", err)
 		}
 		fields["parentItemId"] = raw
 	}
 	if value.Role.Present {
 		raw, err := json.Marshal(value.Role.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant1.role: %w", err)
+			return nil, fmt.Errorf("ContentItemBody.role: %w", err)
 		}
 		fields["role"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Selection)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant1.selection: %w", err)
+			return nil, fmt.Errorf("ContentItemBody.selection: %w", err)
 		}
 		fields["selection"] = raw
 	}
 	if value.Sha256.Present {
 		raw, err := json.Marshal(value.Sha256.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant1.sha256: %w", err)
+			return nil, fmt.Errorf("ContentItemBody.sha256: %w", err)
 		}
 		fields["sha256"] = raw
 	}
 	if value.Size.Present {
 		raw, err := json.Marshal(value.Size.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant1.size: %w", err)
+			return nil, fmt.Errorf("ContentItemBody.size: %w", err)
 		}
 		fields["size"] = raw
 	}
 	if value.Synthesized.Present {
 		raw, err := json.Marshal(value.Synthesized.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant1.synthesized: %w", err)
+			return nil, fmt.Errorf("ContentItemBody.synthesized: %w", err)
 		}
 		fields["synthesized"] = raw
 	}
 	return json.Marshal(fields)
 }
 
-// ContentItemVariant2Gap is a generated nested model.
-type ContentItemVariant2Gap struct {
+// ContentItemBodyGapGap is a generated nested model.
+type ContentItemBodyGapGap struct {
 	Path                 Optional[string]
 	Reason               string
 	AdditionalProperties map[string]json.RawMessage
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *ContentItemVariant2Gap) UnmarshalJSON(data []byte) error {
+func (value *ContentItemBodyGapGap) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("ContentItemVariant2Gap must be a JSON object")
+		return fmt.Errorf("ContentItemBodyGapGap must be a JSON object")
 	}
-	var decoded ContentItemVariant2Gap
+	var decoded ContentItemBodyGapGap
 	if raw, ok := fields["path"]; ok {
 		decoded.Path.Present = true
 		if err := json.Unmarshal(raw, &decoded.Path.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant2Gap.path: %w", err)
+			return fmt.Errorf("ContentItemBodyGapGap.path: %w", err)
 		}
 		delete(fields, "path")
 	}
 	if raw, ok := fields["reason"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Reason); err != nil {
-			return fmt.Errorf("ContentItemVariant2Gap.reason: %w", err)
+			return fmt.Errorf("ContentItemBodyGapGap.reason: %w", err)
 		}
 		delete(fields, "reason")
 	}
@@ -4278,7 +4278,7 @@ func (value *ContentItemVariant2Gap) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value ContentItemVariant2Gap) MarshalJSON() ([]byte, error) {
+func (value ContentItemBodyGapGap) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+2)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -4286,35 +4286,35 @@ func (value ContentItemVariant2Gap) MarshalJSON() ([]byte, error) {
 	if value.Path.Present {
 		raw, err := json.Marshal(value.Path.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant2Gap.path: %w", err)
+			return nil, fmt.Errorf("ContentItemBodyGapGap.path: %w", err)
 		}
 		fields["path"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Reason)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant2Gap.reason: %w", err)
+			return nil, fmt.Errorf("ContentItemBodyGapGap.reason: %w", err)
 		}
 		fields["reason"] = raw
 	}
 	return json.Marshal(fields)
 }
 
-// ContentItemVariant2Selection is a generated schema value.
-type ContentItemVariant2Selection string
+// ContentItemBodyGapSelection is a generated schema value.
+type ContentItemBodyGapSelection string
 
-const ContentItemVariant2SelectionBody ContentItemVariant2Selection = "body"
+const ContentItemBodyGapSelectionBody ContentItemBodyGapSelection = "body"
 
-// ContentItemVariant2 is a generated nested model.
-type ContentItemVariant2 struct {
+// ContentItemBodyGap is a generated nested model.
+type ContentItemBodyGap struct {
 	Category             Optional[string]
-	Gap                  ContentItemVariant2Gap
+	Gap                  ContentItemBodyGapGap
 	ID                   string
 	Kind                 string
 	MediaType            string
 	ParentItemId         Optional[string]
 	Role                 Optional[string]
-	Selection            ContentItemVariant2Selection
+	Selection            ContentItemBodyGapSelection
 	Sha256               Optional[string]
 	Size                 Optional[json.Number]
 	Synthesized          Optional[bool]
@@ -4322,84 +4322,84 @@ type ContentItemVariant2 struct {
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *ContentItemVariant2) UnmarshalJSON(data []byte) error {
+func (value *ContentItemBodyGap) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("ContentItemVariant2 must be a JSON object")
+		return fmt.Errorf("ContentItemBodyGap must be a JSON object")
 	}
-	var decoded ContentItemVariant2
+	var decoded ContentItemBodyGap
 	if raw, ok := fields["category"]; ok {
 		decoded.Category.Present = true
 		if err := json.Unmarshal(raw, &decoded.Category.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant2.category: %w", err)
+			return fmt.Errorf("ContentItemBodyGap.category: %w", err)
 		}
 		delete(fields, "category")
 	}
 	if raw, ok := fields["gap"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Gap); err != nil {
-			return fmt.Errorf("ContentItemVariant2.gap: %w", err)
+			return fmt.Errorf("ContentItemBodyGap.gap: %w", err)
 		}
 		delete(fields, "gap")
 	}
 	if raw, ok := fields["id"]; ok {
 		if err := json.Unmarshal(raw, &decoded.ID); err != nil {
-			return fmt.Errorf("ContentItemVariant2.id: %w", err)
+			return fmt.Errorf("ContentItemBodyGap.id: %w", err)
 		}
 		delete(fields, "id")
 	}
 	if raw, ok := fields["kind"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Kind); err != nil {
-			return fmt.Errorf("ContentItemVariant2.kind: %w", err)
+			return fmt.Errorf("ContentItemBodyGap.kind: %w", err)
 		}
 		delete(fields, "kind")
 	}
 	if raw, ok := fields["mediaType"]; ok {
 		if err := json.Unmarshal(raw, &decoded.MediaType); err != nil {
-			return fmt.Errorf("ContentItemVariant2.mediaType: %w", err)
+			return fmt.Errorf("ContentItemBodyGap.mediaType: %w", err)
 		}
 		delete(fields, "mediaType")
 	}
 	if raw, ok := fields["parentItemId"]; ok {
 		decoded.ParentItemId.Present = true
 		if err := json.Unmarshal(raw, &decoded.ParentItemId.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant2.parentItemId: %w", err)
+			return fmt.Errorf("ContentItemBodyGap.parentItemId: %w", err)
 		}
 		delete(fields, "parentItemId")
 	}
 	if raw, ok := fields["role"]; ok {
 		decoded.Role.Present = true
 		if err := json.Unmarshal(raw, &decoded.Role.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant2.role: %w", err)
+			return fmt.Errorf("ContentItemBodyGap.role: %w", err)
 		}
 		delete(fields, "role")
 	}
 	if raw, ok := fields["selection"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Selection); err != nil {
-			return fmt.Errorf("ContentItemVariant2.selection: %w", err)
+			return fmt.Errorf("ContentItemBodyGap.selection: %w", err)
 		}
 		delete(fields, "selection")
 	}
 	if raw, ok := fields["sha256"]; ok {
 		decoded.Sha256.Present = true
 		if err := json.Unmarshal(raw, &decoded.Sha256.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant2.sha256: %w", err)
+			return fmt.Errorf("ContentItemBodyGap.sha256: %w", err)
 		}
 		delete(fields, "sha256")
 	}
 	if raw, ok := fields["size"]; ok {
 		decoded.Size.Present = true
 		if err := json.Unmarshal(raw, &decoded.Size.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant2.size: %w", err)
+			return fmt.Errorf("ContentItemBodyGap.size: %w", err)
 		}
 		delete(fields, "size")
 	}
 	if raw, ok := fields["synthesized"]; ok {
 		decoded.Synthesized.Present = true
 		if err := json.Unmarshal(raw, &decoded.Synthesized.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant2.synthesized: %w", err)
+			return fmt.Errorf("ContentItemBodyGap.synthesized: %w", err)
 		}
 		delete(fields, "synthesized")
 	}
@@ -4409,7 +4409,7 @@ func (value *ContentItemVariant2) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value ContentItemVariant2) MarshalJSON() ([]byte, error) {
+func (value ContentItemBodyGap) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+11)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -4417,97 +4417,97 @@ func (value ContentItemVariant2) MarshalJSON() ([]byte, error) {
 	if value.Category.Present {
 		raw, err := json.Marshal(value.Category.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant2.category: %w", err)
+			return nil, fmt.Errorf("ContentItemBodyGap.category: %w", err)
 		}
 		fields["category"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Gap)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant2.gap: %w", err)
+			return nil, fmt.Errorf("ContentItemBodyGap.gap: %w", err)
 		}
 		fields["gap"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.ID)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant2.id: %w", err)
+			return nil, fmt.Errorf("ContentItemBodyGap.id: %w", err)
 		}
 		fields["id"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Kind)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant2.kind: %w", err)
+			return nil, fmt.Errorf("ContentItemBodyGap.kind: %w", err)
 		}
 		fields["kind"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.MediaType)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant2.mediaType: %w", err)
+			return nil, fmt.Errorf("ContentItemBodyGap.mediaType: %w", err)
 		}
 		fields["mediaType"] = raw
 	}
 	if value.ParentItemId.Present {
 		raw, err := json.Marshal(value.ParentItemId.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant2.parentItemId: %w", err)
+			return nil, fmt.Errorf("ContentItemBodyGap.parentItemId: %w", err)
 		}
 		fields["parentItemId"] = raw
 	}
 	if value.Role.Present {
 		raw, err := json.Marshal(value.Role.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant2.role: %w", err)
+			return nil, fmt.Errorf("ContentItemBodyGap.role: %w", err)
 		}
 		fields["role"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Selection)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant2.selection: %w", err)
+			return nil, fmt.Errorf("ContentItemBodyGap.selection: %w", err)
 		}
 		fields["selection"] = raw
 	}
 	if value.Sha256.Present {
 		raw, err := json.Marshal(value.Sha256.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant2.sha256: %w", err)
+			return nil, fmt.Errorf("ContentItemBodyGap.sha256: %w", err)
 		}
 		fields["sha256"] = raw
 	}
 	if value.Size.Present {
 		raw, err := json.Marshal(value.Size.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant2.size: %w", err)
+			return nil, fmt.Errorf("ContentItemBodyGap.size: %w", err)
 		}
 		fields["size"] = raw
 	}
 	if value.Synthesized.Present {
 		raw, err := json.Marshal(value.Synthesized.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant2.synthesized: %w", err)
+			return nil, fmt.Errorf("ContentItemBodyGap.synthesized: %w", err)
 		}
 		fields["synthesized"] = raw
 	}
 	return json.Marshal(fields)
 }
 
-// ContentItemVariant3Selection is a generated schema value.
-type ContentItemVariant3Selection string
+// ContentItemMetadataSelection is a generated schema value.
+type ContentItemMetadataSelection string
 
-const ContentItemVariant3SelectionMetadata ContentItemVariant3Selection = "metadata"
+const ContentItemMetadataSelectionMetadata ContentItemMetadataSelection = "metadata"
 
-// ContentItemVariant3 is a generated nested model.
-type ContentItemVariant3 struct {
+// ContentItemMetadata is a generated nested model.
+type ContentItemMetadata struct {
 	Category             Optional[string]
 	ID                   string
 	Kind                 string
 	MediaType            string
 	ParentItemId         Optional[string]
 	Role                 Optional[string]
-	Selection            ContentItemVariant3Selection
+	Selection            ContentItemMetadataSelection
 	Sha256               Optional[string]
 	Size                 Optional[json.Number]
 	Synthesized          Optional[bool]
@@ -4515,78 +4515,78 @@ type ContentItemVariant3 struct {
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *ContentItemVariant3) UnmarshalJSON(data []byte) error {
+func (value *ContentItemMetadata) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("ContentItemVariant3 must be a JSON object")
+		return fmt.Errorf("ContentItemMetadata must be a JSON object")
 	}
-	var decoded ContentItemVariant3
+	var decoded ContentItemMetadata
 	if raw, ok := fields["category"]; ok {
 		decoded.Category.Present = true
 		if err := json.Unmarshal(raw, &decoded.Category.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant3.category: %w", err)
+			return fmt.Errorf("ContentItemMetadata.category: %w", err)
 		}
 		delete(fields, "category")
 	}
 	if raw, ok := fields["id"]; ok {
 		if err := json.Unmarshal(raw, &decoded.ID); err != nil {
-			return fmt.Errorf("ContentItemVariant3.id: %w", err)
+			return fmt.Errorf("ContentItemMetadata.id: %w", err)
 		}
 		delete(fields, "id")
 	}
 	if raw, ok := fields["kind"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Kind); err != nil {
-			return fmt.Errorf("ContentItemVariant3.kind: %w", err)
+			return fmt.Errorf("ContentItemMetadata.kind: %w", err)
 		}
 		delete(fields, "kind")
 	}
 	if raw, ok := fields["mediaType"]; ok {
 		if err := json.Unmarshal(raw, &decoded.MediaType); err != nil {
-			return fmt.Errorf("ContentItemVariant3.mediaType: %w", err)
+			return fmt.Errorf("ContentItemMetadata.mediaType: %w", err)
 		}
 		delete(fields, "mediaType")
 	}
 	if raw, ok := fields["parentItemId"]; ok {
 		decoded.ParentItemId.Present = true
 		if err := json.Unmarshal(raw, &decoded.ParentItemId.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant3.parentItemId: %w", err)
+			return fmt.Errorf("ContentItemMetadata.parentItemId: %w", err)
 		}
 		delete(fields, "parentItemId")
 	}
 	if raw, ok := fields["role"]; ok {
 		decoded.Role.Present = true
 		if err := json.Unmarshal(raw, &decoded.Role.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant3.role: %w", err)
+			return fmt.Errorf("ContentItemMetadata.role: %w", err)
 		}
 		delete(fields, "role")
 	}
 	if raw, ok := fields["selection"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Selection); err != nil {
-			return fmt.Errorf("ContentItemVariant3.selection: %w", err)
+			return fmt.Errorf("ContentItemMetadata.selection: %w", err)
 		}
 		delete(fields, "selection")
 	}
 	if raw, ok := fields["sha256"]; ok {
 		decoded.Sha256.Present = true
 		if err := json.Unmarshal(raw, &decoded.Sha256.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant3.sha256: %w", err)
+			return fmt.Errorf("ContentItemMetadata.sha256: %w", err)
 		}
 		delete(fields, "sha256")
 	}
 	if raw, ok := fields["size"]; ok {
 		decoded.Size.Present = true
 		if err := json.Unmarshal(raw, &decoded.Size.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant3.size: %w", err)
+			return fmt.Errorf("ContentItemMetadata.size: %w", err)
 		}
 		delete(fields, "size")
 	}
 	if raw, ok := fields["synthesized"]; ok {
 		decoded.Synthesized.Present = true
 		if err := json.Unmarshal(raw, &decoded.Synthesized.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant3.synthesized: %w", err)
+			return fmt.Errorf("ContentItemMetadata.synthesized: %w", err)
 		}
 		delete(fields, "synthesized")
 	}
@@ -4596,7 +4596,7 @@ func (value *ContentItemVariant3) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value ContentItemVariant3) MarshalJSON() ([]byte, error) {
+func (value ContentItemMetadata) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+10)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -4604,90 +4604,90 @@ func (value ContentItemVariant3) MarshalJSON() ([]byte, error) {
 	if value.Category.Present {
 		raw, err := json.Marshal(value.Category.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant3.category: %w", err)
+			return nil, fmt.Errorf("ContentItemMetadata.category: %w", err)
 		}
 		fields["category"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.ID)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant3.id: %w", err)
+			return nil, fmt.Errorf("ContentItemMetadata.id: %w", err)
 		}
 		fields["id"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Kind)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant3.kind: %w", err)
+			return nil, fmt.Errorf("ContentItemMetadata.kind: %w", err)
 		}
 		fields["kind"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.MediaType)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant3.mediaType: %w", err)
+			return nil, fmt.Errorf("ContentItemMetadata.mediaType: %w", err)
 		}
 		fields["mediaType"] = raw
 	}
 	if value.ParentItemId.Present {
 		raw, err := json.Marshal(value.ParentItemId.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant3.parentItemId: %w", err)
+			return nil, fmt.Errorf("ContentItemMetadata.parentItemId: %w", err)
 		}
 		fields["parentItemId"] = raw
 	}
 	if value.Role.Present {
 		raw, err := json.Marshal(value.Role.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant3.role: %w", err)
+			return nil, fmt.Errorf("ContentItemMetadata.role: %w", err)
 		}
 		fields["role"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Selection)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant3.selection: %w", err)
+			return nil, fmt.Errorf("ContentItemMetadata.selection: %w", err)
 		}
 		fields["selection"] = raw
 	}
 	if value.Sha256.Present {
 		raw, err := json.Marshal(value.Sha256.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant3.sha256: %w", err)
+			return nil, fmt.Errorf("ContentItemMetadata.sha256: %w", err)
 		}
 		fields["sha256"] = raw
 	}
 	if value.Size.Present {
 		raw, err := json.Marshal(value.Size.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant3.size: %w", err)
+			return nil, fmt.Errorf("ContentItemMetadata.size: %w", err)
 		}
 		fields["size"] = raw
 	}
 	if value.Synthesized.Present {
 		raw, err := json.Marshal(value.Synthesized.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant3.synthesized: %w", err)
+			return nil, fmt.Errorf("ContentItemMetadata.synthesized: %w", err)
 		}
 		fields["synthesized"] = raw
 	}
 	return json.Marshal(fields)
 }
 
-// ContentItemVariant4Selection is a generated schema value.
-type ContentItemVariant4Selection string
+// ContentItemOmitSelection is a generated schema value.
+type ContentItemOmitSelection string
 
-const ContentItemVariant4SelectionOmit ContentItemVariant4Selection = "omit"
+const ContentItemOmitSelectionOmit ContentItemOmitSelection = "omit"
 
-// ContentItemVariant4 is a generated nested model.
-type ContentItemVariant4 struct {
+// ContentItemOmit is a generated nested model.
+type ContentItemOmit struct {
 	Category             Optional[string]
 	ID                   string
 	Kind                 string
 	MediaType            string
 	ParentItemId         Optional[string]
 	Role                 Optional[string]
-	Selection            ContentItemVariant4Selection
+	Selection            ContentItemOmitSelection
 	Sha256               Optional[string]
 	Size                 Optional[json.Number]
 	Synthesized          Optional[bool]
@@ -4695,78 +4695,78 @@ type ContentItemVariant4 struct {
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *ContentItemVariant4) UnmarshalJSON(data []byte) error {
+func (value *ContentItemOmit) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("ContentItemVariant4 must be a JSON object")
+		return fmt.Errorf("ContentItemOmit must be a JSON object")
 	}
-	var decoded ContentItemVariant4
+	var decoded ContentItemOmit
 	if raw, ok := fields["category"]; ok {
 		decoded.Category.Present = true
 		if err := json.Unmarshal(raw, &decoded.Category.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant4.category: %w", err)
+			return fmt.Errorf("ContentItemOmit.category: %w", err)
 		}
 		delete(fields, "category")
 	}
 	if raw, ok := fields["id"]; ok {
 		if err := json.Unmarshal(raw, &decoded.ID); err != nil {
-			return fmt.Errorf("ContentItemVariant4.id: %w", err)
+			return fmt.Errorf("ContentItemOmit.id: %w", err)
 		}
 		delete(fields, "id")
 	}
 	if raw, ok := fields["kind"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Kind); err != nil {
-			return fmt.Errorf("ContentItemVariant4.kind: %w", err)
+			return fmt.Errorf("ContentItemOmit.kind: %w", err)
 		}
 		delete(fields, "kind")
 	}
 	if raw, ok := fields["mediaType"]; ok {
 		if err := json.Unmarshal(raw, &decoded.MediaType); err != nil {
-			return fmt.Errorf("ContentItemVariant4.mediaType: %w", err)
+			return fmt.Errorf("ContentItemOmit.mediaType: %w", err)
 		}
 		delete(fields, "mediaType")
 	}
 	if raw, ok := fields["parentItemId"]; ok {
 		decoded.ParentItemId.Present = true
 		if err := json.Unmarshal(raw, &decoded.ParentItemId.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant4.parentItemId: %w", err)
+			return fmt.Errorf("ContentItemOmit.parentItemId: %w", err)
 		}
 		delete(fields, "parentItemId")
 	}
 	if raw, ok := fields["role"]; ok {
 		decoded.Role.Present = true
 		if err := json.Unmarshal(raw, &decoded.Role.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant4.role: %w", err)
+			return fmt.Errorf("ContentItemOmit.role: %w", err)
 		}
 		delete(fields, "role")
 	}
 	if raw, ok := fields["selection"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Selection); err != nil {
-			return fmt.Errorf("ContentItemVariant4.selection: %w", err)
+			return fmt.Errorf("ContentItemOmit.selection: %w", err)
 		}
 		delete(fields, "selection")
 	}
 	if raw, ok := fields["sha256"]; ok {
 		decoded.Sha256.Present = true
 		if err := json.Unmarshal(raw, &decoded.Sha256.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant4.sha256: %w", err)
+			return fmt.Errorf("ContentItemOmit.sha256: %w", err)
 		}
 		delete(fields, "sha256")
 	}
 	if raw, ok := fields["size"]; ok {
 		decoded.Size.Present = true
 		if err := json.Unmarshal(raw, &decoded.Size.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant4.size: %w", err)
+			return fmt.Errorf("ContentItemOmit.size: %w", err)
 		}
 		delete(fields, "size")
 	}
 	if raw, ok := fields["synthesized"]; ok {
 		decoded.Synthesized.Present = true
 		if err := json.Unmarshal(raw, &decoded.Synthesized.Value); err != nil {
-			return fmt.Errorf("ContentItemVariant4.synthesized: %w", err)
+			return fmt.Errorf("ContentItemOmit.synthesized: %w", err)
 		}
 		delete(fields, "synthesized")
 	}
@@ -4776,7 +4776,7 @@ func (value *ContentItemVariant4) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value ContentItemVariant4) MarshalJSON() ([]byte, error) {
+func (value ContentItemOmit) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+10)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -4784,70 +4784,70 @@ func (value ContentItemVariant4) MarshalJSON() ([]byte, error) {
 	if value.Category.Present {
 		raw, err := json.Marshal(value.Category.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant4.category: %w", err)
+			return nil, fmt.Errorf("ContentItemOmit.category: %w", err)
 		}
 		fields["category"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.ID)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant4.id: %w", err)
+			return nil, fmt.Errorf("ContentItemOmit.id: %w", err)
 		}
 		fields["id"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Kind)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant4.kind: %w", err)
+			return nil, fmt.Errorf("ContentItemOmit.kind: %w", err)
 		}
 		fields["kind"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.MediaType)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant4.mediaType: %w", err)
+			return nil, fmt.Errorf("ContentItemOmit.mediaType: %w", err)
 		}
 		fields["mediaType"] = raw
 	}
 	if value.ParentItemId.Present {
 		raw, err := json.Marshal(value.ParentItemId.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant4.parentItemId: %w", err)
+			return nil, fmt.Errorf("ContentItemOmit.parentItemId: %w", err)
 		}
 		fields["parentItemId"] = raw
 	}
 	if value.Role.Present {
 		raw, err := json.Marshal(value.Role.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant4.role: %w", err)
+			return nil, fmt.Errorf("ContentItemOmit.role: %w", err)
 		}
 		fields["role"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Selection)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant4.selection: %w", err)
+			return nil, fmt.Errorf("ContentItemOmit.selection: %w", err)
 		}
 		fields["selection"] = raw
 	}
 	if value.Sha256.Present {
 		raw, err := json.Marshal(value.Sha256.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant4.sha256: %w", err)
+			return nil, fmt.Errorf("ContentItemOmit.sha256: %w", err)
 		}
 		fields["sha256"] = raw
 	}
 	if value.Size.Present {
 		raw, err := json.Marshal(value.Size.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant4.size: %w", err)
+			return nil, fmt.Errorf("ContentItemOmit.size: %w", err)
 		}
 		fields["size"] = raw
 	}
 	if value.Synthesized.Present {
 		raw, err := json.Marshal(value.Synthesized.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ContentItemVariant4.synthesized: %w", err)
+			return nil, fmt.Errorf("ContentItemOmit.synthesized: %w", err)
 		}
 		fields["synthesized"] = raw
 	}
@@ -4856,10 +4856,10 @@ func (value ContentItemVariant4) MarshalJSON() ([]byte, error) {
 
 // ContentItem is generated from schema/draft/content-item.schema.json#.
 type ContentItem struct {
-	Variant1 Optional[ContentItemVariant1]
-	Variant2 Optional[ContentItemVariant2]
-	Variant3 Optional[ContentItemVariant3]
-	Variant4 Optional[ContentItemVariant4]
+	Body     Optional[ContentItemBody]
+	BodyGap  Optional[ContentItemBodyGap]
+	Metadata Optional[ContentItemMetadata]
+	Omit     Optional[ContentItemOmit]
 	Unknown  json.RawMessage
 }
 
@@ -4879,11 +4879,11 @@ func (value *ContentItem) UnmarshalJSON(data []byte) error {
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[0], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate ContentItemVariant1
+			var candidate ContentItemBody
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("ContentItem.Variant1: %w", err)
+				return fmt.Errorf("ContentItem.Body: %w", err)
 			}
-			decoded.Variant1 = Some(candidate)
+			decoded.Body = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -4892,11 +4892,11 @@ func (value *ContentItem) UnmarshalJSON(data []byte) error {
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[1], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate ContentItemVariant2
+			var candidate ContentItemBodyGap
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("ContentItem.Variant2: %w", err)
+				return fmt.Errorf("ContentItem.BodyGap: %w", err)
 			}
-			decoded.Variant2 = Some(candidate)
+			decoded.BodyGap = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -4905,11 +4905,11 @@ func (value *ContentItem) UnmarshalJSON(data []byte) error {
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[2], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate ContentItemVariant3
+			var candidate ContentItemMetadata
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("ContentItem.Variant3: %w", err)
+				return fmt.Errorf("ContentItem.Metadata: %w", err)
 			}
-			decoded.Variant3 = Some(candidate)
+			decoded.Metadata = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -4918,11 +4918,11 @@ func (value *ContentItem) UnmarshalJSON(data []byte) error {
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[3], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate ContentItemVariant4
+			var candidate ContentItemOmit
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("ContentItem.Variant4: %w", err)
+				return fmt.Errorf("ContentItem.Omit: %w", err)
 			}
-			decoded.Variant4 = Some(candidate)
+			decoded.Omit = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -4934,16 +4934,16 @@ func (value *ContentItem) UnmarshalJSON(data []byte) error {
 
 func (value ContentItem) MarshalJSON() ([]byte, error) {
 	selected := 0
-	if value.Variant1.Present {
+	if value.Body.Present {
 		selected++
 	}
-	if value.Variant2.Present {
+	if value.BodyGap.Present {
 		selected++
 	}
-	if value.Variant3.Present {
+	if value.Metadata.Present {
 		selected++
 	}
-	if value.Variant4.Present {
+	if value.Omit.Present {
 		selected++
 	}
 	if len(value.Unknown) != 0 {
@@ -4952,17 +4952,17 @@ func (value ContentItem) MarshalJSON() ([]byte, error) {
 	if selected != 1 {
 		return nil, fmt.Errorf("ContentItem: exactly one variant must be selected")
 	}
-	if value.Variant1.Present {
-		return json.Marshal(value.Variant1.Value)
+	if value.Body.Present {
+		return json.Marshal(value.Body.Value)
 	}
-	if value.Variant2.Present {
-		return json.Marshal(value.Variant2.Value)
+	if value.BodyGap.Present {
+		return json.Marshal(value.BodyGap.Value)
 	}
-	if value.Variant3.Present {
-		return json.Marshal(value.Variant3.Value)
+	if value.Metadata.Present {
+		return json.Marshal(value.Metadata.Value)
 	}
-	if value.Variant4.Present {
-		return json.Marshal(value.Variant4.Value)
+	if value.Omit.Present {
+		return json.Marshal(value.Omit.Value)
 	}
 	return json.Marshal(value.Unknown)
 }
@@ -7004,30 +7004,30 @@ func (value DenyEffect) MarshalJSON() ([]byte, error) {
 	return json.Marshal(fields)
 }
 
-// EffectVariant2Type is a generated schema value.
-type EffectVariant2Type string
+// EffectAllowType is a generated schema value.
+type EffectAllowType string
 
-const EffectVariant2TypeAllow EffectVariant2Type = "allow"
+const EffectAllowTypeAllow EffectAllowType = "allow"
 
-// EffectVariant2 is a generated nested model.
-type EffectVariant2 struct {
-	Type                 EffectVariant2Type
+// EffectAllow is a generated nested model.
+type EffectAllow struct {
+	Type                 EffectAllowType
 	AdditionalProperties map[string]json.RawMessage
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *EffectVariant2) UnmarshalJSON(data []byte) error {
+func (value *EffectAllow) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("EffectVariant2 must be a JSON object")
+		return fmt.Errorf("EffectAllow must be a JSON object")
 	}
-	var decoded EffectVariant2
+	var decoded EffectAllow
 	if raw, ok := fields["type"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Type); err != nil {
-			return fmt.Errorf("EffectVariant2.type: %w", err)
+			return fmt.Errorf("EffectAllow.type: %w", err)
 		}
 		delete(fields, "type")
 	}
@@ -7037,7 +7037,7 @@ func (value *EffectVariant2) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value EffectVariant2) MarshalJSON() ([]byte, error) {
+func (value EffectAllow) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+1)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -7045,37 +7045,37 @@ func (value EffectVariant2) MarshalJSON() ([]byte, error) {
 	{
 		raw, err := json.Marshal(value.Type)
 		if err != nil {
-			return nil, fmt.Errorf("EffectVariant2.type: %w", err)
+			return nil, fmt.Errorf("EffectAllow.type: %w", err)
 		}
 		fields["type"] = raw
 	}
 	return json.Marshal(fields)
 }
 
-// EffectVariant3Type is a generated schema value.
-type EffectVariant3Type string
+// EffectAskType is a generated schema value.
+type EffectAskType string
 
-const EffectVariant3TypeAsk EffectVariant3Type = "ask"
+const EffectAskTypeAsk EffectAskType = "ask"
 
-// EffectVariant3 is a generated nested model.
-type EffectVariant3 struct {
-	Type                 EffectVariant3Type
+// EffectAsk is a generated nested model.
+type EffectAsk struct {
+	Type                 EffectAskType
 	AdditionalProperties map[string]json.RawMessage
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *EffectVariant3) UnmarshalJSON(data []byte) error {
+func (value *EffectAsk) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("EffectVariant3 must be a JSON object")
+		return fmt.Errorf("EffectAsk must be a JSON object")
 	}
-	var decoded EffectVariant3
+	var decoded EffectAsk
 	if raw, ok := fields["type"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Type); err != nil {
-			return fmt.Errorf("EffectVariant3.type: %w", err)
+			return fmt.Errorf("EffectAsk.type: %w", err)
 		}
 		delete(fields, "type")
 	}
@@ -7085,7 +7085,7 @@ func (value *EffectVariant3) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value EffectVariant3) MarshalJSON() ([]byte, error) {
+func (value EffectAsk) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+1)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -7093,77 +7093,77 @@ func (value EffectVariant3) MarshalJSON() ([]byte, error) {
 	{
 		raw, err := json.Marshal(value.Type)
 		if err != nil {
-			return nil, fmt.Errorf("EffectVariant3.type: %w", err)
+			return nil, fmt.Errorf("EffectAsk.type: %w", err)
 		}
 		fields["type"] = raw
 	}
 	return json.Marshal(fields)
 }
 
-// EffectVariant4Operation is a generated schema value.
-type EffectVariant4Operation string
+// EffectModifyOperation is a generated schema value.
+type EffectModifyOperation string
 
-const EffectVariant4OperationReplace EffectVariant4Operation = "replace"
-const EffectVariant4OperationMerge EffectVariant4Operation = "merge"
+const EffectModifyOperationReplace EffectModifyOperation = "replace"
+const EffectModifyOperationMerge EffectModifyOperation = "merge"
 
-// EffectVariant4Target is a generated schema value.
-type EffectVariant4Target string
+// EffectModifyTarget is a generated schema value.
+type EffectModifyTarget string
 
-const EffectVariant4TargetInput EffectVariant4Target = "input"
-const EffectVariant4TargetOutput EffectVariant4Target = "output"
-const EffectVariant4TargetPrompt EffectVariant4Target = "prompt"
-const EffectVariant4TargetRequest EffectVariant4Target = "request"
-const EffectVariant4TargetResponse EffectVariant4Target = "response"
-const EffectVariant4TargetContent EffectVariant4Target = "content"
-const EffectVariant4TargetInstructions EffectVariant4Target = "instructions"
-const EffectVariant4TargetSummary EffectVariant4Target = "summary"
-const EffectVariant4TargetWorkspace EffectVariant4Target = "workspace"
+const EffectModifyTargetInput EffectModifyTarget = "input"
+const EffectModifyTargetOutput EffectModifyTarget = "output"
+const EffectModifyTargetPrompt EffectModifyTarget = "prompt"
+const EffectModifyTargetRequest EffectModifyTarget = "request"
+const EffectModifyTargetResponse EffectModifyTarget = "response"
+const EffectModifyTargetContent EffectModifyTarget = "content"
+const EffectModifyTargetInstructions EffectModifyTarget = "instructions"
+const EffectModifyTargetSummary EffectModifyTarget = "summary"
+const EffectModifyTargetWorkspace EffectModifyTarget = "workspace"
 
-// EffectVariant4Type is a generated schema value.
-type EffectVariant4Type string
+// EffectModifyType is a generated schema value.
+type EffectModifyType string
 
-const EffectVariant4TypeModify EffectVariant4Type = "modify"
+const EffectModifyTypeModify EffectModifyType = "modify"
 
-// EffectVariant4 is a generated nested model.
-type EffectVariant4 struct {
-	Operation            EffectVariant4Operation
-	Target               EffectVariant4Target
-	Type                 EffectVariant4Type
+// EffectModify is a generated nested model.
+type EffectModify struct {
+	Operation            EffectModifyOperation
+	Target               EffectModifyTarget
+	Type                 EffectModifyType
 	Value                json.RawMessage
 	AdditionalProperties map[string]json.RawMessage
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *EffectVariant4) UnmarshalJSON(data []byte) error {
+func (value *EffectModify) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("EffectVariant4 must be a JSON object")
+		return fmt.Errorf("EffectModify must be a JSON object")
 	}
-	var decoded EffectVariant4
+	var decoded EffectModify
 	if raw, ok := fields["operation"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Operation); err != nil {
-			return fmt.Errorf("EffectVariant4.operation: %w", err)
+			return fmt.Errorf("EffectModify.operation: %w", err)
 		}
 		delete(fields, "operation")
 	}
 	if raw, ok := fields["target"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Target); err != nil {
-			return fmt.Errorf("EffectVariant4.target: %w", err)
+			return fmt.Errorf("EffectModify.target: %w", err)
 		}
 		delete(fields, "target")
 	}
 	if raw, ok := fields["type"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Type); err != nil {
-			return fmt.Errorf("EffectVariant4.type: %w", err)
+			return fmt.Errorf("EffectModify.type: %w", err)
 		}
 		delete(fields, "type")
 	}
 	if raw, ok := fields["value"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Value); err != nil {
-			return fmt.Errorf("EffectVariant4.value: %w", err)
+			return fmt.Errorf("EffectModify.value: %w", err)
 		}
 		delete(fields, "value")
 	}
@@ -7173,7 +7173,7 @@ func (value *EffectVariant4) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value EffectVariant4) MarshalJSON() ([]byte, error) {
+func (value EffectModify) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+4)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -7181,65 +7181,65 @@ func (value EffectVariant4) MarshalJSON() ([]byte, error) {
 	{
 		raw, err := json.Marshal(value.Operation)
 		if err != nil {
-			return nil, fmt.Errorf("EffectVariant4.operation: %w", err)
+			return nil, fmt.Errorf("EffectModify.operation: %w", err)
 		}
 		fields["operation"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Target)
 		if err != nil {
-			return nil, fmt.Errorf("EffectVariant4.target: %w", err)
+			return nil, fmt.Errorf("EffectModify.target: %w", err)
 		}
 		fields["target"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Type)
 		if err != nil {
-			return nil, fmt.Errorf("EffectVariant4.type: %w", err)
+			return nil, fmt.Errorf("EffectModify.type: %w", err)
 		}
 		fields["type"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Value)
 		if err != nil {
-			return nil, fmt.Errorf("EffectVariant4.value: %w", err)
+			return nil, fmt.Errorf("EffectModify.value: %w", err)
 		}
 		fields["value"] = raw
 	}
 	return json.Marshal(fields)
 }
 
-// EffectVariant5Type is a generated schema value.
-type EffectVariant5Type string
+// EffectMessageType is a generated schema value.
+type EffectMessageType string
 
-const EffectVariant5TypeMessage EffectVariant5Type = "message"
+const EffectMessageTypeMessage EffectMessageType = "message"
 
-// EffectVariant5 is a generated nested model.
-type EffectVariant5 struct {
+// EffectMessage is a generated nested model.
+type EffectMessage struct {
 	Text                 string
-	Type                 EffectVariant5Type
+	Type                 EffectMessageType
 	AdditionalProperties map[string]json.RawMessage
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *EffectVariant5) UnmarshalJSON(data []byte) error {
+func (value *EffectMessage) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("EffectVariant5 must be a JSON object")
+		return fmt.Errorf("EffectMessage must be a JSON object")
 	}
-	var decoded EffectVariant5
+	var decoded EffectMessage
 	if raw, ok := fields["text"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Text); err != nil {
-			return fmt.Errorf("EffectVariant5.text: %w", err)
+			return fmt.Errorf("EffectMessage.text: %w", err)
 		}
 		delete(fields, "text")
 	}
 	if raw, ok := fields["type"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Type); err != nil {
-			return fmt.Errorf("EffectVariant5.type: %w", err)
+			return fmt.Errorf("EffectMessage.type: %w", err)
 		}
 		delete(fields, "type")
 	}
@@ -7249,7 +7249,7 @@ func (value *EffectVariant5) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value EffectVariant5) MarshalJSON() ([]byte, error) {
+func (value EffectMessage) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+2)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -7257,51 +7257,51 @@ func (value EffectVariant5) MarshalJSON() ([]byte, error) {
 	{
 		raw, err := json.Marshal(value.Text)
 		if err != nil {
-			return nil, fmt.Errorf("EffectVariant5.text: %w", err)
+			return nil, fmt.Errorf("EffectMessage.text: %w", err)
 		}
 		fields["text"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Type)
 		if err != nil {
-			return nil, fmt.Errorf("EffectVariant5.type: %w", err)
+			return nil, fmt.Errorf("EffectMessage.type: %w", err)
 		}
 		fields["type"] = raw
 	}
 	return json.Marshal(fields)
 }
 
-// EffectVariant6Type is a generated schema value.
-type EffectVariant6Type string
+// EffectReturnType is a generated schema value.
+type EffectReturnType string
 
-const EffectVariant6TypeReturn EffectVariant6Type = "return"
+const EffectReturnTypeReturn EffectReturnType = "return"
 
-// EffectVariant6 is a generated nested model.
-type EffectVariant6 struct {
-	Type                 EffectVariant6Type
+// EffectReturn is a generated nested model.
+type EffectReturn struct {
+	Type                 EffectReturnType
 	Value                json.RawMessage
 	AdditionalProperties map[string]json.RawMessage
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *EffectVariant6) UnmarshalJSON(data []byte) error {
+func (value *EffectReturn) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("EffectVariant6 must be a JSON object")
+		return fmt.Errorf("EffectReturn must be a JSON object")
 	}
-	var decoded EffectVariant6
+	var decoded EffectReturn
 	if raw, ok := fields["type"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Type); err != nil {
-			return fmt.Errorf("EffectVariant6.type: %w", err)
+			return fmt.Errorf("EffectReturn.type: %w", err)
 		}
 		delete(fields, "type")
 	}
 	if raw, ok := fields["value"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Value); err != nil {
-			return fmt.Errorf("EffectVariant6.value: %w", err)
+			return fmt.Errorf("EffectReturn.value: %w", err)
 		}
 		delete(fields, "value")
 	}
@@ -7311,7 +7311,7 @@ func (value *EffectVariant6) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value EffectVariant6) MarshalJSON() ([]byte, error) {
+func (value EffectReturn) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+2)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -7319,63 +7319,63 @@ func (value EffectVariant6) MarshalJSON() ([]byte, error) {
 	{
 		raw, err := json.Marshal(value.Type)
 		if err != nil {
-			return nil, fmt.Errorf("EffectVariant6.type: %w", err)
+			return nil, fmt.Errorf("EffectReturn.type: %w", err)
 		}
 		fields["type"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Value)
 		if err != nil {
-			return nil, fmt.Errorf("EffectVariant6.value: %w", err)
+			return nil, fmt.Errorf("EffectReturn.value: %w", err)
 		}
 		fields["value"] = raw
 	}
 	return json.Marshal(fields)
 }
 
-// EffectVariant7Operation is a generated schema value.
-type EffectVariant7Operation string
+// EffectFlowStopOperation is a generated schema value.
+type EffectFlowStopOperation string
 
-const EffectVariant7OperationStop EffectVariant7Operation = "stop"
+const EffectFlowStopOperationStop EffectFlowStopOperation = "stop"
 
-// EffectVariant7Type is a generated schema value.
-type EffectVariant7Type string
+// EffectFlowStopType is a generated schema value.
+type EffectFlowStopType string
 
-const EffectVariant7TypeFlow EffectVariant7Type = "flow"
+const EffectFlowStopTypeFlow EffectFlowStopType = "flow"
 
-// EffectVariant7 is a generated nested model.
-type EffectVariant7 struct {
-	Operation            EffectVariant7Operation
+// EffectFlowStop is a generated nested model.
+type EffectFlowStop struct {
+	Operation            EffectFlowStopOperation
 	Reason               string
-	Type                 EffectVariant7Type
+	Type                 EffectFlowStopType
 	AdditionalProperties map[string]json.RawMessage
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *EffectVariant7) UnmarshalJSON(data []byte) error {
+func (value *EffectFlowStop) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("EffectVariant7 must be a JSON object")
+		return fmt.Errorf("EffectFlowStop must be a JSON object")
 	}
-	var decoded EffectVariant7
+	var decoded EffectFlowStop
 	if raw, ok := fields["operation"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Operation); err != nil {
-			return fmt.Errorf("EffectVariant7.operation: %w", err)
+			return fmt.Errorf("EffectFlowStop.operation: %w", err)
 		}
 		delete(fields, "operation")
 	}
 	if raw, ok := fields["reason"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Reason); err != nil {
-			return fmt.Errorf("EffectVariant7.reason: %w", err)
+			return fmt.Errorf("EffectFlowStop.reason: %w", err)
 		}
 		delete(fields, "reason")
 	}
 	if raw, ok := fields["type"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Type); err != nil {
-			return fmt.Errorf("EffectVariant7.type: %w", err)
+			return fmt.Errorf("EffectFlowStop.type: %w", err)
 		}
 		delete(fields, "type")
 	}
@@ -7385,7 +7385,7 @@ func (value *EffectVariant7) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value EffectVariant7) MarshalJSON() ([]byte, error) {
+func (value EffectFlowStop) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+3)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -7393,71 +7393,71 @@ func (value EffectVariant7) MarshalJSON() ([]byte, error) {
 	{
 		raw, err := json.Marshal(value.Operation)
 		if err != nil {
-			return nil, fmt.Errorf("EffectVariant7.operation: %w", err)
+			return nil, fmt.Errorf("EffectFlowStop.operation: %w", err)
 		}
 		fields["operation"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Reason)
 		if err != nil {
-			return nil, fmt.Errorf("EffectVariant7.reason: %w", err)
+			return nil, fmt.Errorf("EffectFlowStop.reason: %w", err)
 		}
 		fields["reason"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Type)
 		if err != nil {
-			return nil, fmt.Errorf("EffectVariant7.type: %w", err)
+			return nil, fmt.Errorf("EffectFlowStop.type: %w", err)
 		}
 		fields["type"] = raw
 	}
 	return json.Marshal(fields)
 }
 
-// EffectVariant8Operation is a generated schema value.
-type EffectVariant8Operation string
+// EffectFlowContinueOperation is a generated schema value.
+type EffectFlowContinueOperation string
 
-const EffectVariant8OperationContinue EffectVariant8Operation = "continue"
+const EffectFlowContinueOperationContinue EffectFlowContinueOperation = "continue"
 
-// EffectVariant8Type is a generated schema value.
-type EffectVariant8Type string
+// EffectFlowContinueType is a generated schema value.
+type EffectFlowContinueType string
 
-const EffectVariant8TypeFlow EffectVariant8Type = "flow"
+const EffectFlowContinueTypeFlow EffectFlowContinueType = "flow"
 
-// EffectVariant8 is a generated nested model.
-type EffectVariant8 struct {
+// EffectFlowContinue is a generated nested model.
+type EffectFlowContinue struct {
 	Instruction          Optional[string]
-	Operation            EffectVariant8Operation
-	Type                 EffectVariant8Type
+	Operation            EffectFlowContinueOperation
+	Type                 EffectFlowContinueType
 	AdditionalProperties map[string]json.RawMessage
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *EffectVariant8) UnmarshalJSON(data []byte) error {
+func (value *EffectFlowContinue) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("EffectVariant8 must be a JSON object")
+		return fmt.Errorf("EffectFlowContinue must be a JSON object")
 	}
-	var decoded EffectVariant8
+	var decoded EffectFlowContinue
 	if raw, ok := fields["instruction"]; ok {
 		decoded.Instruction.Present = true
 		if err := json.Unmarshal(raw, &decoded.Instruction.Value); err != nil {
-			return fmt.Errorf("EffectVariant8.instruction: %w", err)
+			return fmt.Errorf("EffectFlowContinue.instruction: %w", err)
 		}
 		delete(fields, "instruction")
 	}
 	if raw, ok := fields["operation"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Operation); err != nil {
-			return fmt.Errorf("EffectVariant8.operation: %w", err)
+			return fmt.Errorf("EffectFlowContinue.operation: %w", err)
 		}
 		delete(fields, "operation")
 	}
 	if raw, ok := fields["type"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Type); err != nil {
-			return fmt.Errorf("EffectVariant8.type: %w", err)
+			return fmt.Errorf("EffectFlowContinue.type: %w", err)
 		}
 		delete(fields, "type")
 	}
@@ -7467,7 +7467,7 @@ func (value *EffectVariant8) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value EffectVariant8) MarshalJSON() ([]byte, error) {
+func (value EffectFlowContinue) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+3)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -7475,95 +7475,95 @@ func (value EffectVariant8) MarshalJSON() ([]byte, error) {
 	if value.Instruction.Present {
 		raw, err := json.Marshal(value.Instruction.Value)
 		if err != nil {
-			return nil, fmt.Errorf("EffectVariant8.instruction: %w", err)
+			return nil, fmt.Errorf("EffectFlowContinue.instruction: %w", err)
 		}
 		fields["instruction"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Operation)
 		if err != nil {
-			return nil, fmt.Errorf("EffectVariant8.operation: %w", err)
+			return nil, fmt.Errorf("EffectFlowContinue.operation: %w", err)
 		}
 		fields["operation"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Type)
 		if err != nil {
-			return nil, fmt.Errorf("EffectVariant8.type: %w", err)
+			return nil, fmt.Errorf("EffectFlowContinue.type: %w", err)
 		}
 		fields["type"] = raw
 	}
 	return json.Marshal(fields)
 }
 
-// EffectVariant9DeliverAt is a generated schema value.
-type EffectVariant9DeliverAt string
+// EffectInjectAppendContextDeliverAt is a generated schema value.
+type EffectInjectAppendContextDeliverAt string
 
-const EffectVariant9DeliverAtNow EffectVariant9DeliverAt = "now"
-const EffectVariant9DeliverAtNextTurn EffectVariant9DeliverAt = "next_turn"
+const EffectInjectAppendContextDeliverAtNow EffectInjectAppendContextDeliverAt = "now"
+const EffectInjectAppendContextDeliverAtNextTurn EffectInjectAppendContextDeliverAt = "next_turn"
 
-// EffectVariant9Operation is a generated schema value.
-type EffectVariant9Operation string
+// EffectInjectAppendContextOperation is a generated schema value.
+type EffectInjectAppendContextOperation string
 
-const EffectVariant9OperationAppend EffectVariant9Operation = "append"
+const EffectInjectAppendContextOperationAppend EffectInjectAppendContextOperation = "append"
 
-// EffectVariant9Target is a generated schema value.
-type EffectVariant9Target string
+// EffectInjectAppendContextTarget is a generated schema value.
+type EffectInjectAppendContextTarget string
 
-const EffectVariant9TargetContext EffectVariant9Target = "context"
+const EffectInjectAppendContextTargetContext EffectInjectAppendContextTarget = "context"
 
-// EffectVariant9Type is a generated schema value.
-type EffectVariant9Type string
+// EffectInjectAppendContextType is a generated schema value.
+type EffectInjectAppendContextType string
 
-const EffectVariant9TypeInject EffectVariant9Type = "inject"
+const EffectInjectAppendContextTypeInject EffectInjectAppendContextType = "inject"
 
-// EffectVariant9 is a generated nested model.
-type EffectVariant9 struct {
-	DeliverAt            EffectVariant9DeliverAt
-	Operation            EffectVariant9Operation
-	Target               EffectVariant9Target
-	Type                 EffectVariant9Type
+// EffectInjectAppendContext is a generated nested model.
+type EffectInjectAppendContext struct {
+	DeliverAt            EffectInjectAppendContextDeliverAt
+	Operation            EffectInjectAppendContextOperation
+	Target               EffectInjectAppendContextTarget
+	Type                 EffectInjectAppendContextType
 	Value                json.RawMessage
 	AdditionalProperties map[string]json.RawMessage
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *EffectVariant9) UnmarshalJSON(data []byte) error {
+func (value *EffectInjectAppendContext) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("EffectVariant9 must be a JSON object")
+		return fmt.Errorf("EffectInjectAppendContext must be a JSON object")
 	}
-	var decoded EffectVariant9
+	var decoded EffectInjectAppendContext
 	if raw, ok := fields["deliverAt"]; ok {
 		if err := json.Unmarshal(raw, &decoded.DeliverAt); err != nil {
-			return fmt.Errorf("EffectVariant9.deliverAt: %w", err)
+			return fmt.Errorf("EffectInjectAppendContext.deliverAt: %w", err)
 		}
 		delete(fields, "deliverAt")
 	}
 	if raw, ok := fields["operation"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Operation); err != nil {
-			return fmt.Errorf("EffectVariant9.operation: %w", err)
+			return fmt.Errorf("EffectInjectAppendContext.operation: %w", err)
 		}
 		delete(fields, "operation")
 	}
 	if raw, ok := fields["target"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Target); err != nil {
-			return fmt.Errorf("EffectVariant9.target: %w", err)
+			return fmt.Errorf("EffectInjectAppendContext.target: %w", err)
 		}
 		delete(fields, "target")
 	}
 	if raw, ok := fields["type"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Type); err != nil {
-			return fmt.Errorf("EffectVariant9.type: %w", err)
+			return fmt.Errorf("EffectInjectAppendContext.type: %w", err)
 		}
 		delete(fields, "type")
 	}
 	if raw, ok := fields["value"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Value); err != nil {
-			return fmt.Errorf("EffectVariant9.value: %w", err)
+			return fmt.Errorf("EffectInjectAppendContext.value: %w", err)
 		}
 		delete(fields, "value")
 	}
@@ -7573,7 +7573,7 @@ func (value *EffectVariant9) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value EffectVariant9) MarshalJSON() ([]byte, error) {
+func (value EffectInjectAppendContext) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+5)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -7581,35 +7581,35 @@ func (value EffectVariant9) MarshalJSON() ([]byte, error) {
 	{
 		raw, err := json.Marshal(value.DeliverAt)
 		if err != nil {
-			return nil, fmt.Errorf("EffectVariant9.deliverAt: %w", err)
+			return nil, fmt.Errorf("EffectInjectAppendContext.deliverAt: %w", err)
 		}
 		fields["deliverAt"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Operation)
 		if err != nil {
-			return nil, fmt.Errorf("EffectVariant9.operation: %w", err)
+			return nil, fmt.Errorf("EffectInjectAppendContext.operation: %w", err)
 		}
 		fields["operation"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Target)
 		if err != nil {
-			return nil, fmt.Errorf("EffectVariant9.target: %w", err)
+			return nil, fmt.Errorf("EffectInjectAppendContext.target: %w", err)
 		}
 		fields["target"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Type)
 		if err != nil {
-			return nil, fmt.Errorf("EffectVariant9.type: %w", err)
+			return nil, fmt.Errorf("EffectInjectAppendContext.type: %w", err)
 		}
 		fields["type"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Value)
 		if err != nil {
-			return nil, fmt.Errorf("EffectVariant9.value: %w", err)
+			return nil, fmt.Errorf("EffectInjectAppendContext.value: %w", err)
 		}
 		fields["value"] = raw
 	}
@@ -7618,16 +7618,16 @@ func (value EffectVariant9) MarshalJSON() ([]byte, error) {
 
 // Effect is generated from schema/draft/effect.schema.json#.
 type Effect struct {
-	DenyEffect Optional[*DenyEffect]
-	Variant2   Optional[EffectVariant2]
-	Variant3   Optional[EffectVariant3]
-	Variant4   Optional[EffectVariant4]
-	Variant5   Optional[EffectVariant5]
-	Variant6   Optional[EffectVariant6]
-	Variant7   Optional[EffectVariant7]
-	Variant8   Optional[EffectVariant8]
-	Variant9   Optional[EffectVariant9]
-	Unknown    json.RawMessage
+	DenyEffect          Optional[*DenyEffect]
+	Allow               Optional[EffectAllow]
+	Ask                 Optional[EffectAsk]
+	Modify              Optional[EffectModify]
+	Message             Optional[EffectMessage]
+	Return              Optional[EffectReturn]
+	FlowStop            Optional[EffectFlowStop]
+	FlowContinue        Optional[EffectFlowContinue]
+	InjectAppendContext Optional[EffectInjectAppendContext]
+	Unknown             json.RawMessage
 }
 
 func (value *Effect) UnmarshalJSON(data []byte) error {
@@ -7659,11 +7659,11 @@ func (value *Effect) UnmarshalJSON(data []byte) error {
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[1], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate EffectVariant2
+			var candidate EffectAllow
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("Effect.Variant2: %w", err)
+				return fmt.Errorf("Effect.Allow: %w", err)
 			}
-			decoded.Variant2 = Some(candidate)
+			decoded.Allow = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -7672,11 +7672,11 @@ func (value *Effect) UnmarshalJSON(data []byte) error {
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[2], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate EffectVariant3
+			var candidate EffectAsk
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("Effect.Variant3: %w", err)
+				return fmt.Errorf("Effect.Ask: %w", err)
 			}
-			decoded.Variant3 = Some(candidate)
+			decoded.Ask = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -7685,11 +7685,11 @@ func (value *Effect) UnmarshalJSON(data []byte) error {
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[3], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate EffectVariant4
+			var candidate EffectModify
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("Effect.Variant4: %w", err)
+				return fmt.Errorf("Effect.Modify: %w", err)
 			}
-			decoded.Variant4 = Some(candidate)
+			decoded.Modify = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -7698,11 +7698,11 @@ func (value *Effect) UnmarshalJSON(data []byte) error {
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[4], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate EffectVariant5
+			var candidate EffectMessage
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("Effect.Variant5: %w", err)
+				return fmt.Errorf("Effect.Message: %w", err)
 			}
-			decoded.Variant5 = Some(candidate)
+			decoded.Message = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -7711,11 +7711,11 @@ func (value *Effect) UnmarshalJSON(data []byte) error {
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[5], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate EffectVariant6
+			var candidate EffectReturn
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("Effect.Variant6: %w", err)
+				return fmt.Errorf("Effect.Return: %w", err)
 			}
-			decoded.Variant6 = Some(candidate)
+			decoded.Return = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -7724,11 +7724,11 @@ func (value *Effect) UnmarshalJSON(data []byte) error {
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[6], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate EffectVariant7
+			var candidate EffectFlowStop
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("Effect.Variant7: %w", err)
+				return fmt.Errorf("Effect.FlowStop: %w", err)
 			}
-			decoded.Variant7 = Some(candidate)
+			decoded.FlowStop = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -7737,11 +7737,11 @@ func (value *Effect) UnmarshalJSON(data []byte) error {
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[7], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate EffectVariant8
+			var candidate EffectFlowContinue
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("Effect.Variant8: %w", err)
+				return fmt.Errorf("Effect.FlowContinue: %w", err)
 			}
-			decoded.Variant8 = Some(candidate)
+			decoded.FlowContinue = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -7750,11 +7750,11 @@ func (value *Effect) UnmarshalJSON(data []byte) error {
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[8], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate EffectVariant9
+			var candidate EffectInjectAppendContext
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("Effect.Variant9: %w", err)
+				return fmt.Errorf("Effect.InjectAppendContext: %w", err)
 			}
-			decoded.Variant9 = Some(candidate)
+			decoded.InjectAppendContext = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -7769,28 +7769,28 @@ func (value Effect) MarshalJSON() ([]byte, error) {
 	if value.DenyEffect.Present {
 		selected++
 	}
-	if value.Variant2.Present {
+	if value.Allow.Present {
 		selected++
 	}
-	if value.Variant3.Present {
+	if value.Ask.Present {
 		selected++
 	}
-	if value.Variant4.Present {
+	if value.Modify.Present {
 		selected++
 	}
-	if value.Variant5.Present {
+	if value.Message.Present {
 		selected++
 	}
-	if value.Variant6.Present {
+	if value.Return.Present {
 		selected++
 	}
-	if value.Variant7.Present {
+	if value.FlowStop.Present {
 		selected++
 	}
-	if value.Variant8.Present {
+	if value.FlowContinue.Present {
 		selected++
 	}
-	if value.Variant9.Present {
+	if value.InjectAppendContext.Present {
 		selected++
 	}
 	if len(value.Unknown) != 0 {
@@ -7802,29 +7802,29 @@ func (value Effect) MarshalJSON() ([]byte, error) {
 	if value.DenyEffect.Present {
 		return json.Marshal(value.DenyEffect.Value)
 	}
-	if value.Variant2.Present {
-		return json.Marshal(value.Variant2.Value)
+	if value.Allow.Present {
+		return json.Marshal(value.Allow.Value)
 	}
-	if value.Variant3.Present {
-		return json.Marshal(value.Variant3.Value)
+	if value.Ask.Present {
+		return json.Marshal(value.Ask.Value)
 	}
-	if value.Variant4.Present {
-		return json.Marshal(value.Variant4.Value)
+	if value.Modify.Present {
+		return json.Marshal(value.Modify.Value)
 	}
-	if value.Variant5.Present {
-		return json.Marshal(value.Variant5.Value)
+	if value.Message.Present {
+		return json.Marshal(value.Message.Value)
 	}
-	if value.Variant6.Present {
-		return json.Marshal(value.Variant6.Value)
+	if value.Return.Present {
+		return json.Marshal(value.Return.Value)
 	}
-	if value.Variant7.Present {
-		return json.Marshal(value.Variant7.Value)
+	if value.FlowStop.Present {
+		return json.Marshal(value.FlowStop.Value)
 	}
-	if value.Variant8.Present {
-		return json.Marshal(value.Variant8.Value)
+	if value.FlowContinue.Present {
+		return json.Marshal(value.FlowContinue.Value)
 	}
-	if value.Variant9.Present {
-		return json.Marshal(value.Variant9.Value)
+	if value.InjectAppendContext.Present {
+		return json.Marshal(value.InjectAppendContext.Value)
 	}
 	return json.Marshal(value.Unknown)
 }
@@ -8239,7 +8239,7 @@ type ExecutionEventAttemptusageCompleteness string
 
 const ExecutionEventAttemptusageCompletenessComplete ExecutionEventAttemptusageCompleteness = "complete"
 const ExecutionEventAttemptusageCompletenessPartial ExecutionEventAttemptusageCompleteness = "partial"
-const ExecutionEventAttemptusageCompletenessUnknown ExecutionEventAttemptusageCompleteness = "unknown"
+const ExecutionEventAttemptusageCompletenessUnknownShape92db31827db71e5a ExecutionEventAttemptusageCompleteness = "unknown"
 
 // ExecutionEventAttemptusageCostBasis is a generated schema value.
 type ExecutionEventAttemptusageCostBasis string
@@ -8981,9 +8981,9 @@ type ExecutionEventContextCompactBefore = json.RawMessage
 
 // ExecutionEventErrorStatus is a generated union model.
 type ExecutionEventErrorStatus struct {
-	Variant1 Optional[string]
-	Variant2 Optional[json.Number]
-	Unknown  json.RawMessage
+	String  Optional[string]
+	Integer Optional[json.Number]
+	Unknown json.RawMessage
 }
 
 func (value *ExecutionEventErrorStatus) UnmarshalJSON(data []byte) error {
@@ -9004,9 +9004,9 @@ func (value *ExecutionEventErrorStatus) UnmarshalJSON(data []byte) error {
 		if !hasErrors(attempt) {
 			var candidate string
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("ExecutionEventErrorStatus.Variant1: %w", err)
+				return fmt.Errorf("ExecutionEventErrorStatus.String: %w", err)
 			}
-			decoded.Variant1 = Some(candidate)
+			decoded.String = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -9017,9 +9017,9 @@ func (value *ExecutionEventErrorStatus) UnmarshalJSON(data []byte) error {
 		if !hasErrors(attempt) {
 			var candidate json.Number
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("ExecutionEventErrorStatus.Variant2: %w", err)
+				return fmt.Errorf("ExecutionEventErrorStatus.Integer: %w", err)
 			}
-			decoded.Variant2 = Some(candidate)
+			decoded.Integer = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -9031,10 +9031,10 @@ func (value *ExecutionEventErrorStatus) UnmarshalJSON(data []byte) error {
 
 func (value ExecutionEventErrorStatus) MarshalJSON() ([]byte, error) {
 	selected := 0
-	if value.Variant1.Present {
+	if value.String.Present {
 		selected++
 	}
-	if value.Variant2.Present {
+	if value.Integer.Present {
 		selected++
 	}
 	if len(value.Unknown) != 0 {
@@ -9043,11 +9043,11 @@ func (value ExecutionEventErrorStatus) MarshalJSON() ([]byte, error) {
 	if selected != 1 {
 		return nil, fmt.Errorf("ExecutionEventErrorStatus: exactly one variant must be selected")
 	}
-	if value.Variant1.Present {
-		return json.Marshal(value.Variant1.Value)
+	if value.String.Present {
+		return json.Marshal(value.String.Value)
 	}
-	if value.Variant2.Present {
-		return json.Marshal(value.Variant2.Value)
+	if value.Integer.Present {
+		return json.Marshal(value.Integer.Value)
 	}
 	return json.Marshal(value.Unknown)
 }
@@ -9154,30 +9154,30 @@ func (value ExecutionEventError) MarshalJSON() ([]byte, error) {
 	return json.Marshal(fields)
 }
 
-// ExecutionEventExecutionVariant1Status is a generated schema value.
-type ExecutionEventExecutionVariant1Status string
+// ExecutionEventExecutionExecutedStatus is a generated schema value.
+type ExecutionEventExecutionExecutedStatus string
 
-const ExecutionEventExecutionVariant1StatusExecuted ExecutionEventExecutionVariant1Status = "executed"
+const ExecutionEventExecutionExecutedStatusExecuted ExecutionEventExecutionExecutedStatus = "executed"
 
-// ExecutionEventExecutionVariant1 is a generated nested model.
-type ExecutionEventExecutionVariant1 struct {
-	Status               ExecutionEventExecutionVariant1Status
+// ExecutionEventExecutionExecuted is a generated nested model.
+type ExecutionEventExecutionExecuted struct {
+	Status               ExecutionEventExecutionExecutedStatus
 	AdditionalProperties map[string]json.RawMessage
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *ExecutionEventExecutionVariant1) UnmarshalJSON(data []byte) error {
+func (value *ExecutionEventExecutionExecuted) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("ExecutionEventExecutionVariant1 must be a JSON object")
+		return fmt.Errorf("ExecutionEventExecutionExecuted must be a JSON object")
 	}
-	var decoded ExecutionEventExecutionVariant1
+	var decoded ExecutionEventExecutionExecuted
 	if raw, ok := fields["status"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Status); err != nil {
-			return fmt.Errorf("ExecutionEventExecutionVariant1.status: %w", err)
+			return fmt.Errorf("ExecutionEventExecutionExecuted.status: %w", err)
 		}
 		delete(fields, "status")
 	}
@@ -9187,7 +9187,7 @@ func (value *ExecutionEventExecutionVariant1) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value ExecutionEventExecutionVariant1) MarshalJSON() ([]byte, error) {
+func (value ExecutionEventExecutionExecuted) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+1)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -9195,49 +9195,49 @@ func (value ExecutionEventExecutionVariant1) MarshalJSON() ([]byte, error) {
 	{
 		raw, err := json.Marshal(value.Status)
 		if err != nil {
-			return nil, fmt.Errorf("ExecutionEventExecutionVariant1.status: %w", err)
+			return nil, fmt.Errorf("ExecutionEventExecutionExecuted.status: %w", err)
 		}
 		fields["status"] = raw
 	}
 	return json.Marshal(fields)
 }
 
-// ExecutionEventExecutionVariant2Reason is a generated schema value.
-type ExecutionEventExecutionVariant2Reason string
+// ExecutionEventExecutionSkippedSuppliedResultReason is a generated schema value.
+type ExecutionEventExecutionSkippedSuppliedResultReason string
 
-const ExecutionEventExecutionVariant2ReasonSuppliedResult ExecutionEventExecutionVariant2Reason = "supplied_result"
+const ExecutionEventExecutionSkippedSuppliedResultReasonSuppliedResult ExecutionEventExecutionSkippedSuppliedResultReason = "supplied_result"
 
-// ExecutionEventExecutionVariant2Status is a generated schema value.
-type ExecutionEventExecutionVariant2Status string
+// ExecutionEventExecutionSkippedSuppliedResultStatus is a generated schema value.
+type ExecutionEventExecutionSkippedSuppliedResultStatus string
 
-const ExecutionEventExecutionVariant2StatusSkipped ExecutionEventExecutionVariant2Status = "skipped"
+const ExecutionEventExecutionSkippedSuppliedResultStatusSkipped ExecutionEventExecutionSkippedSuppliedResultStatus = "skipped"
 
-// ExecutionEventExecutionVariant2 is a generated nested model.
-type ExecutionEventExecutionVariant2 struct {
-	Reason               ExecutionEventExecutionVariant2Reason
-	Status               ExecutionEventExecutionVariant2Status
+// ExecutionEventExecutionSkippedSuppliedResult is a generated nested model.
+type ExecutionEventExecutionSkippedSuppliedResult struct {
+	Reason               ExecutionEventExecutionSkippedSuppliedResultReason
+	Status               ExecutionEventExecutionSkippedSuppliedResultStatus
 	AdditionalProperties map[string]json.RawMessage
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *ExecutionEventExecutionVariant2) UnmarshalJSON(data []byte) error {
+func (value *ExecutionEventExecutionSkippedSuppliedResult) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("ExecutionEventExecutionVariant2 must be a JSON object")
+		return fmt.Errorf("ExecutionEventExecutionSkippedSuppliedResult must be a JSON object")
 	}
-	var decoded ExecutionEventExecutionVariant2
+	var decoded ExecutionEventExecutionSkippedSuppliedResult
 	if raw, ok := fields["reason"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Reason); err != nil {
-			return fmt.Errorf("ExecutionEventExecutionVariant2.reason: %w", err)
+			return fmt.Errorf("ExecutionEventExecutionSkippedSuppliedResult.reason: %w", err)
 		}
 		delete(fields, "reason")
 	}
 	if raw, ok := fields["status"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Status); err != nil {
-			return fmt.Errorf("ExecutionEventExecutionVariant2.status: %w", err)
+			return fmt.Errorf("ExecutionEventExecutionSkippedSuppliedResult.status: %w", err)
 		}
 		delete(fields, "status")
 	}
@@ -9247,7 +9247,7 @@ func (value *ExecutionEventExecutionVariant2) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value ExecutionEventExecutionVariant2) MarshalJSON() ([]byte, error) {
+func (value ExecutionEventExecutionSkippedSuppliedResult) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+2)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -9255,64 +9255,64 @@ func (value ExecutionEventExecutionVariant2) MarshalJSON() ([]byte, error) {
 	{
 		raw, err := json.Marshal(value.Reason)
 		if err != nil {
-			return nil, fmt.Errorf("ExecutionEventExecutionVariant2.reason: %w", err)
+			return nil, fmt.Errorf("ExecutionEventExecutionSkippedSuppliedResult.reason: %w", err)
 		}
 		fields["reason"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Status)
 		if err != nil {
-			return nil, fmt.Errorf("ExecutionEventExecutionVariant2.status: %w", err)
+			return nil, fmt.Errorf("ExecutionEventExecutionSkippedSuppliedResult.status: %w", err)
 		}
 		fields["status"] = raw
 	}
 	return json.Marshal(fields)
 }
 
-// ExecutionEventExecutionVariant3Reason is a generated schema value.
-type ExecutionEventExecutionVariant3Reason string
+// ExecutionEventExecutionSkippedPolicyReason is a generated schema value.
+type ExecutionEventExecutionSkippedPolicyReason string
 
-const ExecutionEventExecutionVariant3ReasonPolicy ExecutionEventExecutionVariant3Reason = "policy"
+const ExecutionEventExecutionSkippedPolicyReasonPolicy ExecutionEventExecutionSkippedPolicyReason = "policy"
 
-// ExecutionEventExecutionVariant3Status is a generated schema value.
-type ExecutionEventExecutionVariant3Status string
+// ExecutionEventExecutionSkippedPolicyStatus is a generated schema value.
+type ExecutionEventExecutionSkippedPolicyStatus string
 
-const ExecutionEventExecutionVariant3StatusSkipped ExecutionEventExecutionVariant3Status = "skipped"
+const ExecutionEventExecutionSkippedPolicyStatusSkipped ExecutionEventExecutionSkippedPolicyStatus = "skipped"
 
-// ExecutionEventExecutionVariant3 is a generated nested model.
-type ExecutionEventExecutionVariant3 struct {
+// ExecutionEventExecutionSkippedPolicy is a generated nested model.
+type ExecutionEventExecutionSkippedPolicy struct {
 	Detail               Optional[string]
-	Reason               ExecutionEventExecutionVariant3Reason
-	Status               ExecutionEventExecutionVariant3Status
+	Reason               ExecutionEventExecutionSkippedPolicyReason
+	Status               ExecutionEventExecutionSkippedPolicyStatus
 	AdditionalProperties map[string]json.RawMessage
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *ExecutionEventExecutionVariant3) UnmarshalJSON(data []byte) error {
+func (value *ExecutionEventExecutionSkippedPolicy) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("ExecutionEventExecutionVariant3 must be a JSON object")
+		return fmt.Errorf("ExecutionEventExecutionSkippedPolicy must be a JSON object")
 	}
-	var decoded ExecutionEventExecutionVariant3
+	var decoded ExecutionEventExecutionSkippedPolicy
 	if raw, ok := fields["detail"]; ok {
 		decoded.Detail.Present = true
 		if err := json.Unmarshal(raw, &decoded.Detail.Value); err != nil {
-			return fmt.Errorf("ExecutionEventExecutionVariant3.detail: %w", err)
+			return fmt.Errorf("ExecutionEventExecutionSkippedPolicy.detail: %w", err)
 		}
 		delete(fields, "detail")
 	}
 	if raw, ok := fields["reason"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Reason); err != nil {
-			return fmt.Errorf("ExecutionEventExecutionVariant3.reason: %w", err)
+			return fmt.Errorf("ExecutionEventExecutionSkippedPolicy.reason: %w", err)
 		}
 		delete(fields, "reason")
 	}
 	if raw, ok := fields["status"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Status); err != nil {
-			return fmt.Errorf("ExecutionEventExecutionVariant3.status: %w", err)
+			return fmt.Errorf("ExecutionEventExecutionSkippedPolicy.status: %w", err)
 		}
 		delete(fields, "status")
 	}
@@ -9322,7 +9322,7 @@ func (value *ExecutionEventExecutionVariant3) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value ExecutionEventExecutionVariant3) MarshalJSON() ([]byte, error) {
+func (value ExecutionEventExecutionSkippedPolicy) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+3)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -9330,71 +9330,71 @@ func (value ExecutionEventExecutionVariant3) MarshalJSON() ([]byte, error) {
 	if value.Detail.Present {
 		raw, err := json.Marshal(value.Detail.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ExecutionEventExecutionVariant3.detail: %w", err)
+			return nil, fmt.Errorf("ExecutionEventExecutionSkippedPolicy.detail: %w", err)
 		}
 		fields["detail"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Reason)
 		if err != nil {
-			return nil, fmt.Errorf("ExecutionEventExecutionVariant3.reason: %w", err)
+			return nil, fmt.Errorf("ExecutionEventExecutionSkippedPolicy.reason: %w", err)
 		}
 		fields["reason"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Status)
 		if err != nil {
-			return nil, fmt.Errorf("ExecutionEventExecutionVariant3.status: %w", err)
+			return nil, fmt.Errorf("ExecutionEventExecutionSkippedPolicy.status: %w", err)
 		}
 		fields["status"] = raw
 	}
 	return json.Marshal(fields)
 }
 
-// ExecutionEventExecutionVariant4Reason is a generated schema value.
-type ExecutionEventExecutionVariant4Reason string
+// ExecutionEventExecutionSkippedCancelledReason is a generated schema value.
+type ExecutionEventExecutionSkippedCancelledReason string
 
-const ExecutionEventExecutionVariant4ReasonCancelled ExecutionEventExecutionVariant4Reason = "cancelled"
+const ExecutionEventExecutionSkippedCancelledReasonCancelled ExecutionEventExecutionSkippedCancelledReason = "cancelled"
 
-// ExecutionEventExecutionVariant4Status is a generated schema value.
-type ExecutionEventExecutionVariant4Status string
+// ExecutionEventExecutionSkippedCancelledStatus is a generated schema value.
+type ExecutionEventExecutionSkippedCancelledStatus string
 
-const ExecutionEventExecutionVariant4StatusSkipped ExecutionEventExecutionVariant4Status = "skipped"
+const ExecutionEventExecutionSkippedCancelledStatusSkipped ExecutionEventExecutionSkippedCancelledStatus = "skipped"
 
-// ExecutionEventExecutionVariant4 is a generated nested model.
-type ExecutionEventExecutionVariant4 struct {
+// ExecutionEventExecutionSkippedCancelled is a generated nested model.
+type ExecutionEventExecutionSkippedCancelled struct {
 	Detail               Optional[string]
-	Reason               ExecutionEventExecutionVariant4Reason
-	Status               ExecutionEventExecutionVariant4Status
+	Reason               ExecutionEventExecutionSkippedCancelledReason
+	Status               ExecutionEventExecutionSkippedCancelledStatus
 	AdditionalProperties map[string]json.RawMessage
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *ExecutionEventExecutionVariant4) UnmarshalJSON(data []byte) error {
+func (value *ExecutionEventExecutionSkippedCancelled) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("ExecutionEventExecutionVariant4 must be a JSON object")
+		return fmt.Errorf("ExecutionEventExecutionSkippedCancelled must be a JSON object")
 	}
-	var decoded ExecutionEventExecutionVariant4
+	var decoded ExecutionEventExecutionSkippedCancelled
 	if raw, ok := fields["detail"]; ok {
 		decoded.Detail.Present = true
 		if err := json.Unmarshal(raw, &decoded.Detail.Value); err != nil {
-			return fmt.Errorf("ExecutionEventExecutionVariant4.detail: %w", err)
+			return fmt.Errorf("ExecutionEventExecutionSkippedCancelled.detail: %w", err)
 		}
 		delete(fields, "detail")
 	}
 	if raw, ok := fields["reason"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Reason); err != nil {
-			return fmt.Errorf("ExecutionEventExecutionVariant4.reason: %w", err)
+			return fmt.Errorf("ExecutionEventExecutionSkippedCancelled.reason: %w", err)
 		}
 		delete(fields, "reason")
 	}
 	if raw, ok := fields["status"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Status); err != nil {
-			return fmt.Errorf("ExecutionEventExecutionVariant4.status: %w", err)
+			return fmt.Errorf("ExecutionEventExecutionSkippedCancelled.status: %w", err)
 		}
 		delete(fields, "status")
 	}
@@ -9404,7 +9404,7 @@ func (value *ExecutionEventExecutionVariant4) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value ExecutionEventExecutionVariant4) MarshalJSON() ([]byte, error) {
+func (value ExecutionEventExecutionSkippedCancelled) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+3)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -9412,71 +9412,71 @@ func (value ExecutionEventExecutionVariant4) MarshalJSON() ([]byte, error) {
 	if value.Detail.Present {
 		raw, err := json.Marshal(value.Detail.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ExecutionEventExecutionVariant4.detail: %w", err)
+			return nil, fmt.Errorf("ExecutionEventExecutionSkippedCancelled.detail: %w", err)
 		}
 		fields["detail"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Reason)
 		if err != nil {
-			return nil, fmt.Errorf("ExecutionEventExecutionVariant4.reason: %w", err)
+			return nil, fmt.Errorf("ExecutionEventExecutionSkippedCancelled.reason: %w", err)
 		}
 		fields["reason"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Status)
 		if err != nil {
-			return nil, fmt.Errorf("ExecutionEventExecutionVariant4.status: %w", err)
+			return nil, fmt.Errorf("ExecutionEventExecutionSkippedCancelled.status: %w", err)
 		}
 		fields["status"] = raw
 	}
 	return json.Marshal(fields)
 }
 
-// ExecutionEventExecutionVariant5Reason is a generated schema value.
-type ExecutionEventExecutionVariant5Reason string
+// ExecutionEventExecutionSkippedTimeoutReason is a generated schema value.
+type ExecutionEventExecutionSkippedTimeoutReason string
 
-const ExecutionEventExecutionVariant5ReasonTimeout ExecutionEventExecutionVariant5Reason = "timeout"
+const ExecutionEventExecutionSkippedTimeoutReasonTimeout ExecutionEventExecutionSkippedTimeoutReason = "timeout"
 
-// ExecutionEventExecutionVariant5Status is a generated schema value.
-type ExecutionEventExecutionVariant5Status string
+// ExecutionEventExecutionSkippedTimeoutStatus is a generated schema value.
+type ExecutionEventExecutionSkippedTimeoutStatus string
 
-const ExecutionEventExecutionVariant5StatusSkipped ExecutionEventExecutionVariant5Status = "skipped"
+const ExecutionEventExecutionSkippedTimeoutStatusSkipped ExecutionEventExecutionSkippedTimeoutStatus = "skipped"
 
-// ExecutionEventExecutionVariant5 is a generated nested model.
-type ExecutionEventExecutionVariant5 struct {
+// ExecutionEventExecutionSkippedTimeout is a generated nested model.
+type ExecutionEventExecutionSkippedTimeout struct {
 	Detail               Optional[string]
-	Reason               ExecutionEventExecutionVariant5Reason
-	Status               ExecutionEventExecutionVariant5Status
+	Reason               ExecutionEventExecutionSkippedTimeoutReason
+	Status               ExecutionEventExecutionSkippedTimeoutStatus
 	AdditionalProperties map[string]json.RawMessage
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *ExecutionEventExecutionVariant5) UnmarshalJSON(data []byte) error {
+func (value *ExecutionEventExecutionSkippedTimeout) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("ExecutionEventExecutionVariant5 must be a JSON object")
+		return fmt.Errorf("ExecutionEventExecutionSkippedTimeout must be a JSON object")
 	}
-	var decoded ExecutionEventExecutionVariant5
+	var decoded ExecutionEventExecutionSkippedTimeout
 	if raw, ok := fields["detail"]; ok {
 		decoded.Detail.Present = true
 		if err := json.Unmarshal(raw, &decoded.Detail.Value); err != nil {
-			return fmt.Errorf("ExecutionEventExecutionVariant5.detail: %w", err)
+			return fmt.Errorf("ExecutionEventExecutionSkippedTimeout.detail: %w", err)
 		}
 		delete(fields, "detail")
 	}
 	if raw, ok := fields["reason"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Reason); err != nil {
-			return fmt.Errorf("ExecutionEventExecutionVariant5.reason: %w", err)
+			return fmt.Errorf("ExecutionEventExecutionSkippedTimeout.reason: %w", err)
 		}
 		delete(fields, "reason")
 	}
 	if raw, ok := fields["status"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Status); err != nil {
-			return fmt.Errorf("ExecutionEventExecutionVariant5.status: %w", err)
+			return fmt.Errorf("ExecutionEventExecutionSkippedTimeout.status: %w", err)
 		}
 		delete(fields, "status")
 	}
@@ -9486,7 +9486,7 @@ func (value *ExecutionEventExecutionVariant5) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value ExecutionEventExecutionVariant5) MarshalJSON() ([]byte, error) {
+func (value ExecutionEventExecutionSkippedTimeout) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+3)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -9494,71 +9494,71 @@ func (value ExecutionEventExecutionVariant5) MarshalJSON() ([]byte, error) {
 	if value.Detail.Present {
 		raw, err := json.Marshal(value.Detail.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ExecutionEventExecutionVariant5.detail: %w", err)
+			return nil, fmt.Errorf("ExecutionEventExecutionSkippedTimeout.detail: %w", err)
 		}
 		fields["detail"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Reason)
 		if err != nil {
-			return nil, fmt.Errorf("ExecutionEventExecutionVariant5.reason: %w", err)
+			return nil, fmt.Errorf("ExecutionEventExecutionSkippedTimeout.reason: %w", err)
 		}
 		fields["reason"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Status)
 		if err != nil {
-			return nil, fmt.Errorf("ExecutionEventExecutionVariant5.status: %w", err)
+			return nil, fmt.Errorf("ExecutionEventExecutionSkippedTimeout.status: %w", err)
 		}
 		fields["status"] = raw
 	}
 	return json.Marshal(fields)
 }
 
-// ExecutionEventExecutionVariant6Reason is a generated schema value.
-type ExecutionEventExecutionVariant6Reason string
+// ExecutionEventExecutionSkippedOtherReason is a generated schema value.
+type ExecutionEventExecutionSkippedOtherReason string
 
-const ExecutionEventExecutionVariant6ReasonOther ExecutionEventExecutionVariant6Reason = "other"
+const ExecutionEventExecutionSkippedOtherReasonOther ExecutionEventExecutionSkippedOtherReason = "other"
 
-// ExecutionEventExecutionVariant6Status is a generated schema value.
-type ExecutionEventExecutionVariant6Status string
+// ExecutionEventExecutionSkippedOtherStatus is a generated schema value.
+type ExecutionEventExecutionSkippedOtherStatus string
 
-const ExecutionEventExecutionVariant6StatusSkipped ExecutionEventExecutionVariant6Status = "skipped"
+const ExecutionEventExecutionSkippedOtherStatusSkipped ExecutionEventExecutionSkippedOtherStatus = "skipped"
 
-// ExecutionEventExecutionVariant6 is a generated nested model.
-type ExecutionEventExecutionVariant6 struct {
+// ExecutionEventExecutionSkippedOther is a generated nested model.
+type ExecutionEventExecutionSkippedOther struct {
 	Detail               Optional[string]
-	Reason               ExecutionEventExecutionVariant6Reason
-	Status               ExecutionEventExecutionVariant6Status
+	Reason               ExecutionEventExecutionSkippedOtherReason
+	Status               ExecutionEventExecutionSkippedOtherStatus
 	AdditionalProperties map[string]json.RawMessage
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *ExecutionEventExecutionVariant6) UnmarshalJSON(data []byte) error {
+func (value *ExecutionEventExecutionSkippedOther) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("ExecutionEventExecutionVariant6 must be a JSON object")
+		return fmt.Errorf("ExecutionEventExecutionSkippedOther must be a JSON object")
 	}
-	var decoded ExecutionEventExecutionVariant6
+	var decoded ExecutionEventExecutionSkippedOther
 	if raw, ok := fields["detail"]; ok {
 		decoded.Detail.Present = true
 		if err := json.Unmarshal(raw, &decoded.Detail.Value); err != nil {
-			return fmt.Errorf("ExecutionEventExecutionVariant6.detail: %w", err)
+			return fmt.Errorf("ExecutionEventExecutionSkippedOther.detail: %w", err)
 		}
 		delete(fields, "detail")
 	}
 	if raw, ok := fields["reason"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Reason); err != nil {
-			return fmt.Errorf("ExecutionEventExecutionVariant6.reason: %w", err)
+			return fmt.Errorf("ExecutionEventExecutionSkippedOther.reason: %w", err)
 		}
 		delete(fields, "reason")
 	}
 	if raw, ok := fields["status"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Status); err != nil {
-			return fmt.Errorf("ExecutionEventExecutionVariant6.status: %w", err)
+			return fmt.Errorf("ExecutionEventExecutionSkippedOther.status: %w", err)
 		}
 		delete(fields, "status")
 	}
@@ -9568,7 +9568,7 @@ func (value *ExecutionEventExecutionVariant6) UnmarshalJSON(data []byte) error {
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value ExecutionEventExecutionVariant6) MarshalJSON() ([]byte, error) {
+func (value ExecutionEventExecutionSkippedOther) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+3)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -9576,21 +9576,21 @@ func (value ExecutionEventExecutionVariant6) MarshalJSON() ([]byte, error) {
 	if value.Detail.Present {
 		raw, err := json.Marshal(value.Detail.Value)
 		if err != nil {
-			return nil, fmt.Errorf("ExecutionEventExecutionVariant6.detail: %w", err)
+			return nil, fmt.Errorf("ExecutionEventExecutionSkippedOther.detail: %w", err)
 		}
 		fields["detail"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Reason)
 		if err != nil {
-			return nil, fmt.Errorf("ExecutionEventExecutionVariant6.reason: %w", err)
+			return nil, fmt.Errorf("ExecutionEventExecutionSkippedOther.reason: %w", err)
 		}
 		fields["reason"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Status)
 		if err != nil {
-			return nil, fmt.Errorf("ExecutionEventExecutionVariant6.status: %w", err)
+			return nil, fmt.Errorf("ExecutionEventExecutionSkippedOther.status: %w", err)
 		}
 		fields["status"] = raw
 	}
@@ -9599,13 +9599,13 @@ func (value ExecutionEventExecutionVariant6) MarshalJSON() ([]byte, error) {
 
 // ExecutionEventExecution is generated from schema/draft/execution-event.schema.json#/$defs/execution.
 type ExecutionEventExecution struct {
-	Variant1 Optional[ExecutionEventExecutionVariant1]
-	Variant2 Optional[ExecutionEventExecutionVariant2]
-	Variant3 Optional[ExecutionEventExecutionVariant3]
-	Variant4 Optional[ExecutionEventExecutionVariant4]
-	Variant5 Optional[ExecutionEventExecutionVariant5]
-	Variant6 Optional[ExecutionEventExecutionVariant6]
-	Unknown  json.RawMessage
+	Executed              Optional[ExecutionEventExecutionExecuted]
+	SkippedSuppliedResult Optional[ExecutionEventExecutionSkippedSuppliedResult]
+	SkippedPolicy         Optional[ExecutionEventExecutionSkippedPolicy]
+	SkippedCancelled      Optional[ExecutionEventExecutionSkippedCancelled]
+	SkippedTimeout        Optional[ExecutionEventExecutionSkippedTimeout]
+	SkippedOther          Optional[ExecutionEventExecutionSkippedOther]
+	Unknown               json.RawMessage
 }
 
 func (value *ExecutionEventExecution) UnmarshalJSON(data []byte) error {
@@ -9624,11 +9624,11 @@ func (value *ExecutionEventExecution) UnmarshalJSON(data []byte) error {
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[0], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate ExecutionEventExecutionVariant1
+			var candidate ExecutionEventExecutionExecuted
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("ExecutionEventExecution.Variant1: %w", err)
+				return fmt.Errorf("ExecutionEventExecution.Executed: %w", err)
 			}
-			decoded.Variant1 = Some(candidate)
+			decoded.Executed = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -9637,11 +9637,11 @@ func (value *ExecutionEventExecution) UnmarshalJSON(data []byte) error {
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[1], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate ExecutionEventExecutionVariant2
+			var candidate ExecutionEventExecutionSkippedSuppliedResult
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("ExecutionEventExecution.Variant2: %w", err)
+				return fmt.Errorf("ExecutionEventExecution.SkippedSuppliedResult: %w", err)
 			}
-			decoded.Variant2 = Some(candidate)
+			decoded.SkippedSuppliedResult = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -9650,11 +9650,11 @@ func (value *ExecutionEventExecution) UnmarshalJSON(data []byte) error {
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[2], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate ExecutionEventExecutionVariant3
+			var candidate ExecutionEventExecutionSkippedPolicy
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("ExecutionEventExecution.Variant3: %w", err)
+				return fmt.Errorf("ExecutionEventExecution.SkippedPolicy: %w", err)
 			}
-			decoded.Variant3 = Some(candidate)
+			decoded.SkippedPolicy = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -9663,11 +9663,11 @@ func (value *ExecutionEventExecution) UnmarshalJSON(data []byte) error {
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[3], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate ExecutionEventExecutionVariant4
+			var candidate ExecutionEventExecutionSkippedCancelled
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("ExecutionEventExecution.Variant4: %w", err)
+				return fmt.Errorf("ExecutionEventExecution.SkippedCancelled: %w", err)
 			}
-			decoded.Variant4 = Some(candidate)
+			decoded.SkippedCancelled = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -9676,11 +9676,11 @@ func (value *ExecutionEventExecution) UnmarshalJSON(data []byte) error {
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[4], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate ExecutionEventExecutionVariant5
+			var candidate ExecutionEventExecutionSkippedTimeout
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("ExecutionEventExecution.Variant5: %w", err)
+				return fmt.Errorf("ExecutionEventExecution.SkippedTimeout: %w", err)
 			}
-			decoded.Variant5 = Some(candidate)
+			decoded.SkippedTimeout = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -9689,11 +9689,11 @@ func (value *ExecutionEventExecution) UnmarshalJSON(data []byte) error {
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[5], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate ExecutionEventExecutionVariant6
+			var candidate ExecutionEventExecutionSkippedOther
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("ExecutionEventExecution.Variant6: %w", err)
+				return fmt.Errorf("ExecutionEventExecution.SkippedOther: %w", err)
 			}
-			decoded.Variant6 = Some(candidate)
+			decoded.SkippedOther = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -9705,22 +9705,22 @@ func (value *ExecutionEventExecution) UnmarshalJSON(data []byte) error {
 
 func (value ExecutionEventExecution) MarshalJSON() ([]byte, error) {
 	selected := 0
-	if value.Variant1.Present {
+	if value.Executed.Present {
 		selected++
 	}
-	if value.Variant2.Present {
+	if value.SkippedSuppliedResult.Present {
 		selected++
 	}
-	if value.Variant3.Present {
+	if value.SkippedPolicy.Present {
 		selected++
 	}
-	if value.Variant4.Present {
+	if value.SkippedCancelled.Present {
 		selected++
 	}
-	if value.Variant5.Present {
+	if value.SkippedTimeout.Present {
 		selected++
 	}
-	if value.Variant6.Present {
+	if value.SkippedOther.Present {
 		selected++
 	}
 	if len(value.Unknown) != 0 {
@@ -9729,23 +9729,23 @@ func (value ExecutionEventExecution) MarshalJSON() ([]byte, error) {
 	if selected != 1 {
 		return nil, fmt.Errorf("ExecutionEventExecution: exactly one variant must be selected")
 	}
-	if value.Variant1.Present {
-		return json.Marshal(value.Variant1.Value)
+	if value.Executed.Present {
+		return json.Marshal(value.Executed.Value)
 	}
-	if value.Variant2.Present {
-		return json.Marshal(value.Variant2.Value)
+	if value.SkippedSuppliedResult.Present {
+		return json.Marshal(value.SkippedSuppliedResult.Value)
 	}
-	if value.Variant3.Present {
-		return json.Marshal(value.Variant3.Value)
+	if value.SkippedPolicy.Present {
+		return json.Marshal(value.SkippedPolicy.Value)
 	}
-	if value.Variant4.Present {
-		return json.Marshal(value.Variant4.Value)
+	if value.SkippedCancelled.Present {
+		return json.Marshal(value.SkippedCancelled.Value)
 	}
-	if value.Variant5.Present {
-		return json.Marshal(value.Variant5.Value)
+	if value.SkippedTimeout.Present {
+		return json.Marshal(value.SkippedTimeout.Value)
 	}
-	if value.Variant6.Present {
-		return json.Marshal(value.Variant6.Value)
+	if value.SkippedOther.Present {
+		return json.Marshal(value.SkippedOther.Value)
 	}
 	return json.Marshal(value.Unknown)
 }
@@ -9862,11 +9862,11 @@ func (value ExecutionEventFilechange) MarshalJSON() ([]byte, error) {
 
 // ExecutionEventMcpConnection is a generated union model.
 type ExecutionEventMcpConnection struct {
-	Variant1 Optional[json.RawMessage]
-	Variant2 Optional[json.RawMessage]
-	Variant3 Optional[json.RawMessage]
-	Variant4 Optional[json.RawMessage]
-	Unknown  json.RawMessage
+	GapsObjectOrUrlObjectAndTransportObjectShape947e67f4c644f1e8                                 Optional[json.RawMessage]
+	GapsObjectOrUrlObjectAndTransportObjectShape03cf6907d766aa03                                 Optional[json.RawMessage]
+	ArgsObjectOrGapsObjectAndCommandObjectOrGapsObjectAndCwdObjectOrGapsObjectAndTransportObject Optional[json.RawMessage]
+	AddressFormObjectOrGapsObjectAndAddressObjectOrGapsObjectAndTransportObject                  Optional[json.RawMessage]
+	Unknown                                                                                      json.RawMessage
 }
 
 func (value *ExecutionEventMcpConnection) UnmarshalJSON(data []byte) error {
@@ -9887,9 +9887,9 @@ func (value *ExecutionEventMcpConnection) UnmarshalJSON(data []byte) error {
 		if !hasErrors(attempt) {
 			var candidate json.RawMessage
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("ExecutionEventMcpConnection.Variant1: %w", err)
+				return fmt.Errorf("ExecutionEventMcpConnection.GapsObjectOrUrlObjectAndTransportObjectShape947e67f4c644f1e8: %w", err)
 			}
-			decoded.Variant1 = Some(candidate)
+			decoded.GapsObjectOrUrlObjectAndTransportObjectShape947e67f4c644f1e8 = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -9900,9 +9900,9 @@ func (value *ExecutionEventMcpConnection) UnmarshalJSON(data []byte) error {
 		if !hasErrors(attempt) {
 			var candidate json.RawMessage
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("ExecutionEventMcpConnection.Variant2: %w", err)
+				return fmt.Errorf("ExecutionEventMcpConnection.GapsObjectOrUrlObjectAndTransportObjectShape03cf6907d766aa03: %w", err)
 			}
-			decoded.Variant2 = Some(candidate)
+			decoded.GapsObjectOrUrlObjectAndTransportObjectShape03cf6907d766aa03 = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -9913,9 +9913,9 @@ func (value *ExecutionEventMcpConnection) UnmarshalJSON(data []byte) error {
 		if !hasErrors(attempt) {
 			var candidate json.RawMessage
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("ExecutionEventMcpConnection.Variant3: %w", err)
+				return fmt.Errorf("ExecutionEventMcpConnection.ArgsObjectOrGapsObjectAndCommandObjectOrGapsObjectAndCwdObjectOrGapsObjectAndTransportObject: %w", err)
 			}
-			decoded.Variant3 = Some(candidate)
+			decoded.ArgsObjectOrGapsObjectAndCommandObjectOrGapsObjectAndCwdObjectOrGapsObjectAndTransportObject = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -9926,9 +9926,9 @@ func (value *ExecutionEventMcpConnection) UnmarshalJSON(data []byte) error {
 		if !hasErrors(attempt) {
 			var candidate json.RawMessage
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("ExecutionEventMcpConnection.Variant4: %w", err)
+				return fmt.Errorf("ExecutionEventMcpConnection.AddressFormObjectOrGapsObjectAndAddressObjectOrGapsObjectAndTransportObject: %w", err)
 			}
-			decoded.Variant4 = Some(candidate)
+			decoded.AddressFormObjectOrGapsObjectAndAddressObjectOrGapsObjectAndTransportObject = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -9940,16 +9940,16 @@ func (value *ExecutionEventMcpConnection) UnmarshalJSON(data []byte) error {
 
 func (value ExecutionEventMcpConnection) MarshalJSON() ([]byte, error) {
 	selected := 0
-	if value.Variant1.Present {
+	if value.GapsObjectOrUrlObjectAndTransportObjectShape947e67f4c644f1e8.Present {
 		selected++
 	}
-	if value.Variant2.Present {
+	if value.GapsObjectOrUrlObjectAndTransportObjectShape03cf6907d766aa03.Present {
 		selected++
 	}
-	if value.Variant3.Present {
+	if value.ArgsObjectOrGapsObjectAndCommandObjectOrGapsObjectAndCwdObjectOrGapsObjectAndTransportObject.Present {
 		selected++
 	}
-	if value.Variant4.Present {
+	if value.AddressFormObjectOrGapsObjectAndAddressObjectOrGapsObjectAndTransportObject.Present {
 		selected++
 	}
 	if len(value.Unknown) != 0 {
@@ -9958,17 +9958,17 @@ func (value ExecutionEventMcpConnection) MarshalJSON() ([]byte, error) {
 	if selected != 1 {
 		return nil, fmt.Errorf("ExecutionEventMcpConnection: exactly one variant must be selected")
 	}
-	if value.Variant1.Present {
-		return json.Marshal(value.Variant1.Value)
+	if value.GapsObjectOrUrlObjectAndTransportObjectShape947e67f4c644f1e8.Present {
+		return json.Marshal(value.GapsObjectOrUrlObjectAndTransportObjectShape947e67f4c644f1e8.Value)
 	}
-	if value.Variant2.Present {
-		return json.Marshal(value.Variant2.Value)
+	if value.GapsObjectOrUrlObjectAndTransportObjectShape03cf6907d766aa03.Present {
+		return json.Marshal(value.GapsObjectOrUrlObjectAndTransportObjectShape03cf6907d766aa03.Value)
 	}
-	if value.Variant3.Present {
-		return json.Marshal(value.Variant3.Value)
+	if value.ArgsObjectOrGapsObjectAndCommandObjectOrGapsObjectAndCwdObjectOrGapsObjectAndTransportObject.Present {
+		return json.Marshal(value.ArgsObjectOrGapsObjectAndCommandObjectOrGapsObjectAndCwdObjectOrGapsObjectAndTransportObject.Value)
 	}
-	if value.Variant4.Present {
-		return json.Marshal(value.Variant4.Value)
+	if value.AddressFormObjectOrGapsObjectAndAddressObjectOrGapsObjectAndTransportObject.Present {
+		return json.Marshal(value.AddressFormObjectOrGapsObjectAndAddressObjectOrGapsObjectAndTransportObject.Value)
 	}
 	return json.Marshal(value.Unknown)
 }
@@ -16165,7 +16165,7 @@ type ExecutionEventTurnusageCompleteness string
 
 const ExecutionEventTurnusageCompletenessComplete ExecutionEventTurnusageCompleteness = "complete"
 const ExecutionEventTurnusageCompletenessPartial ExecutionEventTurnusageCompleteness = "partial"
-const ExecutionEventTurnusageCompletenessUnknown ExecutionEventTurnusageCompleteness = "unknown"
+const ExecutionEventTurnusageCompletenessUnknownShape92db31827db71e5a ExecutionEventTurnusageCompleteness = "unknown"
 
 // ExecutionEventTurnusageCostBasis is a generated schema value.
 type ExecutionEventTurnusageCostBasis string
@@ -16417,7 +16417,7 @@ type ExecutionEventUsageCompleteness string
 
 const ExecutionEventUsageCompletenessComplete ExecutionEventUsageCompleteness = "complete"
 const ExecutionEventUsageCompletenessPartial ExecutionEventUsageCompleteness = "partial"
-const ExecutionEventUsageCompletenessUnknown ExecutionEventUsageCompleteness = "unknown"
+const ExecutionEventUsageCompletenessUnknownShape92db31827db71e5a ExecutionEventUsageCompleteness = "unknown"
 
 // ExecutionEventUsageCostBasis is a generated schema value.
 type ExecutionEventUsageCostBasis string
@@ -19330,23 +19330,23 @@ type InterceptRequestJSONRPC string
 
 const InterceptRequestJSONRPCValue20 InterceptRequestJSONRPC = "2.0"
 
-// InterceptRequestParamsCapabilitiesEffectsItemVariant1 is a generated schema value.
-type InterceptRequestParamsCapabilitiesEffectsItemVariant1 string
+// InterceptRequestParamsCapabilitiesEffectsItemKnown is a generated schema value.
+type InterceptRequestParamsCapabilitiesEffectsItemKnown string
 
-const InterceptRequestParamsCapabilitiesEffectsItemVariant1Deny InterceptRequestParamsCapabilitiesEffectsItemVariant1 = "deny"
-const InterceptRequestParamsCapabilitiesEffectsItemVariant1Allow InterceptRequestParamsCapabilitiesEffectsItemVariant1 = "allow"
-const InterceptRequestParamsCapabilitiesEffectsItemVariant1Ask InterceptRequestParamsCapabilitiesEffectsItemVariant1 = "ask"
-const InterceptRequestParamsCapabilitiesEffectsItemVariant1Modify InterceptRequestParamsCapabilitiesEffectsItemVariant1 = "modify"
-const InterceptRequestParamsCapabilitiesEffectsItemVariant1Message InterceptRequestParamsCapabilitiesEffectsItemVariant1 = "message"
-const InterceptRequestParamsCapabilitiesEffectsItemVariant1Return InterceptRequestParamsCapabilitiesEffectsItemVariant1 = "return"
-const InterceptRequestParamsCapabilitiesEffectsItemVariant1Flow InterceptRequestParamsCapabilitiesEffectsItemVariant1 = "flow"
-const InterceptRequestParamsCapabilitiesEffectsItemVariant1Inject InterceptRequestParamsCapabilitiesEffectsItemVariant1 = "inject"
+const InterceptRequestParamsCapabilitiesEffectsItemKnownDeny InterceptRequestParamsCapabilitiesEffectsItemKnown = "deny"
+const InterceptRequestParamsCapabilitiesEffectsItemKnownAllow InterceptRequestParamsCapabilitiesEffectsItemKnown = "allow"
+const InterceptRequestParamsCapabilitiesEffectsItemKnownAsk InterceptRequestParamsCapabilitiesEffectsItemKnown = "ask"
+const InterceptRequestParamsCapabilitiesEffectsItemKnownModify InterceptRequestParamsCapabilitiesEffectsItemKnown = "modify"
+const InterceptRequestParamsCapabilitiesEffectsItemKnownMessage InterceptRequestParamsCapabilitiesEffectsItemKnown = "message"
+const InterceptRequestParamsCapabilitiesEffectsItemKnownReturn InterceptRequestParamsCapabilitiesEffectsItemKnown = "return"
+const InterceptRequestParamsCapabilitiesEffectsItemKnownFlow InterceptRequestParamsCapabilitiesEffectsItemKnown = "flow"
+const InterceptRequestParamsCapabilitiesEffectsItemKnownInject InterceptRequestParamsCapabilitiesEffectsItemKnown = "inject"
 
 // InterceptRequestParamsCapabilitiesEffectsItem is a generated union model.
 type InterceptRequestParamsCapabilitiesEffectsItem struct {
-	Variant1 Optional[InterceptRequestParamsCapabilitiesEffectsItemVariant1]
-	Variant2 Optional[string]
-	Unknown  json.RawMessage
+	Known   Optional[InterceptRequestParamsCapabilitiesEffectsItemKnown]
+	Custom  Optional[string]
+	Unknown json.RawMessage
 }
 
 func (value *InterceptRequestParamsCapabilitiesEffectsItem) UnmarshalJSON(data []byte) error {
@@ -19365,11 +19365,11 @@ func (value *InterceptRequestParamsCapabilitiesEffectsItem) UnmarshalJSON(data [
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[0], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate InterceptRequestParamsCapabilitiesEffectsItemVariant1
+			var candidate InterceptRequestParamsCapabilitiesEffectsItemKnown
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("InterceptRequestParamsCapabilitiesEffectsItem.Variant1: %w", err)
+				return fmt.Errorf("InterceptRequestParamsCapabilitiesEffectsItem.Known: %w", err)
 			}
-			decoded.Variant1 = Some(candidate)
+			decoded.Known = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -19380,9 +19380,9 @@ func (value *InterceptRequestParamsCapabilitiesEffectsItem) UnmarshalJSON(data [
 		if !hasErrors(attempt) {
 			var candidate string
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("InterceptRequestParamsCapabilitiesEffectsItem.Variant2: %w", err)
+				return fmt.Errorf("InterceptRequestParamsCapabilitiesEffectsItem.Custom: %w", err)
 			}
-			decoded.Variant2 = Some(candidate)
+			decoded.Custom = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -19394,10 +19394,10 @@ func (value *InterceptRequestParamsCapabilitiesEffectsItem) UnmarshalJSON(data [
 
 func (value InterceptRequestParamsCapabilitiesEffectsItem) MarshalJSON() ([]byte, error) {
 	selected := 0
-	if value.Variant1.Present {
+	if value.Known.Present {
 		selected++
 	}
-	if value.Variant2.Present {
+	if value.Custom.Present {
 		selected++
 	}
 	if len(value.Unknown) != 0 {
@@ -19406,11 +19406,11 @@ func (value InterceptRequestParamsCapabilitiesEffectsItem) MarshalJSON() ([]byte
 	if selected != 1 {
 		return nil, fmt.Errorf("InterceptRequestParamsCapabilitiesEffectsItem: exactly one variant must be selected")
 	}
-	if value.Variant1.Present {
-		return json.Marshal(value.Variant1.Value)
+	if value.Known.Present {
+		return json.Marshal(value.Known.Value)
 	}
-	if value.Variant2.Present {
-		return json.Marshal(value.Variant2.Value)
+	if value.Custom.Present {
+		return json.Marshal(value.Custom.Value)
 	}
 	return json.Marshal(value.Unknown)
 }
@@ -20417,28 +20417,28 @@ func (value InterceptRequestParamsEvent) MarshalJSON() ([]byte, error) {
 	return json.Marshal(value.Unknown)
 }
 
-// InterceptRequestParamsStateCandidateVariant2Provenance is a generated nested model.
-type InterceptRequestParamsStateCandidateVariant2Provenance struct {
+// InterceptRequestParamsStateCandidateValueObjectProvenance is a generated nested model.
+type InterceptRequestParamsStateCandidateValueObjectProvenance struct {
 	AdditionalProperties map[string]json.RawMessage
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *InterceptRequestParamsStateCandidateVariant2Provenance) UnmarshalJSON(data []byte) error {
+func (value *InterceptRequestParamsStateCandidateValueObjectProvenance) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("InterceptRequestParamsStateCandidateVariant2Provenance must be a JSON object")
+		return fmt.Errorf("InterceptRequestParamsStateCandidateValueObjectProvenance must be a JSON object")
 	}
-	var decoded InterceptRequestParamsStateCandidateVariant2Provenance
+	var decoded InterceptRequestParamsStateCandidateValueObjectProvenance
 	decoded.AdditionalProperties = fields
 	*value = decoded
 	return nil
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value InterceptRequestParamsStateCandidateVariant2Provenance) MarshalJSON() ([]byte, error) {
+func (value InterceptRequestParamsStateCandidateValueObjectProvenance) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+0)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -20446,33 +20446,33 @@ func (value InterceptRequestParamsStateCandidateVariant2Provenance) MarshalJSON(
 	return json.Marshal(fields)
 }
 
-// InterceptRequestParamsStateCandidateVariant2 is a generated nested model.
-type InterceptRequestParamsStateCandidateVariant2 struct {
-	Provenance           Optional[InterceptRequestParamsStateCandidateVariant2Provenance]
+// InterceptRequestParamsStateCandidateValueObject is a generated nested model.
+type InterceptRequestParamsStateCandidateValueObject struct {
+	Provenance           Optional[InterceptRequestParamsStateCandidateValueObjectProvenance]
 	Value                json.RawMessage
 	AdditionalProperties map[string]json.RawMessage
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *InterceptRequestParamsStateCandidateVariant2) UnmarshalJSON(data []byte) error {
+func (value *InterceptRequestParamsStateCandidateValueObject) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("InterceptRequestParamsStateCandidateVariant2 must be a JSON object")
+		return fmt.Errorf("InterceptRequestParamsStateCandidateValueObject must be a JSON object")
 	}
-	var decoded InterceptRequestParamsStateCandidateVariant2
+	var decoded InterceptRequestParamsStateCandidateValueObject
 	if raw, ok := fields["provenance"]; ok {
 		decoded.Provenance.Present = true
 		if err := json.Unmarshal(raw, &decoded.Provenance.Value); err != nil {
-			return fmt.Errorf("InterceptRequestParamsStateCandidateVariant2.provenance: %w", err)
+			return fmt.Errorf("InterceptRequestParamsStateCandidateValueObject.provenance: %w", err)
 		}
 		delete(fields, "provenance")
 	}
 	if raw, ok := fields["value"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Value); err != nil {
-			return fmt.Errorf("InterceptRequestParamsStateCandidateVariant2.value: %w", err)
+			return fmt.Errorf("InterceptRequestParamsStateCandidateValueObject.value: %w", err)
 		}
 		delete(fields, "value")
 	}
@@ -20482,7 +20482,7 @@ func (value *InterceptRequestParamsStateCandidateVariant2) UnmarshalJSON(data []
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value InterceptRequestParamsStateCandidateVariant2) MarshalJSON() ([]byte, error) {
+func (value InterceptRequestParamsStateCandidateValueObject) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+2)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -20490,14 +20490,14 @@ func (value InterceptRequestParamsStateCandidateVariant2) MarshalJSON() ([]byte,
 	if value.Provenance.Present {
 		raw, err := json.Marshal(value.Provenance.Value)
 		if err != nil {
-			return nil, fmt.Errorf("InterceptRequestParamsStateCandidateVariant2.provenance: %w", err)
+			return nil, fmt.Errorf("InterceptRequestParamsStateCandidateValueObject.provenance: %w", err)
 		}
 		fields["provenance"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Value)
 		if err != nil {
-			return nil, fmt.Errorf("InterceptRequestParamsStateCandidateVariant2.value: %w", err)
+			return nil, fmt.Errorf("InterceptRequestParamsStateCandidateValueObject.value: %w", err)
 		}
 		fields["value"] = raw
 	}
@@ -20506,9 +20506,9 @@ func (value InterceptRequestParamsStateCandidateVariant2) MarshalJSON() ([]byte,
 
 // InterceptRequestParamsStateCandidate is a generated union model.
 type InterceptRequestParamsStateCandidate struct {
-	Variant1 Optional[json.RawMessage]
-	Variant2 Optional[InterceptRequestParamsStateCandidateVariant2]
-	Unknown  json.RawMessage
+	Null        Optional[json.RawMessage]
+	ValueObject Optional[InterceptRequestParamsStateCandidateValueObject]
+	Unknown     json.RawMessage
 }
 
 func (value *InterceptRequestParamsStateCandidate) UnmarshalJSON(data []byte) error {
@@ -20529,9 +20529,9 @@ func (value *InterceptRequestParamsStateCandidate) UnmarshalJSON(data []byte) er
 		if !hasErrors(attempt) {
 			var candidate json.RawMessage
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("InterceptRequestParamsStateCandidate.Variant1: %w", err)
+				return fmt.Errorf("InterceptRequestParamsStateCandidate.Null: %w", err)
 			}
-			decoded.Variant1 = Some(candidate)
+			decoded.Null = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -20540,11 +20540,11 @@ func (value *InterceptRequestParamsStateCandidate) UnmarshalJSON(data []byte) er
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[1], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate InterceptRequestParamsStateCandidateVariant2
+			var candidate InterceptRequestParamsStateCandidateValueObject
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("InterceptRequestParamsStateCandidate.Variant2: %w", err)
+				return fmt.Errorf("InterceptRequestParamsStateCandidate.ValueObject: %w", err)
 			}
-			decoded.Variant2 = Some(candidate)
+			decoded.ValueObject = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -20556,10 +20556,10 @@ func (value *InterceptRequestParamsStateCandidate) UnmarshalJSON(data []byte) er
 
 func (value InterceptRequestParamsStateCandidate) MarshalJSON() ([]byte, error) {
 	selected := 0
-	if value.Variant1.Present {
+	if value.Null.Present {
 		selected++
 	}
-	if value.Variant2.Present {
+	if value.ValueObject.Present {
 		selected++
 	}
 	if len(value.Unknown) != 0 {
@@ -20568,11 +20568,11 @@ func (value InterceptRequestParamsStateCandidate) MarshalJSON() ([]byte, error) 
 	if selected != 1 {
 		return nil, fmt.Errorf("InterceptRequestParamsStateCandidate: exactly one variant must be selected")
 	}
-	if value.Variant1.Present {
-		return json.Marshal(value.Variant1.Value)
+	if value.Null.Present {
+		return json.Marshal(value.Null.Value)
 	}
-	if value.Variant2.Present {
-		return json.Marshal(value.Variant2.Value)
+	if value.ValueObject.Present {
+		return json.Marshal(value.ValueObject.Value)
 	}
 	return json.Marshal(value.Unknown)
 }
@@ -21028,34 +21028,34 @@ func (value InterceptResponse) MarshalJSON() ([]byte, error) {
 	return json.Marshal(fields)
 }
 
-// InterceptSubscriptionEventsItemVariant1 is a generated schema value.
-type InterceptSubscriptionEventsItemVariant1 string
+// InterceptSubscriptionEventsItemKnown is a generated schema value.
+type InterceptSubscriptionEventsItemKnown string
 
-const InterceptSubscriptionEventsItemVariant1ToolBefore InterceptSubscriptionEventsItemVariant1 = "tool.before"
-const InterceptSubscriptionEventsItemVariant1ToolAfter InterceptSubscriptionEventsItemVariant1 = "tool.after"
-const InterceptSubscriptionEventsItemVariant1SessionStart InterceptSubscriptionEventsItemVariant1 = "session.start"
-const InterceptSubscriptionEventsItemVariant1ConfigChangeBefore InterceptSubscriptionEventsItemVariant1 = "config.change.before"
-const InterceptSubscriptionEventsItemVariant1TurnStart InterceptSubscriptionEventsItemVariant1 = "turn.start"
-const InterceptSubscriptionEventsItemVariant1TurnFinishBefore InterceptSubscriptionEventsItemVariant1 = "turn.finish.before"
-const InterceptSubscriptionEventsItemVariant1ModelRequestBefore InterceptSubscriptionEventsItemVariant1 = "model.request.before"
-const InterceptSubscriptionEventsItemVariant1ModelSwitchBefore InterceptSubscriptionEventsItemVariant1 = "model.switch.before"
-const InterceptSubscriptionEventsItemVariant1ToolPermissionRequest InterceptSubscriptionEventsItemVariant1 = "tool.permission.request"
-const InterceptSubscriptionEventsItemVariant1ToolBatchAfter InterceptSubscriptionEventsItemVariant1 = "tool.batch.after"
-const InterceptSubscriptionEventsItemVariant1ContextCompactBefore InterceptSubscriptionEventsItemVariant1 = "context.compact.before"
-const InterceptSubscriptionEventsItemVariant1ContextCompactAfter InterceptSubscriptionEventsItemVariant1 = "context.compact.after"
-const InterceptSubscriptionEventsItemVariant1TaskChangeBefore InterceptSubscriptionEventsItemVariant1 = "task.change.before"
-const InterceptSubscriptionEventsItemVariant1UserElicitationRequest InterceptSubscriptionEventsItemVariant1 = "user.elicitation.request"
-const InterceptSubscriptionEventsItemVariant1UserElicitationResult InterceptSubscriptionEventsItemVariant1 = "user.elicitation.result"
-const InterceptSubscriptionEventsItemVariant1UserMessageInbound InterceptSubscriptionEventsItemVariant1 = "user.message.inbound"
-const InterceptSubscriptionEventsItemVariant1UserMessageOutbound InterceptSubscriptionEventsItemVariant1 = "user.message.outbound"
-const InterceptSubscriptionEventsItemVariant1WorkspaceChangeBefore InterceptSubscriptionEventsItemVariant1 = "workspace.change.before"
-const InterceptSubscriptionEventsItemVariant1ModelResponseAfter InterceptSubscriptionEventsItemVariant1 = "model.response.after"
+const InterceptSubscriptionEventsItemKnownToolBefore InterceptSubscriptionEventsItemKnown = "tool.before"
+const InterceptSubscriptionEventsItemKnownToolAfter InterceptSubscriptionEventsItemKnown = "tool.after"
+const InterceptSubscriptionEventsItemKnownSessionStart InterceptSubscriptionEventsItemKnown = "session.start"
+const InterceptSubscriptionEventsItemKnownConfigChangeBefore InterceptSubscriptionEventsItemKnown = "config.change.before"
+const InterceptSubscriptionEventsItemKnownTurnStart InterceptSubscriptionEventsItemKnown = "turn.start"
+const InterceptSubscriptionEventsItemKnownTurnFinishBefore InterceptSubscriptionEventsItemKnown = "turn.finish.before"
+const InterceptSubscriptionEventsItemKnownModelRequestBefore InterceptSubscriptionEventsItemKnown = "model.request.before"
+const InterceptSubscriptionEventsItemKnownModelSwitchBefore InterceptSubscriptionEventsItemKnown = "model.switch.before"
+const InterceptSubscriptionEventsItemKnownToolPermissionRequest InterceptSubscriptionEventsItemKnown = "tool.permission.request"
+const InterceptSubscriptionEventsItemKnownToolBatchAfter InterceptSubscriptionEventsItemKnown = "tool.batch.after"
+const InterceptSubscriptionEventsItemKnownContextCompactBefore InterceptSubscriptionEventsItemKnown = "context.compact.before"
+const InterceptSubscriptionEventsItemKnownContextCompactAfter InterceptSubscriptionEventsItemKnown = "context.compact.after"
+const InterceptSubscriptionEventsItemKnownTaskChangeBefore InterceptSubscriptionEventsItemKnown = "task.change.before"
+const InterceptSubscriptionEventsItemKnownUserElicitationRequest InterceptSubscriptionEventsItemKnown = "user.elicitation.request"
+const InterceptSubscriptionEventsItemKnownUserElicitationResult InterceptSubscriptionEventsItemKnown = "user.elicitation.result"
+const InterceptSubscriptionEventsItemKnownUserMessageInbound InterceptSubscriptionEventsItemKnown = "user.message.inbound"
+const InterceptSubscriptionEventsItemKnownUserMessageOutbound InterceptSubscriptionEventsItemKnown = "user.message.outbound"
+const InterceptSubscriptionEventsItemKnownWorkspaceChangeBefore InterceptSubscriptionEventsItemKnown = "workspace.change.before"
+const InterceptSubscriptionEventsItemKnownModelResponseAfter InterceptSubscriptionEventsItemKnown = "model.response.after"
 
 // InterceptSubscriptionEventsItem is a generated union model.
 type InterceptSubscriptionEventsItem struct {
-	Variant1 Optional[InterceptSubscriptionEventsItemVariant1]
-	Variant2 Optional[string]
-	Unknown  json.RawMessage
+	Known   Optional[InterceptSubscriptionEventsItemKnown]
+	Custom  Optional[string]
+	Unknown json.RawMessage
 }
 
 func (value *InterceptSubscriptionEventsItem) UnmarshalJSON(data []byte) error {
@@ -21074,11 +21074,11 @@ func (value *InterceptSubscriptionEventsItem) UnmarshalJSON(data []byte) error {
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[0], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate InterceptSubscriptionEventsItemVariant1
+			var candidate InterceptSubscriptionEventsItemKnown
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("InterceptSubscriptionEventsItem.Variant1: %w", err)
+				return fmt.Errorf("InterceptSubscriptionEventsItem.Known: %w", err)
 			}
-			decoded.Variant1 = Some(candidate)
+			decoded.Known = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -21089,9 +21089,9 @@ func (value *InterceptSubscriptionEventsItem) UnmarshalJSON(data []byte) error {
 		if !hasErrors(attempt) {
 			var candidate string
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("InterceptSubscriptionEventsItem.Variant2: %w", err)
+				return fmt.Errorf("InterceptSubscriptionEventsItem.Custom: %w", err)
 			}
-			decoded.Variant2 = Some(candidate)
+			decoded.Custom = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -21103,10 +21103,10 @@ func (value *InterceptSubscriptionEventsItem) UnmarshalJSON(data []byte) error {
 
 func (value InterceptSubscriptionEventsItem) MarshalJSON() ([]byte, error) {
 	selected := 0
-	if value.Variant1.Present {
+	if value.Known.Present {
 		selected++
 	}
-	if value.Variant2.Present {
+	if value.Custom.Present {
 		selected++
 	}
 	if len(value.Unknown) != 0 {
@@ -21115,11 +21115,11 @@ func (value InterceptSubscriptionEventsItem) MarshalJSON() ([]byte, error) {
 	if selected != 1 {
 		return nil, fmt.Errorf("InterceptSubscriptionEventsItem: exactly one variant must be selected")
 	}
-	if value.Variant1.Present {
-		return json.Marshal(value.Variant1.Value)
+	if value.Known.Present {
+		return json.Marshal(value.Known.Value)
 	}
-	if value.Variant2.Present {
-		return json.Marshal(value.Variant2.Value)
+	if value.Custom.Present {
+		return json.Marshal(value.Custom.Value)
 	}
 	return json.Marshal(value.Unknown)
 }
@@ -21525,9 +21525,9 @@ func (value JsonRpcErrorResponse) MarshalJSON() ([]byte, error) {
 
 // JsonRpcId is generated from schema/draft/common.schema.json#/$defs/jsonRpcId.
 type JsonRpcId struct {
-	Variant1 Optional[string]
-	Variant2 Optional[json.Number]
-	Unknown  json.RawMessage
+	String  Optional[string]
+	Integer Optional[json.Number]
+	Unknown json.RawMessage
 }
 
 func (value *JsonRpcId) UnmarshalJSON(data []byte) error {
@@ -21548,9 +21548,9 @@ func (value *JsonRpcId) UnmarshalJSON(data []byte) error {
 		if !hasErrors(attempt) {
 			var candidate string
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("JsonRpcId.Variant1: %w", err)
+				return fmt.Errorf("JsonRpcId.String: %w", err)
 			}
-			decoded.Variant1 = Some(candidate)
+			decoded.String = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -21561,9 +21561,9 @@ func (value *JsonRpcId) UnmarshalJSON(data []byte) error {
 		if !hasErrors(attempt) {
 			var candidate json.Number
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("JsonRpcId.Variant2: %w", err)
+				return fmt.Errorf("JsonRpcId.Integer: %w", err)
 			}
-			decoded.Variant2 = Some(candidate)
+			decoded.Integer = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -21575,10 +21575,10 @@ func (value *JsonRpcId) UnmarshalJSON(data []byte) error {
 
 func (value JsonRpcId) MarshalJSON() ([]byte, error) {
 	selected := 0
-	if value.Variant1.Present {
+	if value.String.Present {
 		selected++
 	}
-	if value.Variant2.Present {
+	if value.Integer.Present {
 		selected++
 	}
 	if len(value.Unknown) != 0 {
@@ -21587,11 +21587,11 @@ func (value JsonRpcId) MarshalJSON() ([]byte, error) {
 	if selected != 1 {
 		return nil, fmt.Errorf("JsonRpcId: exactly one variant must be selected")
 	}
-	if value.Variant1.Present {
-		return json.Marshal(value.Variant1.Value)
+	if value.String.Present {
+		return json.Marshal(value.String.Value)
 	}
-	if value.Variant2.Present {
-		return json.Marshal(value.Variant2.Value)
+	if value.Integer.Present {
+		return json.Marshal(value.Integer.Value)
 	}
 	return json.Marshal(value.Unknown)
 }
@@ -21936,7 +21936,7 @@ func (value JsonRpcRequest) MarshalJSON() ([]byte, error) {
 // JsonRpcResponseId is generated from schema/draft/common.schema.json#/$defs/jsonRpcResponseId.
 type JsonRpcResponseId struct {
 	JsonRpcId Optional[*JsonRpcId]
-	Variant2  Optional[json.RawMessage]
+	Null      Optional[json.RawMessage]
 	Unknown   json.RawMessage
 }
 
@@ -21971,9 +21971,9 @@ func (value *JsonRpcResponseId) UnmarshalJSON(data []byte) error {
 		if !hasErrors(attempt) {
 			var candidate json.RawMessage
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("JsonRpcResponseId.Variant2: %w", err)
+				return fmt.Errorf("JsonRpcResponseId.Null: %w", err)
 			}
-			decoded.Variant2 = Some(candidate)
+			decoded.Null = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -21988,7 +21988,7 @@ func (value JsonRpcResponseId) MarshalJSON() ([]byte, error) {
 	if value.JsonRpcId.Present {
 		selected++
 	}
-	if value.Variant2.Present {
+	if value.Null.Present {
 		selected++
 	}
 	if len(value.Unknown) != 0 {
@@ -22000,8 +22000,8 @@ func (value JsonRpcResponseId) MarshalJSON() ([]byte, error) {
 	if value.JsonRpcId.Present {
 		return json.Marshal(value.JsonRpcId.Value)
 	}
-	if value.Variant2.Present {
-		return json.Marshal(value.Variant2.Value)
+	if value.Null.Present {
+		return json.Marshal(value.Null.Value)
 	}
 	return json.Marshal(value.Unknown)
 }
@@ -22478,7 +22478,7 @@ func (value McpElicitationElicitRequestFormParams) MarshalJSON() ([]byte, error)
 
 // McpElicitationElicitRequestParams is generated from schema/draft/mcp-elicitation.schema.json#/$defs/ElicitRequestParams.
 type McpElicitationElicitRequestParams struct {
-	McpElicitationElicitRequestURLParams  Optional[*McpElicitationElicitRequestURLParams]
+	McpElicitationElicitRequestUrlParams  Optional[*McpElicitationElicitRequestURLParams]
 	McpElicitationElicitRequestFormParams Optional[*McpElicitationElicitRequestFormParams]
 	Unknown                               json.RawMessage
 }
@@ -22501,9 +22501,9 @@ func (value *McpElicitationElicitRequestParams) UnmarshalJSON(data []byte) error
 		if !hasErrors(attempt) {
 			var candidate *McpElicitationElicitRequestURLParams
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("McpElicitationElicitRequestParams.McpElicitationElicitRequestURLParams: %w", err)
+				return fmt.Errorf("McpElicitationElicitRequestParams.McpElicitationElicitRequestUrlParams: %w", err)
 			}
-			decoded.McpElicitationElicitRequestURLParams = Some(candidate)
+			decoded.McpElicitationElicitRequestUrlParams = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -22528,7 +22528,7 @@ func (value *McpElicitationElicitRequestParams) UnmarshalJSON(data []byte) error
 
 func (value McpElicitationElicitRequestParams) MarshalJSON() ([]byte, error) {
 	selected := 0
-	if value.McpElicitationElicitRequestURLParams.Present {
+	if value.McpElicitationElicitRequestUrlParams.Present {
 		selected++
 	}
 	if value.McpElicitationElicitRequestFormParams.Present {
@@ -22540,8 +22540,8 @@ func (value McpElicitationElicitRequestParams) MarshalJSON() ([]byte, error) {
 	if selected != 1 {
 		return nil, fmt.Errorf("McpElicitationElicitRequestParams: exactly one variant must be selected")
 	}
-	if value.McpElicitationElicitRequestURLParams.Present {
-		return json.Marshal(value.McpElicitationElicitRequestURLParams.Value)
+	if value.McpElicitationElicitRequestUrlParams.Present {
+		return json.Marshal(value.McpElicitationElicitRequestUrlParams.Value)
 	}
 	if value.McpElicitationElicitRequestFormParams.Present {
 		return json.Marshal(value.McpElicitationElicitRequestFormParams.Value)
@@ -23292,9 +23292,9 @@ func (value McpElicitationPrimitiveSchemaDefinition) MarshalJSON() ([]byte, erro
 
 // McpElicitationProgressToken is generated from schema/draft/mcp-elicitation.schema.json#/$defs/ProgressToken.
 type McpElicitationProgressToken struct {
-	Variant1 Optional[string]
-	Variant2 Optional[json.Number]
-	Unknown  json.RawMessage
+	String  Optional[string]
+	Number  Optional[json.Number]
+	Unknown json.RawMessage
 }
 
 func (value *McpElicitationProgressToken) UnmarshalJSON(data []byte) error {
@@ -23315,9 +23315,9 @@ func (value *McpElicitationProgressToken) UnmarshalJSON(data []byte) error {
 		if !hasErrors(attempt) {
 			var candidate string
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("McpElicitationProgressToken.Variant1: %w", err)
+				return fmt.Errorf("McpElicitationProgressToken.String: %w", err)
 			}
-			decoded.Variant1 = Some(candidate)
+			decoded.String = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -23328,9 +23328,9 @@ func (value *McpElicitationProgressToken) UnmarshalJSON(data []byte) error {
 		if !hasErrors(attempt) {
 			var candidate json.Number
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("McpElicitationProgressToken.Variant2: %w", err)
+				return fmt.Errorf("McpElicitationProgressToken.Number: %w", err)
 			}
-			decoded.Variant2 = Some(candidate)
+			decoded.Number = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -23342,10 +23342,10 @@ func (value *McpElicitationProgressToken) UnmarshalJSON(data []byte) error {
 
 func (value McpElicitationProgressToken) MarshalJSON() ([]byte, error) {
 	selected := 0
-	if value.Variant1.Present {
+	if value.String.Present {
 		selected++
 	}
-	if value.Variant2.Present {
+	if value.Number.Present {
 		selected++
 	}
 	if len(value.Unknown) != 0 {
@@ -23354,11 +23354,11 @@ func (value McpElicitationProgressToken) MarshalJSON() ([]byte, error) {
 	if selected != 1 {
 		return nil, fmt.Errorf("McpElicitationProgressToken: exactly one variant must be selected")
 	}
-	if value.Variant1.Present {
-		return json.Marshal(value.Variant1.Value)
+	if value.String.Present {
+		return json.Marshal(value.String.Value)
 	}
-	if value.Variant2.Present {
-		return json.Marshal(value.Variant2.Value)
+	if value.Number.Present {
+		return json.Marshal(value.Number.Value)
 	}
 	return json.Marshal(value.Unknown)
 }
@@ -29015,47 +29015,47 @@ func (value ObserveNotification) MarshalJSON() ([]byte, error) {
 	return json.Marshal(fields)
 }
 
-// ObserveSubscriptionEventsItemVariant1 is a generated schema value.
-type ObserveSubscriptionEventsItemVariant1 string
+// ObserveSubscriptionEventsItemKnown is a generated schema value.
+type ObserveSubscriptionEventsItemKnown string
 
-const ObserveSubscriptionEventsItemVariant1ToolBefore ObserveSubscriptionEventsItemVariant1 = "tool.before"
-const ObserveSubscriptionEventsItemVariant1ToolAfter ObserveSubscriptionEventsItemVariant1 = "tool.after"
-const ObserveSubscriptionEventsItemVariant1SessionStart ObserveSubscriptionEventsItemVariant1 = "session.start"
-const ObserveSubscriptionEventsItemVariant1SessionEnd ObserveSubscriptionEventsItemVariant1 = "session.end"
-const ObserveSubscriptionEventsItemVariant1ConfigChangeBefore ObserveSubscriptionEventsItemVariant1 = "config.change.before"
-const ObserveSubscriptionEventsItemVariant1ConfigChangeAfter ObserveSubscriptionEventsItemVariant1 = "config.change.after"
-const ObserveSubscriptionEventsItemVariant1TurnStart ObserveSubscriptionEventsItemVariant1 = "turn.start"
-const ObserveSubscriptionEventsItemVariant1TurnFinishBefore ObserveSubscriptionEventsItemVariant1 = "turn.finish.before"
-const ObserveSubscriptionEventsItemVariant1TurnEnd ObserveSubscriptionEventsItemVariant1 = "turn.end"
-const ObserveSubscriptionEventsItemVariant1TurnProgress ObserveSubscriptionEventsItemVariant1 = "turn.progress"
-const ObserveSubscriptionEventsItemVariant1ModelRequestBefore ObserveSubscriptionEventsItemVariant1 = "model.request.before"
-const ObserveSubscriptionEventsItemVariant1ModelResponseAfter ObserveSubscriptionEventsItemVariant1 = "model.response.after"
-const ObserveSubscriptionEventsItemVariant1ModelError ObserveSubscriptionEventsItemVariant1 = "model.error"
-const ObserveSubscriptionEventsItemVariant1ModelSwitchBefore ObserveSubscriptionEventsItemVariant1 = "model.switch.before"
-const ObserveSubscriptionEventsItemVariant1ModelSwitchAfter ObserveSubscriptionEventsItemVariant1 = "model.switch.after"
-const ObserveSubscriptionEventsItemVariant1ToolPermissionRequest ObserveSubscriptionEventsItemVariant1 = "tool.permission.request"
-const ObserveSubscriptionEventsItemVariant1ToolPermissionResolved ObserveSubscriptionEventsItemVariant1 = "tool.permission.resolved"
-const ObserveSubscriptionEventsItemVariant1ToolProgress ObserveSubscriptionEventsItemVariant1 = "tool.progress"
-const ObserveSubscriptionEventsItemVariant1ToolBatchAfter ObserveSubscriptionEventsItemVariant1 = "tool.batch.after"
-const ObserveSubscriptionEventsItemVariant1ContextCompactBefore ObserveSubscriptionEventsItemVariant1 = "context.compact.before"
-const ObserveSubscriptionEventsItemVariant1ContextCompactAfter ObserveSubscriptionEventsItemVariant1 = "context.compact.after"
-const ObserveSubscriptionEventsItemVariant1TaskChangeBefore ObserveSubscriptionEventsItemVariant1 = "task.change.before"
-const ObserveSubscriptionEventsItemVariant1TaskChangeAfter ObserveSubscriptionEventsItemVariant1 = "task.change.after"
-const ObserveSubscriptionEventsItemVariant1UserAttention ObserveSubscriptionEventsItemVariant1 = "user.attention"
-const ObserveSubscriptionEventsItemVariant1UserElicitationRequest ObserveSubscriptionEventsItemVariant1 = "user.elicitation.request"
-const ObserveSubscriptionEventsItemVariant1UserElicitationResult ObserveSubscriptionEventsItemVariant1 = "user.elicitation.result"
-const ObserveSubscriptionEventsItemVariant1UserMessageInbound ObserveSubscriptionEventsItemVariant1 = "user.message.inbound"
-const ObserveSubscriptionEventsItemVariant1UserMessageOutbound ObserveSubscriptionEventsItemVariant1 = "user.message.outbound"
-const ObserveSubscriptionEventsItemVariant1WorkspaceChangeBefore ObserveSubscriptionEventsItemVariant1 = "workspace.change.before"
-const ObserveSubscriptionEventsItemVariant1WorkspaceChangeAfter ObserveSubscriptionEventsItemVariant1 = "workspace.change.after"
-const ObserveSubscriptionEventsItemVariant1FileChanged ObserveSubscriptionEventsItemVariant1 = "file.changed"
-const ObserveSubscriptionEventsItemVariant1HookFailure ObserveSubscriptionEventsItemVariant1 = "hook.failure"
+const ObserveSubscriptionEventsItemKnownToolBefore ObserveSubscriptionEventsItemKnown = "tool.before"
+const ObserveSubscriptionEventsItemKnownToolAfter ObserveSubscriptionEventsItemKnown = "tool.after"
+const ObserveSubscriptionEventsItemKnownSessionStart ObserveSubscriptionEventsItemKnown = "session.start"
+const ObserveSubscriptionEventsItemKnownSessionEnd ObserveSubscriptionEventsItemKnown = "session.end"
+const ObserveSubscriptionEventsItemKnownConfigChangeBefore ObserveSubscriptionEventsItemKnown = "config.change.before"
+const ObserveSubscriptionEventsItemKnownConfigChangeAfter ObserveSubscriptionEventsItemKnown = "config.change.after"
+const ObserveSubscriptionEventsItemKnownTurnStart ObserveSubscriptionEventsItemKnown = "turn.start"
+const ObserveSubscriptionEventsItemKnownTurnFinishBefore ObserveSubscriptionEventsItemKnown = "turn.finish.before"
+const ObserveSubscriptionEventsItemKnownTurnEnd ObserveSubscriptionEventsItemKnown = "turn.end"
+const ObserveSubscriptionEventsItemKnownTurnProgress ObserveSubscriptionEventsItemKnown = "turn.progress"
+const ObserveSubscriptionEventsItemKnownModelRequestBefore ObserveSubscriptionEventsItemKnown = "model.request.before"
+const ObserveSubscriptionEventsItemKnownModelResponseAfter ObserveSubscriptionEventsItemKnown = "model.response.after"
+const ObserveSubscriptionEventsItemKnownModelError ObserveSubscriptionEventsItemKnown = "model.error"
+const ObserveSubscriptionEventsItemKnownModelSwitchBefore ObserveSubscriptionEventsItemKnown = "model.switch.before"
+const ObserveSubscriptionEventsItemKnownModelSwitchAfter ObserveSubscriptionEventsItemKnown = "model.switch.after"
+const ObserveSubscriptionEventsItemKnownToolPermissionRequest ObserveSubscriptionEventsItemKnown = "tool.permission.request"
+const ObserveSubscriptionEventsItemKnownToolPermissionResolved ObserveSubscriptionEventsItemKnown = "tool.permission.resolved"
+const ObserveSubscriptionEventsItemKnownToolProgress ObserveSubscriptionEventsItemKnown = "tool.progress"
+const ObserveSubscriptionEventsItemKnownToolBatchAfter ObserveSubscriptionEventsItemKnown = "tool.batch.after"
+const ObserveSubscriptionEventsItemKnownContextCompactBefore ObserveSubscriptionEventsItemKnown = "context.compact.before"
+const ObserveSubscriptionEventsItemKnownContextCompactAfter ObserveSubscriptionEventsItemKnown = "context.compact.after"
+const ObserveSubscriptionEventsItemKnownTaskChangeBefore ObserveSubscriptionEventsItemKnown = "task.change.before"
+const ObserveSubscriptionEventsItemKnownTaskChangeAfter ObserveSubscriptionEventsItemKnown = "task.change.after"
+const ObserveSubscriptionEventsItemKnownUserAttention ObserveSubscriptionEventsItemKnown = "user.attention"
+const ObserveSubscriptionEventsItemKnownUserElicitationRequest ObserveSubscriptionEventsItemKnown = "user.elicitation.request"
+const ObserveSubscriptionEventsItemKnownUserElicitationResult ObserveSubscriptionEventsItemKnown = "user.elicitation.result"
+const ObserveSubscriptionEventsItemKnownUserMessageInbound ObserveSubscriptionEventsItemKnown = "user.message.inbound"
+const ObserveSubscriptionEventsItemKnownUserMessageOutbound ObserveSubscriptionEventsItemKnown = "user.message.outbound"
+const ObserveSubscriptionEventsItemKnownWorkspaceChangeBefore ObserveSubscriptionEventsItemKnown = "workspace.change.before"
+const ObserveSubscriptionEventsItemKnownWorkspaceChangeAfter ObserveSubscriptionEventsItemKnown = "workspace.change.after"
+const ObserveSubscriptionEventsItemKnownFileChanged ObserveSubscriptionEventsItemKnown = "file.changed"
+const ObserveSubscriptionEventsItemKnownHookFailure ObserveSubscriptionEventsItemKnown = "hook.failure"
 
 // ObserveSubscriptionEventsItem is a generated union model.
 type ObserveSubscriptionEventsItem struct {
-	Variant1 Optional[ObserveSubscriptionEventsItemVariant1]
-	Variant2 Optional[string]
-	Unknown  json.RawMessage
+	Known   Optional[ObserveSubscriptionEventsItemKnown]
+	Custom  Optional[string]
+	Unknown json.RawMessage
 }
 
 func (value *ObserveSubscriptionEventsItem) UnmarshalJSON(data []byte) error {
@@ -29074,11 +29074,11 @@ func (value *ObserveSubscriptionEventsItem) UnmarshalJSON(data []byte) error {
 		attempt := make([]ParseDiagnostic, 0)
 		checkNode(schema.Variants[0], rawValue, "", &attempt)
 		if !hasErrors(attempt) {
-			var candidate ObserveSubscriptionEventsItemVariant1
+			var candidate ObserveSubscriptionEventsItemKnown
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("ObserveSubscriptionEventsItem.Variant1: %w", err)
+				return fmt.Errorf("ObserveSubscriptionEventsItem.Known: %w", err)
 			}
-			decoded.Variant1 = Some(candidate)
+			decoded.Known = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -29089,9 +29089,9 @@ func (value *ObserveSubscriptionEventsItem) UnmarshalJSON(data []byte) error {
 		if !hasErrors(attempt) {
 			var candidate string
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("ObserveSubscriptionEventsItem.Variant2: %w", err)
+				return fmt.Errorf("ObserveSubscriptionEventsItem.Custom: %w", err)
 			}
-			decoded.Variant2 = Some(candidate)
+			decoded.Custom = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -29103,10 +29103,10 @@ func (value *ObserveSubscriptionEventsItem) UnmarshalJSON(data []byte) error {
 
 func (value ObserveSubscriptionEventsItem) MarshalJSON() ([]byte, error) {
 	selected := 0
-	if value.Variant1.Present {
+	if value.Known.Present {
 		selected++
 	}
-	if value.Variant2.Present {
+	if value.Custom.Present {
 		selected++
 	}
 	if len(value.Unknown) != 0 {
@@ -29115,11 +29115,11 @@ func (value ObserveSubscriptionEventsItem) MarshalJSON() ([]byte, error) {
 	if selected != 1 {
 		return nil, fmt.Errorf("ObserveSubscriptionEventsItem: exactly one variant must be selected")
 	}
-	if value.Variant1.Present {
-		return json.Marshal(value.Variant1.Value)
+	if value.Known.Present {
+		return json.Marshal(value.Known.Value)
 	}
-	if value.Variant2.Present {
-		return json.Marshal(value.Variant2.Value)
+	if value.Custom.Present {
+		return json.Marshal(value.Custom.Value)
 	}
 	return json.Marshal(value.Unknown)
 }
@@ -29760,7 +29760,7 @@ type SessionEndEventOutcome string
 const SessionEndEventOutcomeCompleted SessionEndEventOutcome = "completed"
 const SessionEndEventOutcomeCancelled SessionEndEventOutcome = "cancelled"
 const SessionEndEventOutcomeError SessionEndEventOutcome = "error"
-const SessionEndEventOutcomeUnknown SessionEndEventOutcome = "unknown"
+const SessionEndEventOutcomeUnknownShape92db31827db71e5a SessionEndEventOutcome = "unknown"
 
 // SessionEndEventTurn is a generated nested model.
 type SessionEndEventTurn struct {

@@ -44,11 +44,11 @@ func Initial(value permission.Permission, opts ...Option) *ahp.InterceptRequestP
 	return v
 }
 func NoCandidate() ahp.InterceptRequestParamsStateCandidate {
-	return ahp.InterceptRequestParamsStateCandidate{Variant1: ahp.Some(json.RawMessage("null"))}
+	return ahp.InterceptRequestParamsStateCandidate{Null: ahp.Some(json.RawMessage("null"))}
 }
 
 // Candidate preserves payload encoding errors instead of silently dropping the value.
-func Candidate[T any](value T, provenance ...ahp.InterceptRequestParamsStateCandidateVariant2Provenance) (ahp.InterceptRequestParamsStateCandidate, error) {
+func Candidate[T any](value T, provenance ...ahp.InterceptRequestParamsStateCandidateValueObjectProvenance) (ahp.InterceptRequestParamsStateCandidate, error) {
 	if len(provenance) > 1 {
 		return ahp.InterceptRequestParamsStateCandidate{}, fmt.Errorf("candidate accepts at most one provenance")
 	}
@@ -56,11 +56,11 @@ func Candidate[T any](value T, provenance ...ahp.InterceptRequestParamsStateCand
 	if err != nil {
 		return ahp.InterceptRequestParamsStateCandidate{}, err
 	}
-	candidate := ahp.InterceptRequestParamsStateCandidateVariant2{Value: raw}
+	candidate := ahp.InterceptRequestParamsStateCandidateValueObject{Value: raw}
 	if len(provenance) == 1 {
 		candidate.Provenance = ahp.Some(provenance[0])
 	}
-	return ahp.InterceptRequestParamsStateCandidate{Variant2: ahp.Some(candidate)}, nil
+	return ahp.InterceptRequestParamsStateCandidate{ValueObject: ahp.Some(candidate)}, nil
 }
 func WithCandidate(value ahp.InterceptRequestParamsStateCandidate) Option {
 	return func(v *ahp.InterceptRequestParamsState) { v.Candidate = value }
