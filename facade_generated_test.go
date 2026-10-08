@@ -246,18 +246,18 @@ func TestGeneratedCapabilityHelpers(t *testing.T) {
 		}
 	}
 	overridden := capability.New(nil, capability.WithEffects("allow"), capability.WithEffects("deny"), capability.WithInputModification(true, false), capability.WithInputModification(false, true))
-	if len(overridden.Effects) != 1 || string(overridden.Modify.Value.Input.Value) != `{"replace":false,"merge":true}` {
+	if len(overridden.Effects) != 1 || overridden.Modify.Value.Input.Value.Replace || !overridden.Modify.Value.Input.Value.Merge {
 		t.Fatal("last option did not win")
 	}
 	noImplicitEffects := capability.New(nil, capability.WithInputModification(false, false), capability.WithElicitationForm())
 	if len(noImplicitEffects.Effects) != 0 {
 		t.Fatal("nested helper implicitly granted an effect")
 	}
-	// Options produce new body storage for each use, not shared raw JSON.
+	// Options produce independent typed values for each use.
 	option := capability.WithInputModification(true, false)
 	first, second := capability.New(nil, option), capability.New(nil, option)
-	first.Modify.Value.Input.Value[0] = 'x'
-	if second.Modify.Value.Input.Value[0] != '{' {
+	first.Modify.Value.Input.Value.Replace = false
+	if !second.Modify.Value.Input.Value.Replace {
 		t.Fatal("shared modification backing storage")
 	}
 }
@@ -277,21 +277,16 @@ func TestFunctionalCapabilityComposition(t *testing.T) {
 	if len(first.Modes) != 2 || first.Modes[0] != capability.InterceptMode || first.Modes[1] != capability.ObserveMode {
 		t.Fatal(first.Modes)
 	}
-	var combined, independent map[string]bool
-	if err = json.Unmarshal(first.Capabilities.Modify.Value.Input.Value, &combined); err != nil {
-		t.Fatal(err)
-	}
-	if err = json.Unmarshal(second.Capabilities.Modify.Value.Input.Value, &independent); err != nil {
-		t.Fatal(err)
-	}
-	if !combined["replace"] || !combined["merge"] || !independent["replace"] || independent["merge"] {
+	combined := first.Capabilities.Modify.Value.Input.Value
+	independent := second.Capabilities.Modify.Value.Input.Value
+	if !combined.Replace || !combined.Merge || !independent.Replace || independent.Merge {
 		t.Fatal("reused grant was mutated")
 	}
 	if len(first.Capabilities.Effects) != 2 || len(second.Capabilities.Effects) != 1 {
 		t.Fatal("effect grants not deduplicated")
 	}
-	first.Capabilities.Modify.Value.Input.Value[0] = '!'
-	if !json.Valid(second.Capabilities.Modify.Value.Input.Value) {
+	first.Capabilities.Modify.Value.Input.Value.Replace = false
+	if !second.Capabilities.Modify.Value.Input.Value.Replace {
 		t.Fatal("compositions alias storage")
 	}
 	for _, invalid := range []capability.Grant{{}, capability.ModifyInput(), capability.ModifyInput("invalid"), capability.InjectContextAppend()} {

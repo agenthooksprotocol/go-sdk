@@ -400,3 +400,18 @@ python3 tools/generate_sdk.py --go-sdk ../go-sdk --check
 ## License
 
 Apache-2.0
+
+### Typed composed payloads
+
+Composed MCP transport payloads are ordinary typed models, not raw JSON arms.
+For example, `ExecutionEventMcpConnection.HTTP` contains
+`Optional[ExecutionEventMcpConnectionHTTP]`; its `URL` and `Gaps` fields expose
+strings and typed gap records. `Sse`, `Stdio`, and `CustomTransport` similarly
+expose their schema-declared location fields. `ModelVisibleItem` exposes typed
+content variants with the required `Role` field.
+
+Migration: replace raw JSON construction for these payloads with typed fields.
+Presence predicates such as “URL or gaps” remain checked by the existing
+structural decoder; optional Go fields are not permission to omit every
+alternative. Genuine application JSON, unknown variants, and extension values
+remain raw and retain their existing round-trip behavior.
