@@ -16,6 +16,8 @@ import (
 // Close must unblock Read: cancellation may close the reader concurrently.
 // A source must not be reused across occurrences or read by its caller after transfer.
 type Source struct {
+	lifetime  sync.RWMutex
+	retired   bool
 	reader    io.ReadCloser
 	once      sync.Once
 	closeOnce sync.Once
@@ -45,6 +47,24 @@ func (s *Source) Close() error {
 	return s.closeErr
 }
 
+// Retire ends the occurrence after all receiver fan-out and result extraction.
+// Unlike Close, which preserves the snapshot for other receivers, Retire releases
+// both the cached bytes and the reader. Detached snapshots remain valid.
+// It also interrupts and joins an in-progress snapshot before releasing storage.
+func (s *Source) Retire() error {
+	if s == nil {
+		return nil
+	}
+	err := s.Close()
+	s.lifetime.Lock()
+	defer s.lifetime.Unlock()
+	s.retired = true
+	s.raw = nil
+	s.reader = nil
+	s.err = nil
+	return err
+}
+
 type contentSourceReader struct{ *Source }
 
 func (s contentSourceReader) Read(p []byte) (int, error) { return s.reader.Read(p) }
@@ -54,6 +74,11 @@ func (s contentSourceReader) Read(p []byte) (int, error) { return s.reader.Read(
 func (s *Source) Snapshot(ctx context.Context, limit int64) ([]byte, error) {
 	if s == nil {
 		return nil, errors.New("nil content source")
+	}
+	s.lifetime.RLock()
+	defer s.lifetime.RUnlock()
+	if s.retired {
+		return nil, errors.New("content source is retired")
 	}
 	if limit < 0 || limit == math.MaxInt64 {
 		_ = s.Close()
@@ -90,7 +115,12 @@ func (s *Source) Snapshot(ctx context.Context, limit int64) ([]byte, error) {
 
 // Available observes an immutable completed snapshot without starting a read.
 func (s *Source) Available() ([]byte, bool) {
-	if s == nil || !s.ready.Load() || s.err != nil {
+	if s == nil {
+		return nil, false
+	}
+	s.lifetime.RLock()
+	defer s.lifetime.RUnlock()
+	if s.retired || !s.ready.Load() || s.err != nil {
 		return nil, false
 	}
 	return bytes.Clone(s.raw), true
@@ -98,7 +128,12 @@ func (s *Source) Available() ([]byte, bool) {
 
 // Claim transfers this source to one SDK occurrence. Adapters must reject reuse.
 func (s *Source) Claim() bool {
-	return s != nil && s.reader != nil && s.claimed.CompareAndSwap(false, true)
+	if s == nil {
+		return false
+	}
+	s.lifetime.RLock()
+	defer s.lifetime.RUnlock()
+	return !s.retired && s.reader != nil && s.claimed.CompareAndSwap(false, true)
 }
 
 // readOwnedContent closes the SDK-owned reader exactly once on every exit.

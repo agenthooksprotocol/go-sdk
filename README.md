@@ -356,7 +356,12 @@ performs no reads. Only an authorized selected body snapshots bytes, within the
 configured limit, computes actual size/SHA-256 and uploads independently to each
 receiver before publishing its event. Fan-out reuses the immutable snapshot. Unused,
 failed and cancelled sources are closed, and a source cannot be reused across
-occurrences. Reader `Close` must unblock a pending `Read`. Original source snapshots
+occurrences. Completion, failure, cancellation and timeout retire the source,
+releasing its reader and cached snapshot after receiver fan-out joins. Keeping a
+source or result does not keep the occurrence preparation store alive; results
+own detached effective content. `Source.Close` closes the reader but preserves a
+snapshot for fan-out; adapters use `Source.Retire` when the occurrence ends.
+Reader `Close` must unblock a pending `Read`. Original source snapshots
 and rewritten prepared bodies each have an aggregate `MaxContentBytes` bound;
 together they can retain twice that limit, plus bounded delivery copies. Advanced callers may
 bind canonical slots with `client.WithContentSource`; wire references/resolvers
