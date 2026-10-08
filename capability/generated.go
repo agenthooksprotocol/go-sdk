@@ -830,31 +830,26 @@ func Intercept(grants ...Grant) (Event, error) {
 	return Event{Modes: []Mode{InterceptMode, ObserveMode}, Capabilities: value}, nil
 }
 func Observe() Event { return Event{Modes: []Mode{ObserveMode}} }
-func addEffect(v *ahp.Capabilities, name string) {
-	for _, effect := range v.Effects {
-		if effect.Custom.Present && effect.Custom.Value == name {
-			return
-		}
-		if effect.Known.Present && string(effect.Known.Value) == name {
-			return
-		}
+func addEffect(v *ahp.Capabilities, name ahp.EffectName) {
+	if v.Supports(name) {
+		return
 	}
 	v.Effects = append(v.Effects, ahp.CapabilitiesEffectsItem{Known: ahp.Some(ahp.CapabilitiesEffectsItemKnown(name))})
 }
 func Allow() Grant {
-	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, "allow"); return nil }}
+	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, ahp.EffectNameAllow); return nil }}
 }
 func Ask() Grant {
-	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, "ask"); return nil }}
+	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, ahp.EffectNameAsk); return nil }}
 }
 func Deny() Grant {
-	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, "deny"); return nil }}
+	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, ahp.EffectNameDeny); return nil }}
 }
 func Message() Grant {
-	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, "message"); return nil }}
+	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, ahp.EffectNameMessage); return nil }}
 }
 func Return() Grant {
-	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, "return"); return nil }}
+	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, ahp.EffectNameReturn); return nil }}
 }
 
 const Merge ModifyOperation = "merge"

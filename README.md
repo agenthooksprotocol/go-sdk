@@ -390,7 +390,7 @@ for transport, authentication, upload, and synthetic-host boundaries.
 
 Generated code lives in `generated.go`, semantic-package `generated.go` files, and `client/boundaries_generated.go`. Its provenance is recorded in `ahp-codegen.lock.json`; schema changes are made in the [protocol repository](https://github.com/agenthooksprotocol/agent-hooks-protocol), not by editing the generated file.
 
-The generator source is protocol commit `7a3353d92c14514215cc092a930685b0947f0bc1`. From a protocol checkout at that commit, regenerate and verify with:
+The generator source is protocol commit `9dc64148502ec3f9e16858025887a5dfd6241820`. From a protocol checkout at that commit, regenerate and verify with:
 
 ```sh
 python3 tools/generate_sdk.py --go-sdk ../go-sdk
@@ -415,3 +415,20 @@ Presence predicates such as “URL or gaps” remain checked by the existing
 structural decoder; optional Go fields are not permission to omit every
 alternative. Genuine application JSON, unknown variants, and extension values
 remain raw and retain their existing round-trip behavior.
+
+### Go capability queries
+
+Go exposes `req.Params.Capabilities.Supports(ahp.EffectDeny)` and
+`capabilities.Supports(ahp.EffectName("vendor.custom"))`. The generated
+`EffectNameDeny`, `EffectNameModify`, and the other `EffectName*` constants
+identify effect families; `EffectDeny` aliases `EffectNameDeny`. This avoids
+collisions with existing payload types such as `EffectModify`. Queries inspect typed fields
+without serialization and accept the known and custom string representations.
+Capability grant builders use the same family membership query for deduplication.
+
+`Supports` reports only advertised family membership: it does not authorize
+execution or imply a target, operation, delivery mode, or per-call grant. A nested
+modify grant without the `modify` family returns false; a `modify` family alone
+does not grant any modification operation. Continue to use the existing grant
+builders and host/request validation for operation constraints. This convenience
+API is currently Go-only; no new operation-query API is introduced.

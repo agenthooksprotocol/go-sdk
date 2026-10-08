@@ -72776,6 +72776,53 @@ func (value WorkspaceChangeBeforeEvent) MarshalJSON() ([]byte, error) {
 	return json.Marshal(fields)
 }
 
+// EffectName identifies an advertised effect family, including extension names.
+type EffectName string
+
+const EffectNameAllow EffectName = "allow"
+const EffectNameAsk EffectName = "ask"
+const EffectNameDeny EffectName = "deny"
+const EffectNameFlow EffectName = "flow"
+const EffectNameInject EffectName = "inject"
+const EffectNameMessage EffectName = "message"
+const EffectNameModify EffectName = "modify"
+const EffectNameReturn EffectName = "return"
+
+// EffectDeny is the shorthand family identifier for deny.
+const EffectDeny = EffectNameDeny
+
+// Supports reports advertised effect-family membership only.
+// It does not grant execution permission or check target, operation, mode, or
+// per-call restrictions. Nested grants alone never imply family support.
+func (value Capabilities) Supports(effect EffectName) bool {
+	for _, item := range value.Effects {
+		if item.Known.Present {
+			if string(item.Known.Value) == string(effect) {
+				return true
+			}
+		} else if item.Custom.Present && item.Custom.Value == string(effect) {
+			return true
+		}
+	}
+	return false
+}
+
+// Supports reports advertised effect-family membership only.
+// It does not grant execution permission or check target, operation, mode, or
+// per-call restrictions. Nested grants alone never imply family support.
+func (value InterceptRequestParamsCapabilities) Supports(effect EffectName) bool {
+	for _, item := range value.Effects {
+		if item.Known.Present {
+			if string(item.Known.Value) == string(effect) {
+				return true
+			}
+		} else if item.Custom.Present && item.Custom.Value == string(effect) {
+			return true
+		}
+	}
+	return false
+}
+
 // UnmarshalJSON enforces generated structural rules and retains supported extensions.
 func (value *Authentication) UnmarshalJSON(data []byte) error {
 	if err := validateModelJSON(modelDescriptors["Authentication"], data); err != nil {
