@@ -219,6 +219,20 @@ candidate and returns an error; `state.WithCandidate`, `WithFlow`,
 `state.NoCandidate` represents an explicit absent candidate. Initial state never
 skips host permission, approval, or application-schema validation.
 
+`Nullable[T]` represents JSON null independently of property presence. A required
+nullable property uses `Nullable[T]`; an optional one uses `Optional[Nullable[T]]`.
+Use `ahp.Null[T]()` for null and `ahp.NonNull(value)` for a non-null value. Check
+`Valid` before reading `Value`; `false`, `0`, and empty strings remain non-null
+values. For an optional property, check `Present` first: absent, explicit null,
+and a non-null value are three different states.
+
+`state.NoCandidate()` encodes `null`, while `state.Candidate(nil)` encodes
+`{"value":null}`. Named nullable models, including response IDs, are values rather
+than pointers; pass their address to `json.Unmarshal`. Non-null selections whose
+payload serializes to null (for example a nil slice or pointer) return an encoding
+error. Named `Parse*` entrypoints retain descriptor validation, including required
+members; direct `json.Unmarshal` is not a complete protocol validator.
+
 Receiver-side `effect.Modify<Target>Merge(value)` and
 `effect.Modify<Target>Replace(value)` accept typed application values for all
 nine modification targets above. `effect.Return(value)` and

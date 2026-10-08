@@ -27,6 +27,46 @@ func Some[T any](value T) Optional[T] {
 	return Optional[T]{Value: value, Present: true}
 }
 
+// Nullable distinguishes JSON null from a non-null value, independently of presence.
+// Its zero value is null. Use Optional[Nullable[T]] for an optional nullable member.
+type Nullable[T any] struct {
+	Value T
+	Valid bool
+}
+
+// Null returns an explicit JSON null.
+func Null[T any]() Nullable[T] { return Nullable[T]{} }
+
+// NonNull returns a non-null payload. Encoding rejects payloads that encode as null.
+func NonNull[T any](value T) Nullable[T] { return Nullable[T]{Value: value, Valid: true} }
+
+func (value *Nullable[T]) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		*value = Null[T]()
+		return nil
+	}
+	var payload T
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	*value = NonNull(payload)
+	return nil
+}
+
+func (value Nullable[T]) MarshalJSON() ([]byte, error) {
+	if !value.Valid {
+		return []byte("null"), nil
+	}
+	data, err := json.Marshal(value.Value)
+	if err != nil {
+		return nil, err
+	}
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		return nil, fmt.Errorf("Nullable: non-null payload encoded as null")
+	}
+	return data, nil
+}
+
 // DiagnosticCode identifies a structural parse diagnostic.
 type DiagnosticCode string
 
@@ -1875,7 +1915,7 @@ func (value CapabilitiesResponseResult) MarshalJSON() ([]byte, error) {
 
 // CapabilitiesResponse is generated from schema/draft/capabilities-response.schema.json#.
 type CapabilitiesResponse struct {
-	ID                   *JsonRpcResponseId
+	ID                   JsonRpcResponseId
 	JSONRPC              CapabilitiesResponseJSONRPC
 	Result               CapabilitiesResponseResult
 	AdditionalProperties map[string]json.RawMessage
@@ -1891,6 +1931,9 @@ func (value *CapabilitiesResponse) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("CapabilitiesResponse must be a JSON object")
 	}
 	var decoded CapabilitiesResponse
+	if _, ok := fields["id"]; !ok {
+		return fmt.Errorf("CapabilitiesResponse.id: missing required member")
+	}
 	if raw, ok := fields["id"]; ok {
 		if err := json.Unmarshal(raw, &decoded.ID); err != nil {
 			return fmt.Errorf("CapabilitiesResponse.id: %w", err)
@@ -8239,7 +8282,7 @@ type ExecutionEventAttemptusageCompleteness string
 
 const ExecutionEventAttemptusageCompletenessComplete ExecutionEventAttemptusageCompleteness = "complete"
 const ExecutionEventAttemptusageCompletenessPartial ExecutionEventAttemptusageCompleteness = "partial"
-const ExecutionEventAttemptusageCompletenessUnknownShape92db31827db71e5a ExecutionEventAttemptusageCompleteness = "unknown"
+const ExecutionEventAttemptusageCompletenessUnknownValue ExecutionEventAttemptusageCompleteness = "unknown"
 
 // ExecutionEventAttemptusageCostBasis is a generated schema value.
 type ExecutionEventAttemptusageCostBasis string
@@ -9862,11 +9905,11 @@ func (value ExecutionEventFilechange) MarshalJSON() ([]byte, error) {
 
 // ExecutionEventMcpConnection is a generated union model.
 type ExecutionEventMcpConnection struct {
-	GapsObjectOrUrlObjectAndTransportObjectShape947e67f4c644f1e8                                 Optional[json.RawMessage]
-	GapsObjectOrUrlObjectAndTransportObjectShape03cf6907d766aa03                                 Optional[json.RawMessage]
-	ArgsObjectOrGapsObjectAndCommandObjectOrGapsObjectAndCwdObjectOrGapsObjectAndTransportObject Optional[json.RawMessage]
-	AddressFormObjectOrGapsObjectAndAddressObjectOrGapsObjectAndTransportObject                  Optional[json.RawMessage]
-	Unknown                                                                                      json.RawMessage
+	HTTP            Optional[json.RawMessage]
+	Sse             Optional[json.RawMessage]
+	Stdio           Optional[json.RawMessage]
+	CustomTransport Optional[json.RawMessage]
+	Unknown         json.RawMessage
 }
 
 func (value *ExecutionEventMcpConnection) UnmarshalJSON(data []byte) error {
@@ -9887,9 +9930,9 @@ func (value *ExecutionEventMcpConnection) UnmarshalJSON(data []byte) error {
 		if !hasErrors(attempt) {
 			var candidate json.RawMessage
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("ExecutionEventMcpConnection.GapsObjectOrUrlObjectAndTransportObjectShape947e67f4c644f1e8: %w", err)
+				return fmt.Errorf("ExecutionEventMcpConnection.HTTP: %w", err)
 			}
-			decoded.GapsObjectOrUrlObjectAndTransportObjectShape947e67f4c644f1e8 = Some(candidate)
+			decoded.HTTP = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -9900,9 +9943,9 @@ func (value *ExecutionEventMcpConnection) UnmarshalJSON(data []byte) error {
 		if !hasErrors(attempt) {
 			var candidate json.RawMessage
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("ExecutionEventMcpConnection.GapsObjectOrUrlObjectAndTransportObjectShape03cf6907d766aa03: %w", err)
+				return fmt.Errorf("ExecutionEventMcpConnection.Sse: %w", err)
 			}
-			decoded.GapsObjectOrUrlObjectAndTransportObjectShape03cf6907d766aa03 = Some(candidate)
+			decoded.Sse = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -9913,9 +9956,9 @@ func (value *ExecutionEventMcpConnection) UnmarshalJSON(data []byte) error {
 		if !hasErrors(attempt) {
 			var candidate json.RawMessage
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("ExecutionEventMcpConnection.ArgsObjectOrGapsObjectAndCommandObjectOrGapsObjectAndCwdObjectOrGapsObjectAndTransportObject: %w", err)
+				return fmt.Errorf("ExecutionEventMcpConnection.Stdio: %w", err)
 			}
-			decoded.ArgsObjectOrGapsObjectAndCommandObjectOrGapsObjectAndCwdObjectOrGapsObjectAndTransportObject = Some(candidate)
+			decoded.Stdio = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -9926,9 +9969,9 @@ func (value *ExecutionEventMcpConnection) UnmarshalJSON(data []byte) error {
 		if !hasErrors(attempt) {
 			var candidate json.RawMessage
 			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("ExecutionEventMcpConnection.AddressFormObjectOrGapsObjectAndAddressObjectOrGapsObjectAndTransportObject: %w", err)
+				return fmt.Errorf("ExecutionEventMcpConnection.CustomTransport: %w", err)
 			}
-			decoded.AddressFormObjectOrGapsObjectAndAddressObjectOrGapsObjectAndTransportObject = Some(candidate)
+			decoded.CustomTransport = Some(candidate)
 			*value = decoded
 			return nil
 		}
@@ -9940,16 +9983,16 @@ func (value *ExecutionEventMcpConnection) UnmarshalJSON(data []byte) error {
 
 func (value ExecutionEventMcpConnection) MarshalJSON() ([]byte, error) {
 	selected := 0
-	if value.GapsObjectOrUrlObjectAndTransportObjectShape947e67f4c644f1e8.Present {
+	if value.HTTP.Present {
 		selected++
 	}
-	if value.GapsObjectOrUrlObjectAndTransportObjectShape03cf6907d766aa03.Present {
+	if value.Sse.Present {
 		selected++
 	}
-	if value.ArgsObjectOrGapsObjectAndCommandObjectOrGapsObjectAndCwdObjectOrGapsObjectAndTransportObject.Present {
+	if value.Stdio.Present {
 		selected++
 	}
-	if value.AddressFormObjectOrGapsObjectAndAddressObjectOrGapsObjectAndTransportObject.Present {
+	if value.CustomTransport.Present {
 		selected++
 	}
 	if len(value.Unknown) != 0 {
@@ -9958,17 +10001,17 @@ func (value ExecutionEventMcpConnection) MarshalJSON() ([]byte, error) {
 	if selected != 1 {
 		return nil, fmt.Errorf("ExecutionEventMcpConnection: exactly one variant must be selected")
 	}
-	if value.GapsObjectOrUrlObjectAndTransportObjectShape947e67f4c644f1e8.Present {
-		return json.Marshal(value.GapsObjectOrUrlObjectAndTransportObjectShape947e67f4c644f1e8.Value)
+	if value.HTTP.Present {
+		return json.Marshal(value.HTTP.Value)
 	}
-	if value.GapsObjectOrUrlObjectAndTransportObjectShape03cf6907d766aa03.Present {
-		return json.Marshal(value.GapsObjectOrUrlObjectAndTransportObjectShape03cf6907d766aa03.Value)
+	if value.Sse.Present {
+		return json.Marshal(value.Sse.Value)
 	}
-	if value.ArgsObjectOrGapsObjectAndCommandObjectOrGapsObjectAndCwdObjectOrGapsObjectAndTransportObject.Present {
-		return json.Marshal(value.ArgsObjectOrGapsObjectAndCommandObjectOrGapsObjectAndCwdObjectOrGapsObjectAndTransportObject.Value)
+	if value.Stdio.Present {
+		return json.Marshal(value.Stdio.Value)
 	}
-	if value.AddressFormObjectOrGapsObjectAndAddressObjectOrGapsObjectAndTransportObject.Present {
-		return json.Marshal(value.AddressFormObjectOrGapsObjectAndAddressObjectOrGapsObjectAndTransportObject.Value)
+	if value.CustomTransport.Present {
+		return json.Marshal(value.CustomTransport.Value)
 	}
 	return json.Marshal(value.Unknown)
 }
@@ -16165,7 +16208,7 @@ type ExecutionEventTurnusageCompleteness string
 
 const ExecutionEventTurnusageCompletenessComplete ExecutionEventTurnusageCompleteness = "complete"
 const ExecutionEventTurnusageCompletenessPartial ExecutionEventTurnusageCompleteness = "partial"
-const ExecutionEventTurnusageCompletenessUnknownShape92db31827db71e5a ExecutionEventTurnusageCompleteness = "unknown"
+const ExecutionEventTurnusageCompletenessUnknownValue ExecutionEventTurnusageCompleteness = "unknown"
 
 // ExecutionEventTurnusageCostBasis is a generated schema value.
 type ExecutionEventTurnusageCostBasis string
@@ -16417,7 +16460,7 @@ type ExecutionEventUsageCompleteness string
 
 const ExecutionEventUsageCompletenessComplete ExecutionEventUsageCompleteness = "complete"
 const ExecutionEventUsageCompletenessPartial ExecutionEventUsageCompleteness = "partial"
-const ExecutionEventUsageCompletenessUnknownShape92db31827db71e5a ExecutionEventUsageCompleteness = "unknown"
+const ExecutionEventUsageCompletenessUnknownValue ExecutionEventUsageCompleteness = "unknown"
 
 // ExecutionEventUsageCostBasis is a generated schema value.
 type ExecutionEventUsageCostBasis string
@@ -19108,7 +19151,7 @@ func (value InterceptDenyResponseResult) MarshalJSON() ([]byte, error) {
 
 // InterceptDenyResponse is generated from schema/draft/intercept-deny-response.schema.json#.
 type InterceptDenyResponse struct {
-	ID                   *JsonRpcResponseId
+	ID                   JsonRpcResponseId
 	JSONRPC              InterceptDenyResponseJSONRPC
 	Result               InterceptDenyResponseResult
 	AdditionalProperties map[string]json.RawMessage
@@ -19124,6 +19167,9 @@ func (value *InterceptDenyResponse) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("InterceptDenyResponse must be a JSON object")
 	}
 	var decoded InterceptDenyResponse
+	if _, ok := fields["id"]; !ok {
+		return fmt.Errorf("InterceptDenyResponse.id: missing required member")
+	}
 	if raw, ok := fields["id"]; ok {
 		if err := json.Unmarshal(raw, &decoded.ID); err != nil {
 			return fmt.Errorf("InterceptDenyResponse.id: %w", err)
@@ -19256,7 +19302,7 @@ func (value InterceptNoEffectResponseResult) MarshalJSON() ([]byte, error) {
 
 // InterceptNoEffectResponse is generated from schema/draft/intercept-no-effect-response.schema.json#.
 type InterceptNoEffectResponse struct {
-	ID                   *JsonRpcResponseId
+	ID                   JsonRpcResponseId
 	JSONRPC              InterceptNoEffectResponseJSONRPC
 	Result               InterceptNoEffectResponseResult
 	AdditionalProperties map[string]json.RawMessage
@@ -19272,6 +19318,9 @@ func (value *InterceptNoEffectResponse) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("InterceptNoEffectResponse must be a JSON object")
 	}
 	var decoded InterceptNoEffectResponse
+	if _, ok := fields["id"]; !ok {
+		return fmt.Errorf("InterceptNoEffectResponse.id: missing required member")
+	}
 	if raw, ok := fields["id"]; ok {
 		if err := json.Unmarshal(raw, &decoded.ID); err != nil {
 			return fmt.Errorf("InterceptNoEffectResponse.id: %w", err)
@@ -20417,28 +20466,28 @@ func (value InterceptRequestParamsEvent) MarshalJSON() ([]byte, error) {
 	return json.Marshal(value.Unknown)
 }
 
-// InterceptRequestParamsStateCandidateValueObjectProvenance is a generated nested model.
-type InterceptRequestParamsStateCandidateValueObjectProvenance struct {
+// InterceptRequestParamsStateCandidateValueProvenance is a generated nested model.
+type InterceptRequestParamsStateCandidateValueProvenance struct {
 	AdditionalProperties map[string]json.RawMessage
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *InterceptRequestParamsStateCandidateValueObjectProvenance) UnmarshalJSON(data []byte) error {
+func (value *InterceptRequestParamsStateCandidateValueProvenance) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("InterceptRequestParamsStateCandidateValueObjectProvenance must be a JSON object")
+		return fmt.Errorf("InterceptRequestParamsStateCandidateValueProvenance must be a JSON object")
 	}
-	var decoded InterceptRequestParamsStateCandidateValueObjectProvenance
+	var decoded InterceptRequestParamsStateCandidateValueProvenance
 	decoded.AdditionalProperties = fields
 	*value = decoded
 	return nil
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value InterceptRequestParamsStateCandidateValueObjectProvenance) MarshalJSON() ([]byte, error) {
+func (value InterceptRequestParamsStateCandidateValueProvenance) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+0)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -20446,33 +20495,33 @@ func (value InterceptRequestParamsStateCandidateValueObjectProvenance) MarshalJS
 	return json.Marshal(fields)
 }
 
-// InterceptRequestParamsStateCandidateValueObject is a generated nested model.
-type InterceptRequestParamsStateCandidateValueObject struct {
-	Provenance           Optional[InterceptRequestParamsStateCandidateValueObjectProvenance]
+// InterceptRequestParamsStateCandidateValue is a generated nested model.
+type InterceptRequestParamsStateCandidateValue struct {
+	Provenance           Optional[InterceptRequestParamsStateCandidateValueProvenance]
 	Value                json.RawMessage
 	AdditionalProperties map[string]json.RawMessage
 }
 
 // UnmarshalJSON retains members not known to this schema revision.
-func (value *InterceptRequestParamsStateCandidateValueObject) UnmarshalJSON(data []byte) error {
+func (value *InterceptRequestParamsStateCandidateValue) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	if fields == nil {
-		return fmt.Errorf("InterceptRequestParamsStateCandidateValueObject must be a JSON object")
+		return fmt.Errorf("InterceptRequestParamsStateCandidateValue must be a JSON object")
 	}
-	var decoded InterceptRequestParamsStateCandidateValueObject
+	var decoded InterceptRequestParamsStateCandidateValue
 	if raw, ok := fields["provenance"]; ok {
 		decoded.Provenance.Present = true
 		if err := json.Unmarshal(raw, &decoded.Provenance.Value); err != nil {
-			return fmt.Errorf("InterceptRequestParamsStateCandidateValueObject.provenance: %w", err)
+			return fmt.Errorf("InterceptRequestParamsStateCandidateValue.provenance: %w", err)
 		}
 		delete(fields, "provenance")
 	}
 	if raw, ok := fields["value"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Value); err != nil {
-			return fmt.Errorf("InterceptRequestParamsStateCandidateValueObject.value: %w", err)
+			return fmt.Errorf("InterceptRequestParamsStateCandidateValue.value: %w", err)
 		}
 		delete(fields, "value")
 	}
@@ -20482,7 +20531,7 @@ func (value *InterceptRequestParamsStateCandidateValueObject) UnmarshalJSON(data
 }
 
 // MarshalJSON emits known fields together with all retained members.
-func (value InterceptRequestParamsStateCandidateValueObject) MarshalJSON() ([]byte, error) {
+func (value InterceptRequestParamsStateCandidateValue) MarshalJSON() ([]byte, error) {
 	fields := make(map[string]json.RawMessage, len(value.AdditionalProperties)+2)
 	for key, raw := range value.AdditionalProperties {
 		fields[key] = raw
@@ -20490,91 +20539,18 @@ func (value InterceptRequestParamsStateCandidateValueObject) MarshalJSON() ([]by
 	if value.Provenance.Present {
 		raw, err := json.Marshal(value.Provenance.Value)
 		if err != nil {
-			return nil, fmt.Errorf("InterceptRequestParamsStateCandidateValueObject.provenance: %w", err)
+			return nil, fmt.Errorf("InterceptRequestParamsStateCandidateValue.provenance: %w", err)
 		}
 		fields["provenance"] = raw
 	}
 	{
 		raw, err := json.Marshal(value.Value)
 		if err != nil {
-			return nil, fmt.Errorf("InterceptRequestParamsStateCandidateValueObject.value: %w", err)
+			return nil, fmt.Errorf("InterceptRequestParamsStateCandidateValue.value: %w", err)
 		}
 		fields["value"] = raw
 	}
 	return json.Marshal(fields)
-}
-
-// InterceptRequestParamsStateCandidate is a generated union model.
-type InterceptRequestParamsStateCandidate struct {
-	Null        Optional[json.RawMessage]
-	ValueObject Optional[InterceptRequestParamsStateCandidateValueObject]
-	Unknown     json.RawMessage
-}
-
-func (value *InterceptRequestParamsStateCandidate) UnmarshalJSON(data []byte) error {
-	rawValue, err := decodeJSON(data)
-	if err != nil {
-		return err
-	}
-	schema := loadSchemaNode("{\"kind\":\"union\",\"mode\":\"anyOf\",\"variants\":[{\"kind\":\"null\"},{\"kind\":\"object\",\"properties\":[{\"wire_name\":\"provenance\",\"required\":false,\"shape\":{\"kind\":\"object\",\"properties\":[],\"forbidden_property_sets\":[],\"additional\":{\"kind\":\"allowed\"}}},{\"wire_name\":\"value\",\"required\":true,\"shape\":{\"kind\":\"any\"}}],\"forbidden_property_sets\":[],\"additional\":{\"kind\":\"allowed\"}}]}")
-	diagnostics := make([]ParseDiagnostic, 0)
-	checkNode(schema, rawValue, "", &diagnostics)
-	if hasErrors(diagnostics) {
-		return fmt.Errorf("InterceptRequestParamsStateCandidate: value does not match the union")
-	}
-	var decoded InterceptRequestParamsStateCandidate
-	{
-		attempt := make([]ParseDiagnostic, 0)
-		checkNode(schema.Variants[0], rawValue, "", &attempt)
-		if !hasErrors(attempt) {
-			var candidate json.RawMessage
-			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("InterceptRequestParamsStateCandidate.Null: %w", err)
-			}
-			decoded.Null = Some(candidate)
-			*value = decoded
-			return nil
-		}
-	}
-	{
-		attempt := make([]ParseDiagnostic, 0)
-		checkNode(schema.Variants[1], rawValue, "", &attempt)
-		if !hasErrors(attempt) {
-			var candidate InterceptRequestParamsStateCandidateValueObject
-			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("InterceptRequestParamsStateCandidate.ValueObject: %w", err)
-			}
-			decoded.ValueObject = Some(candidate)
-			*value = decoded
-			return nil
-		}
-	}
-	decoded.Unknown = append(json.RawMessage(nil), data...)
-	*value = decoded
-	return nil
-}
-
-func (value InterceptRequestParamsStateCandidate) MarshalJSON() ([]byte, error) {
-	selected := 0
-	if value.Null.Present {
-		selected++
-	}
-	if value.ValueObject.Present {
-		selected++
-	}
-	if len(value.Unknown) != 0 {
-		selected++
-	}
-	if selected != 1 {
-		return nil, fmt.Errorf("InterceptRequestParamsStateCandidate: exactly one variant must be selected")
-	}
-	if value.Null.Present {
-		return json.Marshal(value.Null.Value)
-	}
-	if value.ValueObject.Present {
-		return json.Marshal(value.ValueObject.Value)
-	}
-	return json.Marshal(value.Unknown)
 }
 
 // InterceptRequestParamsStateFlow is a generated schema value.
@@ -20594,7 +20570,7 @@ const InterceptRequestParamsStatePermissionDeny InterceptRequestParamsStatePermi
 
 // InterceptRequestParamsState is a generated nested model.
 type InterceptRequestParamsState struct {
-	Candidate            InterceptRequestParamsStateCandidate
+	Candidate            Nullable[InterceptRequestParamsStateCandidateValue]
 	Flow                 Optional[InterceptRequestParamsStateFlow]
 	Injections           Optional[[]json.RawMessage]
 	Instructions         Optional[[]string]
@@ -20612,6 +20588,9 @@ func (value *InterceptRequestParamsState) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("InterceptRequestParamsState must be a JSON object")
 	}
 	var decoded InterceptRequestParamsState
+	if _, ok := fields["candidate"]; !ok {
+		return fmt.Errorf("InterceptRequestParamsState.candidate: missing required member")
+	}
 	if raw, ok := fields["candidate"]; ok {
 		if err := json.Unmarshal(raw, &decoded.Candidate); err != nil {
 			return fmt.Errorf("InterceptRequestParamsState.candidate: %w", err)
@@ -20959,7 +20938,7 @@ func (value InterceptResponseResult) MarshalJSON() ([]byte, error) {
 
 // InterceptResponse is generated from schema/draft/intercept-response.schema.json#.
 type InterceptResponse struct {
-	ID                   *JsonRpcResponseId
+	ID                   JsonRpcResponseId
 	JSONRPC              InterceptResponseJSONRPC
 	Result               InterceptResponseResult
 	AdditionalProperties map[string]json.RawMessage
@@ -20975,6 +20954,9 @@ func (value *InterceptResponse) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("InterceptResponse must be a JSON object")
 	}
 	var decoded InterceptResponse
+	if _, ok := fields["id"]; !ok {
+		return fmt.Errorf("InterceptResponse.id: missing required member")
+	}
 	if raw, ok := fields["id"]; ok {
 		if err := json.Unmarshal(raw, &decoded.ID); err != nil {
 			return fmt.Errorf("InterceptResponse.id: %w", err)
@@ -21455,7 +21437,7 @@ const JsonRpcErrorResponseJSONRPCValue20 JsonRpcErrorResponseJSONRPC = "2.0"
 // JsonRpcErrorResponse is generated from schema/draft/common.schema.json#/$defs/errorResponse.
 type JsonRpcErrorResponse struct {
 	Error                JsonRpcErrorResponseError
-	ID                   *JsonRpcResponseId
+	ID                   JsonRpcResponseId
 	JSONRPC              JsonRpcErrorResponseJSONRPC
 	AdditionalProperties map[string]json.RawMessage
 }
@@ -21475,6 +21457,9 @@ func (value *JsonRpcErrorResponse) UnmarshalJSON(data []byte) error {
 			return fmt.Errorf("JsonRpcErrorResponse.error: %w", err)
 		}
 		delete(fields, "error")
+	}
+	if _, ok := fields["id"]; !ok {
+		return fmt.Errorf("JsonRpcErrorResponse.id: missing required member")
 	}
 	if raw, ok := fields["id"]; ok {
 		if err := json.Unmarshal(raw, &decoded.ID); err != nil {
@@ -21933,78 +21918,8 @@ func (value JsonRpcRequest) MarshalJSON() ([]byte, error) {
 	return json.Marshal(fields)
 }
 
-// JsonRpcResponseId is generated from schema/draft/common.schema.json#/$defs/jsonRpcResponseId.
-type JsonRpcResponseId struct {
-	JsonRpcId Optional[*JsonRpcId]
-	Null      Optional[json.RawMessage]
-	Unknown   json.RawMessage
-}
-
-func (value *JsonRpcResponseId) UnmarshalJSON(data []byte) error {
-	rawValue, err := decodeJSON(data)
-	if err != nil {
-		return err
-	}
-	schema := loadSchemaNode("{\"kind\":\"union\",\"mode\":\"anyOf\",\"variants\":[{\"kind\":\"ref\",\"name\":\"JsonRpcId\"},{\"kind\":\"null\"}]}")
-	diagnostics := make([]ParseDiagnostic, 0)
-	checkNode(schema, rawValue, "", &diagnostics)
-	if hasErrors(diagnostics) {
-		return fmt.Errorf("JsonRpcResponseId: value does not match the union")
-	}
-	var decoded JsonRpcResponseId
-	{
-		attempt := make([]ParseDiagnostic, 0)
-		checkNode(schema.Variants[0], rawValue, "", &attempt)
-		if !hasErrors(attempt) {
-			var candidate *JsonRpcId
-			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("JsonRpcResponseId.JsonRpcId: %w", err)
-			}
-			decoded.JsonRpcId = Some(candidate)
-			*value = decoded
-			return nil
-		}
-	}
-	{
-		attempt := make([]ParseDiagnostic, 0)
-		checkNode(schema.Variants[1], rawValue, "", &attempt)
-		if !hasErrors(attempt) {
-			var candidate json.RawMessage
-			if err := json.Unmarshal(data, &candidate); err != nil {
-				return fmt.Errorf("JsonRpcResponseId.Null: %w", err)
-			}
-			decoded.Null = Some(candidate)
-			*value = decoded
-			return nil
-		}
-	}
-	decoded.Unknown = append(json.RawMessage(nil), data...)
-	*value = decoded
-	return nil
-}
-
-func (value JsonRpcResponseId) MarshalJSON() ([]byte, error) {
-	selected := 0
-	if value.JsonRpcId.Present {
-		selected++
-	}
-	if value.Null.Present {
-		selected++
-	}
-	if len(value.Unknown) != 0 {
-		selected++
-	}
-	if selected != 1 {
-		return nil, fmt.Errorf("JsonRpcResponseId: exactly one variant must be selected")
-	}
-	if value.JsonRpcId.Present {
-		return json.Marshal(value.JsonRpcId.Value)
-	}
-	if value.Null.Present {
-		return json.Marshal(value.Null.Value)
-	}
-	return json.Marshal(value.Unknown)
-}
+// JsonRpcResponseId distinguishes null from a non-null value.
+type JsonRpcResponseId = Nullable[*JsonRpcId]
 
 // JsonRpcSuccessResponseJSONRPC is a generated schema value.
 type JsonRpcSuccessResponseJSONRPC string
@@ -22042,7 +21957,7 @@ func (value JsonRpcSuccessResponseResult) MarshalJSON() ([]byte, error) {
 
 // JsonRpcSuccessResponse is generated from schema/draft/common.schema.json#/$defs/successResponse.
 type JsonRpcSuccessResponse struct {
-	ID                   *JsonRpcResponseId
+	ID                   JsonRpcResponseId
 	JSONRPC              JsonRpcSuccessResponseJSONRPC
 	Result               JsonRpcSuccessResponseResult
 	AdditionalProperties map[string]json.RawMessage
@@ -22058,6 +21973,9 @@ func (value *JsonRpcSuccessResponse) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("JsonRpcSuccessResponse must be a JSON object")
 	}
 	var decoded JsonRpcSuccessResponse
+	if _, ok := fields["id"]; !ok {
+		return fmt.Errorf("JsonRpcSuccessResponse.id: missing required member")
+	}
 	if raw, ok := fields["id"]; ok {
 		if err := json.Unmarshal(raw, &decoded.ID); err != nil {
 			return fmt.Errorf("JsonRpcSuccessResponse.id: %w", err)
@@ -29760,7 +29678,7 @@ type SessionEndEventOutcome string
 const SessionEndEventOutcomeCompleted SessionEndEventOutcome = "completed"
 const SessionEndEventOutcomeCancelled SessionEndEventOutcome = "cancelled"
 const SessionEndEventOutcomeError SessionEndEventOutcome = "error"
-const SessionEndEventOutcomeUnknownShape92db31827db71e5a SessionEndEventOutcome = "unknown"
+const SessionEndEventOutcomeUnknownValue SessionEndEventOutcome = "unknown"
 
 // SessionEndEventTurn is a generated nested model.
 type SessionEndEventTurn struct {

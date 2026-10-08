@@ -332,8 +332,33 @@ func TestInitialAndTypedEffectOperations(t *testing.T) {
 		t.Fatal(err)
 	}
 	initial = state.Initial(permission.Ask, state.WithCandidate(candidate))
-	if string(initial.Candidate.ValueObject.Value.Value) != `{"count":3}` {
+	if string(initial.Candidate.Value.Value) != `{"count":3}` {
 		t.Fatal(initial)
+	}
+	nullPayload, err := state.Candidate[any](nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !nullPayload.Valid || string(nullPayload.Value.Value) != "null" {
+		t.Fatal("candidate null payload collapsed into no candidate")
+	}
+	if state.NoCandidate().Valid {
+		t.Fatal("no candidate must be null")
+	}
+	for _, candidate := range []struct {
+		value any
+		want  string
+	}{
+		{state.NoCandidate(), `null`}, {nullPayload, `{"value":null}`},
+	} {
+		encoded, err := json.Marshal(candidate.value)
+		if err != nil || string(encoded) != candidate.want {
+			t.Fatalf("candidate state: %s %v", encoded, err)
+		}
+	}
+	var missingCandidate ahp.InterceptRequestParamsState
+	if json.Unmarshal([]byte(`{"permission":"allow"}`), &missingCandidate) == nil {
+		t.Fatal("missing required candidate accepted")
 	}
 	if _, err := state.Candidate(make(chan int)); err == nil {
 		t.Fatal("candidate encoding failure hidden")
