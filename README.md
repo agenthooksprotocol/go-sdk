@@ -230,8 +230,33 @@ and a non-null value are three different states.
 `{"value":null}`. Named nullable models, including response IDs, are values rather
 than pointers; pass their address to `json.Unmarshal`. Non-null selections whose
 payload serializes to null (for example a nil slice or pointer) return an encoding
-error. Named `Parse*` entrypoints retain descriptor validation, including required
-members; direct `json.Unmarshal` is not a complete protocol validator.
+error. `Nullable[T]` handles null itself and delegates non-null decoding to `T`.
+
+Generated model `UnmarshalJSON` methods and named `Parse*` entrypoints enforce the
+same generated **structural** rules: required members, JSON types, literals,
+closed enums, nested models, forbidden property combinations, and union matching.
+For example, decoding a candidate `{}` now fails because `value` is required;
+`null` and `{"value":null}` remain distinct valid candidate states. Open string
+enums and unknown tagged variants remain accepted, and supported extension
+members remain retained. `Parse*` additionally returns structured diagnostics
+(including warnings) and the original raw JSON; direct decoding returns an error
+for structural failures without a diagnostics collection.
+
+This is not complete canonical JSON Schema validation. The generated IR does not
+represent string length/pattern/format, numeric bounds, or all array/object
+keywords. Unknown members remain forward-compatible even where the canonical
+schema closes objects. Server-side canonical validation and request-dependent
+checks remain separate and unchanged. Do not substitute decoding for those checks.
+
+Migration: direct decoding now rejects structurally invalid models that older
+versions accepted. Named primitive models such as `ReverseDnsName` are defined Go
+types rather than aliases so they can own decoders; convert existing string
+variables explicitly (for example, `id := ahp.ReverseDnsName(existingID)`). The
+`registration.NewBackend` convenience constructor still accepts a string.
+`ContextCompactBeforeEvent` and `McpElicitationRequest` now alias target values,
+not pointers, so null cannot bypass the target decoder. Use `*Model` explicitly
+where your own API needs a pointer; Go itself still accepts null into pointer
+variables without invoking the pointed-to model's decoder.
 
 Receiver-side `effect.Modify<Target>Merge(value)` and
 `effect.Modify<Target>Replace(value)` accept typed application values for all

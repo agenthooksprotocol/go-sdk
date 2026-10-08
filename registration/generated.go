@@ -14,7 +14,7 @@ func WithBackendSubscriptions(values ...ahp.BackendSubscriptionsItem) BackendOpt
 	return func(v *ahp.Backend) { v.Subscriptions = append([]ahp.BackendSubscriptionsItem{}, values...) }
 }
 func NewBackend(argID string, argTransport ahp.BackendTransport, argSubscriptions ahp.BackendSubscriptionsItem, opts ...BackendOption) *ahp.Backend {
-	v := &ahp.Backend{ID: &argID, Transport: argTransport, Subscriptions: []ahp.BackendSubscriptionsItem{argSubscriptions}}
+	v := &ahp.Backend{ID: func() *ahp.ReverseDnsName { v := ahp.ReverseDnsName(argID); return &v }(), Transport: argTransport, Subscriptions: []ahp.BackendSubscriptionsItem{argSubscriptions}}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(v)
