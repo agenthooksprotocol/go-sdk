@@ -1,14 +1,12 @@
 package client
 
 import (
-	"crypto/sha256"
-	"fmt"
 	"testing"
 )
 
 func elicitationFixture(stage, mode, payload string) (map[string]any, map[string][]byte) {
 	raw := []byte(payload)
-	item := map[string]any{"id": "item", "kind": "data", "mediaType": "application/json", "selection": "body", "body": map[string]any{"ref": stage, "size": len(raw), "sha256": fmt.Sprintf("%x", sha256.Sum256(raw))}}
+	item := map[string]any{"id": "item", "kind": "data", "mediaType": "application/json", "selection": "body", "body": map[string]any{"ref": stage}}
 	meta := map[string]any{"server": "requester", "mode": mode, stage: item}
 	event := map[string]any{"type": "user.elicitation." + stage, "id": "request-id", "source": "urn:adapter", "session": map[string]any{"id": "session"}, "elicitation": meta}
 	if stage == "result" {

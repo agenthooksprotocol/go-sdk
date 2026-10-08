@@ -10,8 +10,8 @@ import "strings"
 
 type ReferenceOption func(*ahp.ContentReference)
 
-func NewReference(argRef string, argSha256 string, argSize json.Number, opts ...ReferenceOption) *ahp.ContentReference {
-	v := &ahp.ContentReference{Ref: argRef, Sha256: argSha256, Size: argSize}
+func NewReference(argRef string, opts ...ReferenceOption) *ahp.ContentReference {
+	v := &ahp.ContentReference{Ref: argRef}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(v)
@@ -90,6 +90,18 @@ func NewUploadDuration(argEndpoint string, argMaxBytes json.Number, argTimeout t
 		return zero, err
 	}
 	return NewUploadMilliseconds(argEndpoint, argMaxBytes, argTimeoutMs, opts...), nil
+}
+
+type UploadReceiptOption func(*ahp.ContentUploadReceipt)
+
+func NewUploadReceipt(argRef string, argSha256 string, argSize json.Number, opts ...UploadReceiptOption) *ahp.ContentUploadReceipt {
+	v := &ahp.ContentUploadReceipt{Ref: argRef, Sha256: argSha256, Size: argSize}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return v
 }
 
 // Milliseconds converts a positive, whole-millisecond duration without truncation.

@@ -181,20 +181,20 @@ func TestReviewedExecutionWire(t *testing.T) {
 	}
 }
 
-func TestContentReferenceHashExactFormat(t *testing.T) {
+func TestContentReferenceRejectsUploadMetadata(t *testing.T) {
 	v, e := newLifecycleValidator(schemaPath(t))
 	if e != nil {
 		t.Fatal(e)
 	}
 	good := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	item := Object{"id": "i", "kind": "text", "mediaType": "text/plain", "selection": "body", "body": Object{"ref": "r", "size": float64(0), "sha256": good}}
+	item := Object{"id": "i", "kind": "text", "mediaType": "text/plain", "selection": "body", "body": Object{"ref": "r"}}
 	if e := v.item.Validate(item); e != nil {
 		t.Fatal(e)
 	}
-	for _, hash := range []string{good + "\n", good[:63], "G" + good[1:]} {
+	for _, hash := range []string{good, good + "\n", good[:63], "G" + good[1:]} {
 		obj(item["body"])["sha256"] = hash
 		if e := v.item.Validate(item); e == nil {
-			t.Fatal("malformed hash accepted")
+			t.Fatal("deprecated reference hash accepted")
 		}
 	}
 }

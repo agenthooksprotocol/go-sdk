@@ -282,7 +282,7 @@ const ContextCompactAfter Type = "context.compact.after"
 
 type ContextCompactBeforeInput struct {
 	Extensions         ahp.Optional[*ahp.Extensions]
-	Gaps               ahp.Optional[[]json.RawMessage]
+	Gaps               ahp.Optional[[]ahp.ContextCompactBeforeEventGapsItem]
 	ID                 ahp.Optional[string]
 	Instructions       ahp.Optional[*ahp.ContentItem]
 	Items              []*ahp.ModelVisibleItem
@@ -292,8 +292,8 @@ type ContextCompactBeforeInput struct {
 	Synthesized        ahp.Optional[bool]
 	Time               ahp.Optional[string]
 	TokenCounts        ahp.Optional[*ahp.ExecutionEventTokencounts]
-	Trigger            string
-	Turn               ahp.Optional[json.RawMessage]
+	Trigger            ahp.ContextCompactBeforeEventTrigger
+	Turn               ahp.Optional[ahp.ContextCompactBeforeEventTurn]
 	InstructionsSource *content.Source   `json:"-"`
 	ItemsSources       []*content.Source `json:"-"`
 }
@@ -550,7 +550,7 @@ const HookFailure Type = "hook.failure"
 type ModelErrorInput struct {
 	Attempt       *ahp.ExecutionEventAttempt
 	Error         *ahp.ExecutionEventError
-	Execution     json.RawMessage
+	Execution     ahp.ModelErrorEventExecution
 	Extensions    ahp.Optional[*ahp.Extensions]
 	Gaps          ahp.Optional[[]ahp.ModelErrorEventGapsItem]
 	ID            ahp.Optional[string]

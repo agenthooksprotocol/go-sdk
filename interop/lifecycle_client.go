@@ -536,12 +536,12 @@ func (p *lifecyclePipe) waitDiscarded(ctx context.Context, id string, count int)
 	}
 }
 
-// Fixture references are local aliases only. Preserve size/hash so a corrupt
-// fixture descriptor is still rejected before publication.
+// Fixture references are local aliases only. Preserve other fields so invalid
+// deprecated metadata is still rejected before publication.
 func resolveUploadAliases(value any, scope string, aliases map[string]string) {
 	switch x := value.(type) {
 	case map[string]any:
-		if ref, ok := x["ref"].(string); ok && x["size"] != nil && x["sha256"] != nil {
+		if ref, ok := x["ref"].(string); ok {
 			if allocated, ok := aliases[contentKey(scope, ref)]; ok {
 				x["ref"] = allocated
 			}

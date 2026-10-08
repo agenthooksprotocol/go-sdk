@@ -85,7 +85,7 @@ func receiveAccepted(request O, sub string, config O, store string, v *ahp.Valid
 		item := obj(raw)
 		ref := obj(item["body"])
 		body, e := os.ReadFile(location(store, sub, str(ref["ref"])))
-		if e != nil || float64(len(body)) != ref["size"] || digest(body) != ref["sha256"] || !utf8.Valid(body) {
+		if e != nil || len(ref) != 1 || !utf8.Valid(body) {
 			return failure
 		}
 		bodies[str(item["id"])] = string(body)
@@ -150,7 +150,7 @@ func exchange(plan O, sub, name string, snapshot O, v *ahp.Validator, trace *[]a
 		raw := []byte(text)
 		ref := "urn:host:" + id
 		bodies[ref] = raw
-		return O{"id": id, "kind": kind, "mediaType": "text/plain", "role": role, "selection": "body", "body": O{"ref": ref, "size": len(raw), "sha256": digest(raw)}}, nil
+		return O{"id": id, "kind": kind, "mediaType": "text/plain", "role": role, "selection": "body", "body": O{"ref": ref}}, nil
 	}
 
 	if boundary == "before" {

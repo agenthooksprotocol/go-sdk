@@ -84,7 +84,7 @@ func TestContentSourceConcurrentFanoutSnapshotsOnce(t *testing.T) {
 				return
 			}
 			item := contentTestBody(t, out)
-			if item["size"] != int64(6) || item["sha256"] == nil {
+			if item["size"] != nil || item["sha256"] != nil {
 				t.Errorf("missing actual metadata: %#v", item)
 			}
 		}()
@@ -198,9 +198,12 @@ func TestContentSourceFailureAndUnusedBoundaryClose(t *testing.T) {
 			if mode == "closed" {
 				_ = c.Close()
 			}
-			_, err := c.dispatch(context.Background(), "tool.before", input, WithContentSource("/items/0", source))
+			_, err := c.Dispatch(context.Background(), "tool.before", input, WithContentSource("/items/0", source))
 			if (mode == "invalid" || mode == "closed") && err == nil {
 				t.Fatal("invalid call accepted")
+			}
+			if _, snapshotErr := source.Snapshot(context.Background(), 128); snapshotErr == nil {
+				t.Fatal("terminal boundary did not retire source")
 			}
 			if reader.reads.Load() != 0 || reader.closes.Load() != 1 {
 				t.Fatalf("reads=%d closes=%d err=%v", reader.reads.Load(), reader.closes.Load(), err)

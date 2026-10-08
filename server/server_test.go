@@ -195,7 +195,7 @@ func uploadRequest(body []byte) *http.Request {
 	r.Header.Set("AHP-Content-SHA256", hex.EncodeToString(sum[:]))
 	return r
 }
-func TestUploadVerificationAndReference(t *testing.T) {
+func TestUploadVerificationAndReceipt(t *testing.T) {
 	for _, body := range [][]byte{{}, {0, 255, 128, 13, 10}} {
 		r := uploadRequest(body)
 		u, e := ParseUpload(r, 10)
@@ -205,19 +205,19 @@ func TestUploadVerificationAndReference(t *testing.T) {
 		if u.Verified() {
 			t.Fatal("eager verification")
 		}
-		if _, e = u.Reference("x"); !errors.Is(e, ErrUploadUnverified) {
+		if _, e = u.Receipt("x"); !errors.Is(e, ErrUploadUnverified) {
 			t.Fatal(e)
 		}
 		got, e := io.ReadAll(u)
 		if e != nil || !bytes.Equal(got, body) || !u.Verified() {
 			t.Fatalf("read: %x %v", got, e)
 		}
-		ref, e := u.Reference("immutable")
+		ref, e := u.Receipt("immutable")
 		if e != nil {
 			t.Fatal(e)
 		}
 		ref.Sha256 = "tampered"
-		ref, e = u.Reference("immutable")
+		ref, e = u.Receipt("immutable")
 		if e != nil || ref.Sha256 == "tampered" {
 			t.Fatal("mutable metadata")
 		}
@@ -370,7 +370,7 @@ func TestUploadExplicitLengthAndRealHTTP(t *testing.T) {
 			http.Error(w, "verification", 400)
 			return
 		}
-		ref, e := u.Reference("scoped-ref")
+		ref, e := u.Receipt("scoped-ref")
 		if e != nil {
 			http.Error(w, "ref", 500)
 			return

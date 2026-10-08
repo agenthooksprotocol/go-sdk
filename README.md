@@ -219,6 +219,45 @@ candidate and returns an error; `state.WithCandidate`, `WithFlow`,
 `state.NoCandidate` represents an explicit absent candidate. Initial state never
 skips host permission, approval, or application-schema validation.
 
+`Nullable[T]` represents JSON null independently of property presence. A required
+nullable property uses `Nullable[T]`; an optional one uses `Optional[Nullable[T]]`.
+Use `ahp.Null[T]()` for null and `ahp.NonNull(value)` for a non-null value. Check
+`Valid` before reading `Value`; `false`, `0`, and empty strings remain non-null
+values. For an optional property, check `Present` first: absent, explicit null,
+and a non-null value are three different states.
+
+`state.NoCandidate()` encodes `null`, while `state.Candidate(nil)` encodes
+`{"value":null}`. Named nullable models, including response IDs, are values rather
+than pointers; pass their address to `json.Unmarshal`. Non-null selections whose
+payload serializes to null (for example a nil slice or pointer) return an encoding
+error. `Nullable[T]` handles null itself and delegates non-null decoding to `T`.
+
+Generated model `UnmarshalJSON` methods and named `Parse*` entrypoints enforce the
+same generated **structural** rules: required members, JSON types, literals,
+closed enums, nested models, forbidden property combinations, and union matching.
+For example, decoding a candidate `{}` now fails because `value` is required;
+`null` and `{"value":null}` remain distinct valid candidate states. Open string
+enums and unknown tagged variants remain accepted, and supported extension
+members remain retained. `Parse*` additionally returns structured diagnostics
+(including warnings) and the original raw JSON; direct decoding returns an error
+for structural failures without a diagnostics collection.
+
+This is not complete canonical JSON Schema validation. The generated IR does not
+represent string length/pattern/format, numeric bounds, or all array/object
+keywords. Unknown members remain forward-compatible even where the canonical
+schema closes objects. Server-side canonical validation and request-dependent
+checks remain separate and unchanged. Do not substitute decoding for those checks.
+
+Migration: direct decoding now rejects structurally invalid models that older
+versions accepted. Named primitive models such as `ReverseDnsName` are defined Go
+types rather than aliases so they can own decoders; convert existing string
+variables explicitly (for example, `id := ahp.ReverseDnsName(existingID)`). The
+`registration.NewBackend` convenience constructor still accepts a string.
+`ContextCompactBeforeEvent` and `McpElicitationRequest` now alias target values,
+not pointers, so null cannot bypass the target decoder. Use `*Model` explicitly
+where your own API needs a pointer; Go itself still accepts null into pointer
+variables without invoking the pointed-to model's decoder.
+
 Receiver-side `effect.Modify<Target>Merge(value)` and
 `effect.Modify<Target>Replace(value)` accept typed application values for all
 nine modification targets above. `effect.Return(value)` and
@@ -317,17 +356,30 @@ performs no reads. Only an authorized selected body snapshots bytes, within the
 configured limit, computes actual size/SHA-256 and uploads independently to each
 receiver before publishing its event. Fan-out reuses the immutable snapshot. Unused,
 failed and cancelled sources are closed, and a source cannot be reused across
-occurrences. Reader `Close` must unblock a pending `Read`. Original source snapshots
+occurrences. Completion, failure, cancellation and timeout retire the source,
+releasing its reader and cached snapshot after receiver fan-out joins. Keeping a
+source or result does not keep the occurrence preparation store alive; results
+own detached effective content. `Source.Close` closes the reader but preserves a
+snapshot for fan-out; adapters use `Source.Retire` when the occurrence ends.
+Reader `Close` must unblock a pending `Read`. Original source snapshots
 and rewritten prepared bodies each have an aggregate `MaxContentBytes` bound;
 together they can retain twice that limit, plus bounded delivery copies. Advanced callers may
 bind canonical slots with `client.WithContentSource`; wire references/resolvers
 remain available for already prepared content.
 
 On the receiver, upload parsing verifies declared size and digest only at
-successful EOF. Early close or a failed read cannot yield a verified reference.
+successful EOF. Early close or a failed read cannot yield a verified receipt.
 The application authorizes scope, stages and commits immutable storage, allocates
 the receiver reference, and only then writes the upload response. The SDK does
 not provide a content store or infer publication from verification.
+
+`upload.Receipt(ref)` returns a `ContentUploadReceipt` with `ref`, `size`, and
+`sha256` for `server.WriteUploadResponse`. Use `content.ReferenceFromReceipt(receipt)`
+to explicitly construct the ref-only `ContentReference` carried by events. Body-selected
+items do not carry outer size or digest metadata; metadata-only items and gaps may
+disclose it. Resolve references within authenticated storage scope, not by trusting
+event-provided lengths or hashes. Upload framing and receipt verification still
+check the exact bytes sent.
 
 ## Development
 
@@ -351,7 +403,7 @@ for transport, authentication, upload, and synthetic-host boundaries.
 
 Generated code lives in `generated.go`, semantic-package `generated.go` files, and `client/boundaries_generated.go`. Its provenance is recorded in `ahp-codegen.lock.json`; schema changes are made in the [protocol repository](https://github.com/agenthooksprotocol/agent-hooks-protocol), not by editing the generated file.
 
-The generator source is protocol commit `7a3353d92c14514215cc092a930685b0947f0bc1`. From a protocol checkout at that commit, regenerate and verify with:
+The generator source is protocol commit `9dc64148502ec3f9e16858025887a5dfd6241820`. From a protocol checkout at that commit, regenerate and verify with:
 
 ```sh
 python3 tools/generate_sdk.py --go-sdk ../go-sdk
@@ -361,3 +413,35 @@ python3 tools/generate_sdk.py --go-sdk ../go-sdk --check
 ## License
 
 Apache-2.0
+
+### Typed composed payloads
+
+Composed MCP transport payloads are ordinary typed models, not raw JSON arms.
+For example, `ExecutionEventMcpConnection.HTTP` contains
+`Optional[ExecutionEventMcpConnectionHTTP]`; its `URL` and `Gaps` fields expose
+strings and typed gap records. `Sse`, `Stdio`, and `CustomTransport` similarly
+expose their schema-declared location fields. `ModelVisibleItem` exposes typed
+content variants with the required `Role` field.
+
+Migration: replace raw JSON construction for these payloads with typed fields.
+Presence predicates such as “URL or gaps” remain checked by the existing
+structural decoder; optional Go fields are not permission to omit every
+alternative. Genuine application JSON, unknown variants, and extension values
+remain raw and retain their existing round-trip behavior.
+
+### Go capability queries
+
+Go exposes `req.Params.Capabilities.Supports(ahp.EffectDeny)` and
+`capabilities.Supports(ahp.EffectName("vendor.custom"))`. The generated
+`EffectNameDeny`, `EffectNameModify`, and the other `EffectName*` constants
+identify effect families; `EffectDeny` aliases `EffectNameDeny`. This avoids
+collisions with existing payload types such as `EffectModify`. Queries inspect typed fields
+without serialization and accept the known and custom string representations.
+Capability grant builders use the same family membership query for deduplication.
+
+`Supports` reports only advertised family membership: it does not authorize
+execution or imply a target, operation, delivery mode, or per-call grant. A nested
+modify grant without the `modify` family returns false; a `modify` family alone
+does not grant any modification operation. Continue to use the existing grant
+builders and host/request validation for operation constraints. This convenience
+API is currently Go-only; no new operation-query API is introduced.

@@ -56,7 +56,7 @@ func TestCanonicalUploadRawBytesAndScope(t *testing.T) {
 		if !present || stored != string(body) || crossScope {
 			t.Fatal("incorrect bytes or credential-derived scope")
 		}
-		event := Object{"items": []any{Object{"body": descriptor}}}
+		event := Object{"items": []any{Object{"body": Object{"ref": descriptor["ref"]}}}}
 		if err := checkContent(event, "", eventContent); err != nil {
 			t.Fatal(err)
 		}
@@ -174,9 +174,9 @@ func TestCanonicalUploadRejectsCredentialFraming(t *testing.T) {
 	}
 }
 
-func TestCanonicalUploadAliasPreservesDescriptorValidation(t *testing.T) {
+func TestCanonicalUploadAliasResolvesScopedRefOnly(t *testing.T) {
 	body := []byte("abc")
-	descriptor := Object{"ref": "local", "size": float64(3), "sha256": fmt.Sprintf("%x", sha256.Sum256(body))}
+	descriptor := Object{"ref": "local"}
 	event := Object{"items": []any{Object{"body": descriptor}}}
 	resolveUploadAliases(event, "scope", map[string]string{contentKey("scope", "local"): "allocated"})
 	confirmed := map[string]string{contentKey("scope", "allocated"): string(body)}
@@ -185,7 +185,7 @@ func TestCanonicalUploadAliasPreservesDescriptorValidation(t *testing.T) {
 	}
 	descriptor["size"] = float64(2)
 	if err := checkContent(event, "scope", confirmed); err == nil {
-		t.Fatal("alias resolution hid corrupt metadata")
+		t.Fatal("alias resolution accepted deprecated metadata")
 	}
 	encoded, err := json.Marshal(event)
 	if err != nil || bytes.Contains(encoded, []byte("subscriptionId")) || bytes.Contains(encoded, []byte(`"local"`)) {
@@ -222,7 +222,7 @@ func TestCanonicalUploadInvalidConfirmationBlocksDependentEvent(t *testing.T) {
 			// A body dependent on this upload must fail before dispatch, even when the
 			// receiver returns a non-confirming 2xx status rather than malformed 201.
 			event := obj(obj(req["params"])["event"])
-			event["items"] = []any{Object{"id": "item", "kind": "text", "mediaType": "text/plain", "body": Object{"ref": "local", "size": float64(3), "sha256": fmt.Sprintf("%x", sha256.Sum256([]byte("abc")))}}}
+			event["items"] = []any{Object{"id": "item", "kind": "text", "mediaType": "text/plain", "body": Object{"ref": "local"}}}
 			if err := writeAtomic(fixture, Object{"scenarios": []lifecycleScenario{scenario}}); err != nil {
 				t.Fatal(err)
 			}

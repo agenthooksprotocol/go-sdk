@@ -272,7 +272,6 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 		result.Interrupted = true
 	}
 	result.content = preparedContent(event, prepared)
-	result.prepared = prepared
 	result.Snapshot = prepared.snapshot
 	result.Event = sdkJSON(event)
 	if tool := sdkObj(event["tool"]); tool != nil {

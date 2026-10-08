@@ -269,7 +269,7 @@ func acceptCompactionEffects(snapshot Object, effects []Object) error {
 		body = str(obj(snapshot["bodies"])[str(obj(snapshot["summary"])["ref"])])
 	}
 	raw := []byte(body)
-	descriptor := Object{"id": "fixture-" + target, "kind": target, "role": role, "mediaType": "text/plain", "selection": "body", "body": Object{"ref": "urn:host:body", "size": len(raw), "sha256": fmt.Sprintf("%x", sha256.Sum256(raw))}}
+	descriptor := Object{"id": "fixture-" + target, "kind": target, "role": role, "mediaType": "text/plain", "selection": "body", "body": Object{"ref": "urn:host:body"}}
 	ev := Object{"id": "fixture-" + boundary, "source": "urn:fixture:compaction", "time": "2026-09-15T12:00:00Z", "type": "context.compact." + boundary, target: descriptor}
 	if boundary == "before" {
 		ev["trigger"] = "manual"

@@ -37,7 +37,7 @@ func TestContentSelectionIsNotPermission(t *testing.T) {
 		t.Fatal("unauthorized resolver call")
 		return nil, nil
 	}}}}
-	item := contentTestItem(map[string]any{"ref": "private", "size": 3, "sha256": strings.Repeat("0", 64)})
+	item := contentTestItem(map[string]any{"ref": "private"})
 	item["authorized"] = true
 	item["permissions"] = map[string]any{"content": true}
 	event := map[string]any{"items": []any{item}, "native": map[string]any{"secret": "private"}, "tool": map[string]any{"input": "private", "output": "private", "name": "tool"}}
@@ -124,7 +124,7 @@ func TestContentRemoteHandlesUploadPerReceiver(t *testing.T) {
 		return true, nil
 	}}}}
 	sub := contentTestSubscription(server.URL + "/custom/raw?tenant=one")
-	item := contentTestItem(map[string]any{"ref": "https://never-fetch.example/private", "size": len(raw), "sha256": sum})
+	item := contentTestItem(map[string]any{"ref": "https://never-fetch.example/private"})
 	event := map[string]any{"items": []any{item}}
 	for i, backend := range []string{"backend-A", "backend-B"} {
 		out, err := c.projectContent(context.Background(), event, sub, backend)
@@ -132,7 +132,7 @@ func TestContentRemoteHandlesUploadPerReceiver(t *testing.T) {
 			t.Fatal(err)
 		}
 		body := contentTestBody(t, out)["body"].(map[string]any)
-		if body["ref"] != fmt.Sprintf("receiver-handle-%d", i+1) {
+		if len(body) != 1 || body["ref"] != fmt.Sprintf("receiver-handle-%d", i+1) {
 			t.Fatalf("reference not allocated per receiver: %#v", body)
 		}
 	}
@@ -328,7 +328,7 @@ func TestContentBareFileReferencesAreReceiverAllocated(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out["changes"].([]any)[0].(map[string]any)["after"].(map[string]any)
-	if got["ref"] != "receiver-file" || len(got) != 3 {
+	if got["ref"] != "receiver-file" || len(got) != 1 {
 		t.Fatalf("bare reference normalized or unallocated: %#v", got)
 	}
 	sub["content"] = map[string]any{"default": "metadata"}

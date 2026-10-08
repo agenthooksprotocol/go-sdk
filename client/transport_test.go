@@ -318,11 +318,11 @@ func TestEventResolverOAuthScopeAndDetachedSnapshot(t *testing.T) {
 		if _, ok := ctx.Deadline(); !ok {
 			t.Error("resolver missing delivery deadline")
 		}
-		if b.Transport.HttpTransport.Value.URL != endpoint || b.Authentication.Value.Variant2.Value.Scopes.Value[0] != "intercept" {
+		if b.Transport.HttpTransport.Value.URL != endpoint || b.Authentication.Value.Oauth.Value.Scopes.Value[0] != "intercept" {
 			t.Error("resolver snapshot mutated")
 		}
 		b.Transport.HttpTransport.Value.URL = "https://untrusted.example"
-		b.Authentication.Value.Variant2.Value.Scopes.Value[0] = "changed"
+		b.Authentication.Value.Oauth.Value.Scopes.Value[0] = "changed"
 		return supplied, nil
 	}
 	tr, err := newBackendTransport(original, nil, resolver)
@@ -343,7 +343,7 @@ func TestEventResolverOAuthScopeAndDetachedSnapshot(t *testing.T) {
 	if calls != 2 {
 		t.Fatal("resolver not called for each delivery")
 	}
-	if original.Transport.HttpTransport.Value.URL != endpoint || original.Authentication.Value.Variant2.Value.Scopes.Value[0] != "intercept" {
+	if original.Transport.HttpTransport.Value.URL != endpoint || original.Authentication.Value.Oauth.Value.Scopes.Value[0] != "intercept" {
 		t.Fatal("original backend mutated")
 	}
 	if supplied.CheckRedirect != nil {

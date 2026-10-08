@@ -86,7 +86,6 @@ type Result struct {
 	// Snapshot retains the original MCP request, never an effective result.
 	Snapshot        *ElicitationRequest
 	EffectiveValues map[string]json.RawMessage
-	prepared        *preparedBoundary
 	Event           json.RawMessage
 	EffectiveInput  json.RawMessage
 	State           ahp.InterceptRequestParamsState

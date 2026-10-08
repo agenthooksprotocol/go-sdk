@@ -36,7 +36,7 @@ func WithInterceptEvents(values ...string) InterceptOption {
 		v.Events = func() []ahp.InterceptSubscriptionEventsItem {
 			items := make([]ahp.InterceptSubscriptionEventsItem, len(values))
 			for i, value := range values {
-				items[i] = ahp.InterceptSubscriptionEventsItem{Variant2: ahp.Optional[string]{Present: true, Value: value}}
+				items[i] = ahp.InterceptSubscriptionEventsItem{Custom: ahp.Optional[string]{Present: true, Value: value}}
 			}
 			return items
 		}()
@@ -46,7 +46,7 @@ func NewInterceptMilliseconds(argEvents []string, argTimeoutMs json.Number, argF
 	v := &ahp.InterceptSubscription{Events: func() []ahp.InterceptSubscriptionEventsItem {
 		items := make([]ahp.InterceptSubscriptionEventsItem, len(argEvents))
 		for i, value := range argEvents {
-			items[i] = ahp.InterceptSubscriptionEventsItem{Variant2: ahp.Optional[string]{Present: true, Value: value}}
+			items[i] = ahp.InterceptSubscriptionEventsItem{Custom: ahp.Optional[string]{Present: true, Value: value}}
 		}
 		return items
 	}(), TimeoutMs: argTimeoutMs, FailurePolicy: argFailurePolicy, Content: argContent, Mode: "intercept", IncludeNative: ahp.Optional[bool]{Present: true, Value: bool(false)}}
@@ -101,7 +101,7 @@ func WithObserveEvents(values ...string) ObserveOption {
 		v.Events = func() []ahp.ObserveSubscriptionEventsItem {
 			items := make([]ahp.ObserveSubscriptionEventsItem, len(values))
 			for i, value := range values {
-				items[i] = ahp.ObserveSubscriptionEventsItem{Variant2: ahp.Optional[string]{Present: true, Value: value}}
+				items[i] = ahp.ObserveSubscriptionEventsItem{Custom: ahp.Optional[string]{Present: true, Value: value}}
 			}
 			return items
 		}()
@@ -111,7 +111,7 @@ func NewObserve(argContent *ahp.ContentSelection, argEvents []string, opts ...Ob
 	v := &ahp.ObserveSubscription{Content: argContent, Events: func() []ahp.ObserveSubscriptionEventsItem {
 		items := make([]ahp.ObserveSubscriptionEventsItem, len(argEvents))
 		for i, value := range argEvents {
-			items[i] = ahp.ObserveSubscriptionEventsItem{Variant2: ahp.Optional[string]{Present: true, Value: value}}
+			items[i] = ahp.ObserveSubscriptionEventsItem{Custom: ahp.Optional[string]{Present: true, Value: value}}
 		}
 		return items
 	}(), Mode: "observe", IncludeNative: ahp.Optional[bool]{Present: true, Value: bool(false)}}

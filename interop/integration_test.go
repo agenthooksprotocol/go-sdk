@@ -30,10 +30,10 @@ func TestBinaryUploadBinding(t *testing.T) {
 	if e != nil || status != 201 {
 		t.Fatalf("%d %v", status, e)
 	}
-	if e = checkContent(Object{"items": []any{Object{"body": ref}}}, "body", s.uploads); e != nil {
+	if e = checkContent(Object{"items": []any{Object{"body": Object{"ref": ref["ref"]}}}}, "body", s.uploads); e != nil {
 		t.Fatal(e)
 	}
-	if e = checkContent(Object{"items": []any{Object{"body": ref}}}, "other", s.uploads); e == nil {
+	if e = checkContent(Object{"items": []any{Object{"body": Object{"ref": ref["ref"]}}}}, "other", s.uploads); e == nil {
 		t.Fatal("cross-subscription reference")
 	}
 	if str(ref["ref"]) == "" || ref["ref"] == "urn:binary" {
@@ -43,7 +43,7 @@ func TestBinaryUploadBinding(t *testing.T) {
 	if e != nil || status != 201 {
 		t.Fatal("retry", status, e)
 	}
-	if e = checkContent(Object{"items": []any{Object{"body": retry}}}, "body", s.uploads); e != nil {
+	if e = checkContent(Object{"items": []any{Object{"body": Object{"ref": retry["ref"]}}}}, "body", s.uploads); e != nil {
 		t.Fatal(e)
 	}
 	changed, status, e := UploadContent(context.Background(), binding, "body", "urn:binary", []byte("changed"))

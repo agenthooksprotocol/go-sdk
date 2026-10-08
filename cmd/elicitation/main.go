@@ -127,7 +127,7 @@ func main() {
 			return nil, err
 		}
 		b, ok := store[str(ref["ref"])]
-		if !ok || float64(len(b)) != ref["size"] || hash(b) != ref["sha256"] {
+		if !ok {
 			return nil, fmt.Errorf("Upload integrity")
 		}
 		return b, nil

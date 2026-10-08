@@ -45,7 +45,7 @@ func TestUploadCanonicalOctetsAndImmutableReferences(t *testing.T) {
 			t.Fatal("reference not freshly allocated")
 		}
 		previous = ref
-		event := Object{"items": []any{Object{"content": descriptor}}}
+		event := Object{"items": []any{Object{"body": Object{"ref": descriptor["ref"]}}}}
 		if err := checkContent(event, "scope", s.uploads); err != nil {
 			t.Fatal(err)
 		}
@@ -155,8 +155,8 @@ func TestUploadFixtureMismatchReachesReceiver(t *testing.T) {
 
 func TestUploadAliasesPreserveNegativeDescriptors(t *testing.T) {
 	body := []byte("abc")
-	descriptor := Object{"ref": "fixture", "size": float64(3), "sha256": fmt.Sprintf("%x", sha256.Sum256(body))}
-	event := Object{"items": []any{Object{"content": descriptor}}}
+	descriptor := Object{"ref": "fixture"}
+	event := Object{"items": []any{Object{"body": descriptor}}}
 	aliases := map[string]string{contentKey("scope", "fixture"): "allocated"}
 	resolveUploadAliases(event, "scope", aliases)
 	confirmed := map[string]string{contentKey("scope", "allocated"): string(body)}

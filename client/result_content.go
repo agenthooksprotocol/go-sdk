@@ -30,7 +30,7 @@ func preparedContent(event map[string]any, p *preparedBoundary) map[string][]byt
 					}
 				}
 				if raw, ok := p.bodies[compositionString(sdkObj(v["body"])["ref"])]; ok {
-					out[path] = raw
+					out[path] = bytes.Clone(raw)
 				}
 				return
 			}

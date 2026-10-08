@@ -248,9 +248,9 @@ func checkContent(event Object, sub string, uploads map[string]string) error {
 	walk = func(v any) error {
 		switch x := v.(type) {
 		case map[string]any:
-			if ref, ok := x["ref"].(string); ok && x["sha256"] != nil && x["size"] != nil {
-				body, found := uploads[contentKey(sub, ref)]
-				if !found || x["size"] != float64(len(body)) || x["sha256"] != fmt.Sprintf("%x", sha256.Sum256([]byte(body))) {
+			if ref, ok := x["ref"].(string); ok {
+				_, found := uploads[contentKey(sub, ref)]
+				if !found || len(x) != 1 {
 					return fmt.Errorf("unavailable scoped content reference")
 				}
 			}

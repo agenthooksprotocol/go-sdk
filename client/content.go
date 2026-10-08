@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 
+	ahp "github.com/agenthooksprotocol/go-sdk"
 	"github.com/agenthooksprotocol/go-sdk/auth"
 	"strings"
 	"time"
@@ -279,7 +280,7 @@ func (c *Hooks) projectContentItem(ctx context.Context, item, selection, subscri
 		raw = []byte(source)
 	case map[string]any:
 		ref, ok := source["ref"].(string)
-		if !ok || ref == "" {
+		if !ok || ref == "" || len(source) != 1 || item["size"] != nil || item["sha256"] != nil {
 			return nil, errors.New("invalid host content reference")
 		}
 		resolver := c.opts.Content.Resolver
@@ -313,9 +314,6 @@ func (c *Hooks) projectContentItem(ctx context.Context, item, selection, subscri
 		if int64(len(raw)) > limit {
 			return nil, errors.New("content exceeds byte limit")
 		}
-		if err = contentMatches(source, raw); err != nil {
-			return nil, err
-		}
 	default:
 		return nil, errors.New("content body must be raw bytes, text, or a host reference")
 	}
@@ -333,11 +331,9 @@ func (c *Hooks) projectContentItem(ctx context.Context, item, selection, subscri
 	if err != nil {
 		return nil, err
 	}
-	out["body"] = descriptor
-	if _, owned := body.(*ContentSource); owned {
-		out["size"] = int64(len(raw))
-		out["sha256"] = fmt.Sprintf("%x", sha256.Sum256(raw))
-	}
+	out["body"] = map[string]any{"ref": descriptor.Ref}
+	delete(out, "size")
+	delete(out, "sha256")
 	return out, nil
 }
 
@@ -357,7 +353,7 @@ func contentMatches(metadata map[string]any, raw []byte) error {
 	return nil
 }
 
-func (c *Hooks) uploadContent(ctx context.Context, config map[string]any, raw []byte, backendIDs ...string) (map[string]any, error) {
+func (c *Hooks) uploadContent(ctx context.Context, config map[string]any, raw []byte, backendIDs ...string) (*ahp.ContentUploadReceipt, error) {
 	endpoint, ok := config["endpoint"].(string)
 	if !ok || strings.ContainsAny(endpoint, "\r\n") {
 		return nil, errors.New("invalid upload endpoint")
@@ -458,7 +454,7 @@ func (c *Hooks) uploadContent(ctx context.Context, config map[string]any, raw []
 	if _, ok := descriptor["sha256"]; !ok {
 		return nil, errors.New("missing upload hash")
 	}
-	return descriptor, nil
+	return &ahp.ContentUploadReceipt{Ref: ref, Size: descriptor["size"].(json.Number), Sha256: descriptor["sha256"].(string)}, nil
 }
 
 func contentInt(value any) (int64, bool) {

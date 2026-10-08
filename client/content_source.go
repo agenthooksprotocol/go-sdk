@@ -43,7 +43,7 @@ func contentSourceConfig(options []InterceptOption) interceptConfig {
 
 func (cfg interceptConfig) closeSources() {
 	for _, source := range cfg.ownedSources {
-		_ = source.Close()
+		_ = source.Retire()
 	}
 }
 

@@ -126,7 +126,7 @@ func TestCompositionUnknownEffectFieldAndCorrelation(t *testing.T) {
 		t.Fatal("unknown effect field accepted")
 	}
 	res = compositionTestResponse(t, `[]`)
-	if err := json.Unmarshal([]byte(`"wrong"`), res.ID); err != nil {
+	if err := json.Unmarshal([]byte(`"wrong"`), &res.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := compose(req, res); err == nil {

@@ -31,7 +31,7 @@ func WithEffects(values ...string) Option {
 		v.Effects = func() []ahp.CapabilitiesEffectsItem {
 			items := make([]ahp.CapabilitiesEffectsItem, len(values))
 			for i, value := range values {
-				items[i] = ahp.CapabilitiesEffectsItem{Variant2: ahp.Optional[string]{Present: true, Value: value}}
+				items[i] = ahp.CapabilitiesEffectsItem{Custom: ahp.Optional[string]{Present: true, Value: value}}
 			}
 			return items
 		}()
@@ -41,7 +41,7 @@ func New(argEffects []string, opts ...Option) *ahp.Capabilities {
 	v := &ahp.Capabilities{Effects: func() []ahp.CapabilitiesEffectsItem {
 		items := make([]ahp.CapabilitiesEffectsItem, len(argEffects))
 		for i, value := range argEffects {
-			items[i] = ahp.CapabilitiesEffectsItem{Variant2: ahp.Optional[string]{Present: true, Value: value}}
+			items[i] = ahp.CapabilitiesEffectsItem{Custom: ahp.Optional[string]{Present: true, Value: value}}
 		}
 		return items
 	}()}
@@ -75,7 +75,7 @@ func WithConfigChangeBeforeModify(value ahp.ConfigChangeBeforeCapabilitiesModify
 		v.Modify = ahp.Optional[ahp.ConfigChangeBeforeCapabilitiesModify]{Present: true, Value: value}
 	}
 }
-func NewConfigChangeBefore(argEffects json.RawMessage, opts ...ConfigChangeBeforeOption) *ahp.ConfigChangeBeforeCapabilities {
+func NewConfigChangeBefore(argEffects ahp.ConfigChangeBeforeCapabilitiesEffects, opts ...ConfigChangeBeforeOption) *ahp.ConfigChangeBeforeCapabilities {
 	v := &ahp.ConfigChangeBeforeCapabilities{Effects: argEffects}
 	for _, opt := range opts {
 		if opt != nil {
@@ -107,7 +107,7 @@ func WithContextCompactAfterModify(value ahp.ContextCompactAfterCapabilitiesModi
 		v.Modify = ahp.Optional[ahp.ContextCompactAfterCapabilitiesModify]{Present: true, Value: value}
 	}
 }
-func NewContextCompactAfter(argEffects json.RawMessage, opts ...ContextCompactAfterOption) *ahp.ContextCompactAfterCapabilities {
+func NewContextCompactAfter(argEffects ahp.ContextCompactAfterCapabilitiesEffects, opts ...ContextCompactAfterOption) *ahp.ContextCompactAfterCapabilities {
 	v := &ahp.ContextCompactAfterCapabilities{Effects: argEffects}
 	for _, opt := range opts {
 		if opt != nil {
@@ -139,7 +139,7 @@ func WithContextCompactBeforeModify(value ahp.ContextCompactBeforeCapabilitiesMo
 		v.Modify = ahp.Optional[ahp.ContextCompactBeforeCapabilitiesModify]{Present: true, Value: value}
 	}
 }
-func NewContextCompactBefore(argEffects json.RawMessage, opts ...ContextCompactBeforeOption) *ahp.ContextCompactBeforeCapabilities {
+func NewContextCompactBefore(argEffects ahp.ContextCompactBeforeCapabilitiesEffects, opts ...ContextCompactBeforeOption) *ahp.ContextCompactBeforeCapabilities {
 	v := &ahp.ContextCompactBeforeCapabilities{Effects: argEffects}
 	for _, opt := range opts {
 		if opt != nil {
@@ -171,7 +171,7 @@ func WithModelRequestBeforeModify(value ahp.ModelRequestBeforeCapabilitiesModify
 		v.Modify = ahp.Optional[ahp.ModelRequestBeforeCapabilitiesModify]{Present: true, Value: value}
 	}
 }
-func NewModelRequestBefore(argEffects json.RawMessage, opts ...ModelRequestBeforeOption) *ahp.ModelRequestBeforeCapabilities {
+func NewModelRequestBefore(argEffects ahp.ModelRequestBeforeCapabilitiesEffects, opts ...ModelRequestBeforeOption) *ahp.ModelRequestBeforeCapabilities {
 	v := &ahp.ModelRequestBeforeCapabilities{Effects: argEffects}
 	for _, opt := range opts {
 		if opt != nil {
@@ -203,7 +203,7 @@ func WithModelResponseAfterModify(value ahp.ModelResponseAfterCapabilitiesModify
 		v.Modify = ahp.Optional[ahp.ModelResponseAfterCapabilitiesModify]{Present: true, Value: value}
 	}
 }
-func NewModelResponseAfter(argEffects json.RawMessage, opts ...ModelResponseAfterOption) *ahp.ModelResponseAfterCapabilities {
+func NewModelResponseAfter(argEffects ahp.ModelResponseAfterCapabilitiesEffects, opts ...ModelResponseAfterOption) *ahp.ModelResponseAfterCapabilities {
 	v := &ahp.ModelResponseAfterCapabilities{Effects: argEffects}
 	for _, opt := range opts {
 		if opt != nil {
@@ -235,7 +235,7 @@ func WithModelSwitchBeforeModify(value ahp.ModelSwitchBeforeCapabilitiesModify) 
 		v.Modify = ahp.Optional[ahp.ModelSwitchBeforeCapabilitiesModify]{Present: true, Value: value}
 	}
 }
-func NewModelSwitchBefore(argEffects json.RawMessage, opts ...ModelSwitchBeforeOption) *ahp.ModelSwitchBeforeCapabilities {
+func NewModelSwitchBefore(argEffects ahp.ModelSwitchBeforeCapabilitiesEffects, opts ...ModelSwitchBeforeOption) *ahp.ModelSwitchBeforeCapabilities {
 	v := &ahp.ModelSwitchBeforeCapabilities{Effects: argEffects}
 	for _, opt := range opts {
 		if opt != nil {
@@ -267,7 +267,7 @@ func WithSessionStartModify(value ahp.SessionStartCapabilitiesModify) SessionSta
 		v.Modify = ahp.Optional[ahp.SessionStartCapabilitiesModify]{Present: true, Value: value}
 	}
 }
-func NewSessionStart(argEffects json.RawMessage, opts ...SessionStartOption) *ahp.SessionStartCapabilities {
+func NewSessionStart(argEffects ahp.SessionStartCapabilitiesEffects, opts ...SessionStartOption) *ahp.SessionStartCapabilities {
 	v := &ahp.SessionStartCapabilities{Effects: argEffects}
 	for _, opt := range opts {
 		if opt != nil {
@@ -340,7 +340,7 @@ func WithTaskChangeBeforeModify(value ahp.TaskChangeBeforeCapabilitiesModify) Ta
 		v.Modify = ahp.Optional[ahp.TaskChangeBeforeCapabilitiesModify]{Present: true, Value: value}
 	}
 }
-func NewTaskChangeBefore(argEffects json.RawMessage, opts ...TaskChangeBeforeOption) *ahp.TaskChangeBeforeCapabilities {
+func NewTaskChangeBefore(argEffects ahp.TaskChangeBeforeCapabilitiesEffects, opts ...TaskChangeBeforeOption) *ahp.TaskChangeBeforeCapabilities {
 	v := &ahp.TaskChangeBeforeCapabilities{Effects: argEffects}
 	for _, opt := range opts {
 		if opt != nil {
@@ -372,7 +372,7 @@ func WithToolAfterModify(value ahp.ToolAfterCapabilitiesModify) ToolAfterOption 
 		v.Modify = ahp.Optional[ahp.ToolAfterCapabilitiesModify]{Present: true, Value: value}
 	}
 }
-func NewToolAfter(argEffects json.RawMessage, opts ...ToolAfterOption) *ahp.ToolAfterCapabilities {
+func NewToolAfter(argEffects ahp.ToolAfterCapabilitiesEffects, opts ...ToolAfterOption) *ahp.ToolAfterCapabilities {
 	v := &ahp.ToolAfterCapabilities{Effects: argEffects}
 	for _, opt := range opts {
 		if opt != nil {
@@ -404,7 +404,7 @@ func WithToolBatchAfterModify(value ahp.ToolBatchAfterCapabilitiesModify) ToolBa
 		v.Modify = ahp.Optional[ahp.ToolBatchAfterCapabilitiesModify]{Present: true, Value: value}
 	}
 }
-func NewToolBatchAfter(argEffects json.RawMessage, opts ...ToolBatchAfterOption) *ahp.ToolBatchAfterCapabilities {
+func NewToolBatchAfter(argEffects ahp.ToolBatchAfterCapabilitiesEffects, opts ...ToolBatchAfterOption) *ahp.ToolBatchAfterCapabilities {
 	v := &ahp.ToolBatchAfterCapabilities{Effects: argEffects}
 	for _, opt := range opts {
 		if opt != nil {
@@ -436,7 +436,7 @@ func WithToolBeforeModify(value ahp.ToolBeforeCapabilitiesModify) ToolBeforeOpti
 		v.Modify = ahp.Optional[ahp.ToolBeforeCapabilitiesModify]{Present: true, Value: value}
 	}
 }
-func NewToolBefore(argEffects json.RawMessage, opts ...ToolBeforeOption) *ahp.ToolBeforeCapabilities {
+func NewToolBefore(argEffects ahp.ToolBeforeCapabilitiesEffects, opts ...ToolBeforeOption) *ahp.ToolBeforeCapabilities {
 	v := &ahp.ToolBeforeCapabilities{Effects: argEffects}
 	for _, opt := range opts {
 		if opt != nil {
@@ -468,7 +468,7 @@ func WithToolPermissionRequestModify(value ahp.ToolPermissionRequestCapabilities
 		v.Modify = ahp.Optional[ahp.ToolPermissionRequestCapabilitiesModify]{Present: true, Value: value}
 	}
 }
-func NewToolPermissionRequest(argEffects json.RawMessage, opts ...ToolPermissionRequestOption) *ahp.ToolPermissionRequestCapabilities {
+func NewToolPermissionRequest(argEffects ahp.ToolPermissionRequestCapabilitiesEffects, opts ...ToolPermissionRequestOption) *ahp.ToolPermissionRequestCapabilities {
 	v := &ahp.ToolPermissionRequestCapabilities{Effects: argEffects}
 	for _, opt := range opts {
 		if opt != nil {
@@ -500,7 +500,7 @@ func WithTurnFinishBeforeModify(value ahp.TurnFinishBeforeCapabilitiesModify) Tu
 		v.Modify = ahp.Optional[ahp.TurnFinishBeforeCapabilitiesModify]{Present: true, Value: value}
 	}
 }
-func NewTurnFinishBefore(argEffects json.RawMessage, opts ...TurnFinishBeforeOption) *ahp.TurnFinishBeforeCapabilities {
+func NewTurnFinishBefore(argEffects ahp.TurnFinishBeforeCapabilitiesEffects, opts ...TurnFinishBeforeOption) *ahp.TurnFinishBeforeCapabilities {
 	v := &ahp.TurnFinishBeforeCapabilities{Effects: argEffects}
 	for _, opt := range opts {
 		if opt != nil {
@@ -532,7 +532,7 @@ func WithTurnStartModify(value ahp.TurnStartCapabilitiesModify) TurnStartOption 
 		v.Modify = ahp.Optional[ahp.TurnStartCapabilitiesModify]{Present: true, Value: value}
 	}
 }
-func NewTurnStart(argEffects json.RawMessage, opts ...TurnStartOption) *ahp.TurnStartCapabilities {
+func NewTurnStart(argEffects ahp.TurnStartCapabilitiesEffects, opts ...TurnStartOption) *ahp.TurnStartCapabilities {
 	v := &ahp.TurnStartCapabilities{Effects: argEffects}
 	for _, opt := range opts {
 		if opt != nil {
@@ -564,7 +564,7 @@ func WithUserElicitationRequestModify(value ahp.UserElicitationRequestCapabiliti
 		v.Modify = ahp.Optional[ahp.UserElicitationRequestCapabilitiesModify]{Present: true, Value: value}
 	}
 }
-func NewUserElicitationRequest(argEffects json.RawMessage, opts ...UserElicitationRequestOption) *ahp.UserElicitationRequestCapabilities {
+func NewUserElicitationRequest(argEffects ahp.UserElicitationRequestCapabilitiesEffects, opts ...UserElicitationRequestOption) *ahp.UserElicitationRequestCapabilities {
 	v := &ahp.UserElicitationRequestCapabilities{Effects: argEffects}
 	for _, opt := range opts {
 		if opt != nil {
@@ -596,7 +596,7 @@ func WithUserElicitationResultModify(value ahp.UserElicitationResultCapabilities
 		v.Modify = ahp.Optional[ahp.UserElicitationResultCapabilitiesModify]{Present: true, Value: value}
 	}
 }
-func NewUserElicitationResult(argEffects json.RawMessage, opts ...UserElicitationResultOption) *ahp.UserElicitationResultCapabilities {
+func NewUserElicitationResult(argEffects ahp.UserElicitationResultCapabilitiesEffects, opts ...UserElicitationResultOption) *ahp.UserElicitationResultCapabilities {
 	v := &ahp.UserElicitationResultCapabilities{Effects: argEffects}
 	for _, opt := range opts {
 		if opt != nil {
@@ -628,7 +628,7 @@ func WithUserMessageInboundModify(value ahp.UserMessageInboundCapabilitiesModify
 		v.Modify = ahp.Optional[ahp.UserMessageInboundCapabilitiesModify]{Present: true, Value: value}
 	}
 }
-func NewUserMessageInbound(argEffects json.RawMessage, opts ...UserMessageInboundOption) *ahp.UserMessageInboundCapabilities {
+func NewUserMessageInbound(argEffects ahp.UserMessageInboundCapabilitiesEffects, opts ...UserMessageInboundOption) *ahp.UserMessageInboundCapabilities {
 	v := &ahp.UserMessageInboundCapabilities{Effects: argEffects}
 	for _, opt := range opts {
 		if opt != nil {
@@ -660,7 +660,7 @@ func WithUserMessageOutboundModify(value ahp.UserMessageOutboundCapabilitiesModi
 		v.Modify = ahp.Optional[ahp.UserMessageOutboundCapabilitiesModify]{Present: true, Value: value}
 	}
 }
-func NewUserMessageOutbound(argEffects json.RawMessage, opts ...UserMessageOutboundOption) *ahp.UserMessageOutboundCapabilities {
+func NewUserMessageOutbound(argEffects ahp.UserMessageOutboundCapabilitiesEffects, opts ...UserMessageOutboundOption) *ahp.UserMessageOutboundCapabilities {
 	v := &ahp.UserMessageOutboundCapabilities{Effects: argEffects}
 	for _, opt := range opts {
 		if opt != nil {
@@ -692,7 +692,7 @@ func WithWorkspaceChangeBeforeModify(value ahp.WorkspaceChangeBeforeCapabilities
 		v.Modify = ahp.Optional[ahp.WorkspaceChangeBeforeCapabilitiesModify]{Present: true, Value: value}
 	}
 }
-func NewWorkspaceChangeBefore(argEffects json.RawMessage, opts ...WorkspaceChangeBeforeOption) *ahp.WorkspaceChangeBeforeCapabilities {
+func NewWorkspaceChangeBefore(argEffects ahp.WorkspaceChangeBeforeCapabilitiesEffects, opts ...WorkspaceChangeBeforeOption) *ahp.WorkspaceChangeBeforeCapabilities {
 	v := &ahp.WorkspaceChangeBeforeCapabilities{Effects: argEffects}
 	for _, opt := range opts {
 		if opt != nil {
@@ -722,7 +722,7 @@ func WithElicitationURL() Option {
 func WithContentModification(argReplace bool, argMerge bool) Option {
 	return func(v *ahp.Capabilities) {
 		v.Modify.Present = true
-		v.Modify.Value.Content = ahp.Optional[json.RawMessage]{Present: true, Value: json.RawMessage("{" + "\"replace\":" + strconv.FormatBool(argReplace) + ",\"merge\":" + strconv.FormatBool(argMerge) + "}")}
+		v.Modify.Value.Content = ahp.Optional[ahp.CapabilitiesModifyContent]{Present: true, Value: ahp.CapabilitiesModifyContent{Replace: argReplace, Merge: argMerge}}
 	}
 }
 
@@ -730,7 +730,7 @@ func WithContentModification(argReplace bool, argMerge bool) Option {
 func WithInputModification(argReplace bool, argMerge bool) Option {
 	return func(v *ahp.Capabilities) {
 		v.Modify.Present = true
-		v.Modify.Value.Input = ahp.Optional[json.RawMessage]{Present: true, Value: json.RawMessage("{" + "\"replace\":" + strconv.FormatBool(argReplace) + ",\"merge\":" + strconv.FormatBool(argMerge) + "}")}
+		v.Modify.Value.Input = ahp.Optional[ahp.CapabilitiesModifyInput]{Present: true, Value: ahp.CapabilitiesModifyInput{Replace: argReplace, Merge: argMerge}}
 	}
 }
 
@@ -738,7 +738,7 @@ func WithInputModification(argReplace bool, argMerge bool) Option {
 func WithInstructionsModification(argReplace bool, argMerge bool) Option {
 	return func(v *ahp.Capabilities) {
 		v.Modify.Present = true
-		v.Modify.Value.Instructions = ahp.Optional[json.RawMessage]{Present: true, Value: json.RawMessage("{" + "\"replace\":" + strconv.FormatBool(argReplace) + ",\"merge\":" + strconv.FormatBool(argMerge) + "}")}
+		v.Modify.Value.Instructions = ahp.Optional[ahp.CapabilitiesModifyInstructions]{Present: true, Value: ahp.CapabilitiesModifyInstructions{Replace: argReplace, Merge: argMerge}}
 	}
 }
 
@@ -746,7 +746,7 @@ func WithInstructionsModification(argReplace bool, argMerge bool) Option {
 func WithOutputModification(argReplace bool, argMerge bool) Option {
 	return func(v *ahp.Capabilities) {
 		v.Modify.Present = true
-		v.Modify.Value.Output = ahp.Optional[json.RawMessage]{Present: true, Value: json.RawMessage("{" + "\"replace\":" + strconv.FormatBool(argReplace) + ",\"merge\":" + strconv.FormatBool(argMerge) + "}")}
+		v.Modify.Value.Output = ahp.Optional[ahp.CapabilitiesModifyOutput]{Present: true, Value: ahp.CapabilitiesModifyOutput{Replace: argReplace, Merge: argMerge}}
 	}
 }
 
@@ -754,7 +754,7 @@ func WithOutputModification(argReplace bool, argMerge bool) Option {
 func WithPromptModification(argReplace bool, argMerge bool) Option {
 	return func(v *ahp.Capabilities) {
 		v.Modify.Present = true
-		v.Modify.Value.Prompt = ahp.Optional[json.RawMessage]{Present: true, Value: json.RawMessage("{" + "\"replace\":" + strconv.FormatBool(argReplace) + ",\"merge\":" + strconv.FormatBool(argMerge) + "}")}
+		v.Modify.Value.Prompt = ahp.Optional[ahp.CapabilitiesModifyPrompt]{Present: true, Value: ahp.CapabilitiesModifyPrompt{Replace: argReplace, Merge: argMerge}}
 	}
 }
 
@@ -762,7 +762,7 @@ func WithPromptModification(argReplace bool, argMerge bool) Option {
 func WithRequestModification(argReplace bool, argMerge bool) Option {
 	return func(v *ahp.Capabilities) {
 		v.Modify.Present = true
-		v.Modify.Value.Request = ahp.Optional[json.RawMessage]{Present: true, Value: json.RawMessage("{" + "\"replace\":" + strconv.FormatBool(argReplace) + ",\"merge\":" + strconv.FormatBool(argMerge) + "}")}
+		v.Modify.Value.Request = ahp.Optional[ahp.CapabilitiesModifyRequest]{Present: true, Value: ahp.CapabilitiesModifyRequest{Replace: argReplace, Merge: argMerge}}
 	}
 }
 
@@ -770,7 +770,7 @@ func WithRequestModification(argReplace bool, argMerge bool) Option {
 func WithResponseModification(argReplace bool, argMerge bool) Option {
 	return func(v *ahp.Capabilities) {
 		v.Modify.Present = true
-		v.Modify.Value.Response = ahp.Optional[json.RawMessage]{Present: true, Value: json.RawMessage("{" + "\"replace\":" + strconv.FormatBool(argReplace) + ",\"merge\":" + strconv.FormatBool(argMerge) + "}")}
+		v.Modify.Value.Response = ahp.Optional[ahp.CapabilitiesModifyResponse]{Present: true, Value: ahp.CapabilitiesModifyResponse{Replace: argReplace, Merge: argMerge}}
 	}
 }
 
@@ -778,7 +778,7 @@ func WithResponseModification(argReplace bool, argMerge bool) Option {
 func WithSummaryModification(argReplace bool, argMerge bool) Option {
 	return func(v *ahp.Capabilities) {
 		v.Modify.Present = true
-		v.Modify.Value.Summary = ahp.Optional[json.RawMessage]{Present: true, Value: json.RawMessage("{" + "\"replace\":" + strconv.FormatBool(argReplace) + ",\"merge\":" + strconv.FormatBool(argMerge) + "}")}
+		v.Modify.Value.Summary = ahp.Optional[ahp.CapabilitiesModifySummary]{Present: true, Value: ahp.CapabilitiesModifySummary{Replace: argReplace, Merge: argMerge}}
 	}
 }
 
@@ -786,7 +786,7 @@ func WithSummaryModification(argReplace bool, argMerge bool) Option {
 func WithWorkspaceModification(argReplace bool, argMerge bool) Option {
 	return func(v *ahp.Capabilities) {
 		v.Modify.Present = true
-		v.Modify.Value.Workspace = ahp.Optional[json.RawMessage]{Present: true, Value: json.RawMessage("{" + "\"replace\":" + strconv.FormatBool(argReplace) + ",\"merge\":" + strconv.FormatBool(argMerge) + "}")}
+		v.Modify.Value.Workspace = ahp.Optional[ahp.CapabilitiesModifyWorkspace]{Present: true, Value: ahp.CapabilitiesModifyWorkspace{Replace: argReplace, Merge: argMerge}}
 	}
 }
 
@@ -830,31 +830,26 @@ func Intercept(grants ...Grant) (Event, error) {
 	return Event{Modes: []Mode{InterceptMode, ObserveMode}, Capabilities: value}, nil
 }
 func Observe() Event { return Event{Modes: []Mode{ObserveMode}} }
-func addEffect(v *ahp.Capabilities, name string) {
-	for _, effect := range v.Effects {
-		if effect.Variant2.Present && effect.Variant2.Value == name {
-			return
-		}
-		if effect.Variant1.Present && string(effect.Variant1.Value) == name {
-			return
-		}
+func addEffect(v *ahp.Capabilities, name ahp.EffectName) {
+	if v.Supports(name) {
+		return
 	}
-	v.Effects = append(v.Effects, ahp.CapabilitiesEffectsItem{Variant1: ahp.Some(ahp.CapabilitiesEffectsItemVariant1(name))})
+	v.Effects = append(v.Effects, ahp.CapabilitiesEffectsItem{Known: ahp.Some(ahp.CapabilitiesEffectsItemKnown(name))})
 }
 func Allow() Grant {
-	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, "allow"); return nil }}
+	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, ahp.EffectNameAllow); return nil }}
 }
 func Ask() Grant {
-	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, "ask"); return nil }}
+	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, ahp.EffectNameAsk); return nil }}
 }
 func Deny() Grant {
-	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, "deny"); return nil }}
+	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, ahp.EffectNameDeny); return nil }}
 }
 func Message() Grant {
-	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, "message"); return nil }}
+	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, ahp.EffectNameMessage); return nil }}
 }
 func Return() Grant {
-	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, "return"); return nil }}
+	return Grant{apply: func(v *ahp.Capabilities) error { addEffect(v, ahp.EffectNameReturn); return nil }}
 }
 
 const Merge ModifyOperation = "merge"
@@ -866,28 +861,20 @@ func ModifyContent(operations ...ModifyOperation) Grant {
 		if len(operations) == 0 {
 			return fmt.Errorf("modification requires an operation")
 		}
-		flags := map[string]bool{"merge": false, "replace": false}
+		grant := v.Modify.Value.Content.Value
 		for _, operation := range operations {
-			if _, known := flags[string(operation)]; !known {
+			switch string(operation) {
+			case "merge":
+				grant.Merge = true
+			case "replace":
+				grant.Replace = true
+
+			default:
 				return fmt.Errorf("unknown modify operation %q", operation)
 			}
-			flags[string(operation)] = true
-		}
-		if v.Modify.Present && v.Modify.Value.Content.Present {
-			var previous map[string]bool
-			if err := json.Unmarshal(v.Modify.Value.Content.Value, &previous); err != nil {
-				return err
-			}
-			for operation, enabled := range previous {
-				flags[operation] = flags[operation] || enabled
-			}
-		}
-		raw, err := json.Marshal(flags)
-		if err != nil {
-			return err
 		}
 		v.Modify.Present = true
-		v.Modify.Value.Content = ahp.Some(json.RawMessage(raw))
+		v.Modify.Value.Content = ahp.Some(grant)
 		addEffect(v, "modify")
 		return nil
 	}}
@@ -899,28 +886,20 @@ func ModifyInput(operations ...ModifyOperation) Grant {
 		if len(operations) == 0 {
 			return fmt.Errorf("modification requires an operation")
 		}
-		flags := map[string]bool{"merge": false, "replace": false}
+		grant := v.Modify.Value.Input.Value
 		for _, operation := range operations {
-			if _, known := flags[string(operation)]; !known {
+			switch string(operation) {
+			case "merge":
+				grant.Merge = true
+			case "replace":
+				grant.Replace = true
+
+			default:
 				return fmt.Errorf("unknown modify operation %q", operation)
 			}
-			flags[string(operation)] = true
-		}
-		if v.Modify.Present && v.Modify.Value.Input.Present {
-			var previous map[string]bool
-			if err := json.Unmarshal(v.Modify.Value.Input.Value, &previous); err != nil {
-				return err
-			}
-			for operation, enabled := range previous {
-				flags[operation] = flags[operation] || enabled
-			}
-		}
-		raw, err := json.Marshal(flags)
-		if err != nil {
-			return err
 		}
 		v.Modify.Present = true
-		v.Modify.Value.Input = ahp.Some(json.RawMessage(raw))
+		v.Modify.Value.Input = ahp.Some(grant)
 		addEffect(v, "modify")
 		return nil
 	}}
@@ -932,28 +911,20 @@ func ModifyInstructions(operations ...ModifyOperation) Grant {
 		if len(operations) == 0 {
 			return fmt.Errorf("modification requires an operation")
 		}
-		flags := map[string]bool{"merge": false, "replace": false}
+		grant := v.Modify.Value.Instructions.Value
 		for _, operation := range operations {
-			if _, known := flags[string(operation)]; !known {
+			switch string(operation) {
+			case "merge":
+				grant.Merge = true
+			case "replace":
+				grant.Replace = true
+
+			default:
 				return fmt.Errorf("unknown modify operation %q", operation)
 			}
-			flags[string(operation)] = true
-		}
-		if v.Modify.Present && v.Modify.Value.Instructions.Present {
-			var previous map[string]bool
-			if err := json.Unmarshal(v.Modify.Value.Instructions.Value, &previous); err != nil {
-				return err
-			}
-			for operation, enabled := range previous {
-				flags[operation] = flags[operation] || enabled
-			}
-		}
-		raw, err := json.Marshal(flags)
-		if err != nil {
-			return err
 		}
 		v.Modify.Present = true
-		v.Modify.Value.Instructions = ahp.Some(json.RawMessage(raw))
+		v.Modify.Value.Instructions = ahp.Some(grant)
 		addEffect(v, "modify")
 		return nil
 	}}
@@ -965,28 +936,20 @@ func ModifyOutput(operations ...ModifyOperation) Grant {
 		if len(operations) == 0 {
 			return fmt.Errorf("modification requires an operation")
 		}
-		flags := map[string]bool{"merge": false, "replace": false}
+		grant := v.Modify.Value.Output.Value
 		for _, operation := range operations {
-			if _, known := flags[string(operation)]; !known {
+			switch string(operation) {
+			case "merge":
+				grant.Merge = true
+			case "replace":
+				grant.Replace = true
+
+			default:
 				return fmt.Errorf("unknown modify operation %q", operation)
 			}
-			flags[string(operation)] = true
-		}
-		if v.Modify.Present && v.Modify.Value.Output.Present {
-			var previous map[string]bool
-			if err := json.Unmarshal(v.Modify.Value.Output.Value, &previous); err != nil {
-				return err
-			}
-			for operation, enabled := range previous {
-				flags[operation] = flags[operation] || enabled
-			}
-		}
-		raw, err := json.Marshal(flags)
-		if err != nil {
-			return err
 		}
 		v.Modify.Present = true
-		v.Modify.Value.Output = ahp.Some(json.RawMessage(raw))
+		v.Modify.Value.Output = ahp.Some(grant)
 		addEffect(v, "modify")
 		return nil
 	}}
@@ -998,28 +961,20 @@ func ModifyPrompt(operations ...ModifyOperation) Grant {
 		if len(operations) == 0 {
 			return fmt.Errorf("modification requires an operation")
 		}
-		flags := map[string]bool{"merge": false, "replace": false}
+		grant := v.Modify.Value.Prompt.Value
 		for _, operation := range operations {
-			if _, known := flags[string(operation)]; !known {
+			switch string(operation) {
+			case "merge":
+				grant.Merge = true
+			case "replace":
+				grant.Replace = true
+
+			default:
 				return fmt.Errorf("unknown modify operation %q", operation)
 			}
-			flags[string(operation)] = true
-		}
-		if v.Modify.Present && v.Modify.Value.Prompt.Present {
-			var previous map[string]bool
-			if err := json.Unmarshal(v.Modify.Value.Prompt.Value, &previous); err != nil {
-				return err
-			}
-			for operation, enabled := range previous {
-				flags[operation] = flags[operation] || enabled
-			}
-		}
-		raw, err := json.Marshal(flags)
-		if err != nil {
-			return err
 		}
 		v.Modify.Present = true
-		v.Modify.Value.Prompt = ahp.Some(json.RawMessage(raw))
+		v.Modify.Value.Prompt = ahp.Some(grant)
 		addEffect(v, "modify")
 		return nil
 	}}
@@ -1031,28 +986,20 @@ func ModifyRequest(operations ...ModifyOperation) Grant {
 		if len(operations) == 0 {
 			return fmt.Errorf("modification requires an operation")
 		}
-		flags := map[string]bool{"merge": false, "replace": false}
+		grant := v.Modify.Value.Request.Value
 		for _, operation := range operations {
-			if _, known := flags[string(operation)]; !known {
+			switch string(operation) {
+			case "merge":
+				grant.Merge = true
+			case "replace":
+				grant.Replace = true
+
+			default:
 				return fmt.Errorf("unknown modify operation %q", operation)
 			}
-			flags[string(operation)] = true
-		}
-		if v.Modify.Present && v.Modify.Value.Request.Present {
-			var previous map[string]bool
-			if err := json.Unmarshal(v.Modify.Value.Request.Value, &previous); err != nil {
-				return err
-			}
-			for operation, enabled := range previous {
-				flags[operation] = flags[operation] || enabled
-			}
-		}
-		raw, err := json.Marshal(flags)
-		if err != nil {
-			return err
 		}
 		v.Modify.Present = true
-		v.Modify.Value.Request = ahp.Some(json.RawMessage(raw))
+		v.Modify.Value.Request = ahp.Some(grant)
 		addEffect(v, "modify")
 		return nil
 	}}
@@ -1064,28 +1011,20 @@ func ModifyResponse(operations ...ModifyOperation) Grant {
 		if len(operations) == 0 {
 			return fmt.Errorf("modification requires an operation")
 		}
-		flags := map[string]bool{"merge": false, "replace": false}
+		grant := v.Modify.Value.Response.Value
 		for _, operation := range operations {
-			if _, known := flags[string(operation)]; !known {
+			switch string(operation) {
+			case "merge":
+				grant.Merge = true
+			case "replace":
+				grant.Replace = true
+
+			default:
 				return fmt.Errorf("unknown modify operation %q", operation)
 			}
-			flags[string(operation)] = true
-		}
-		if v.Modify.Present && v.Modify.Value.Response.Present {
-			var previous map[string]bool
-			if err := json.Unmarshal(v.Modify.Value.Response.Value, &previous); err != nil {
-				return err
-			}
-			for operation, enabled := range previous {
-				flags[operation] = flags[operation] || enabled
-			}
-		}
-		raw, err := json.Marshal(flags)
-		if err != nil {
-			return err
 		}
 		v.Modify.Present = true
-		v.Modify.Value.Response = ahp.Some(json.RawMessage(raw))
+		v.Modify.Value.Response = ahp.Some(grant)
 		addEffect(v, "modify")
 		return nil
 	}}
@@ -1097,28 +1036,20 @@ func ModifySummary(operations ...ModifyOperation) Grant {
 		if len(operations) == 0 {
 			return fmt.Errorf("modification requires an operation")
 		}
-		flags := map[string]bool{"merge": false, "replace": false}
+		grant := v.Modify.Value.Summary.Value
 		for _, operation := range operations {
-			if _, known := flags[string(operation)]; !known {
+			switch string(operation) {
+			case "merge":
+				grant.Merge = true
+			case "replace":
+				grant.Replace = true
+
+			default:
 				return fmt.Errorf("unknown modify operation %q", operation)
 			}
-			flags[string(operation)] = true
-		}
-		if v.Modify.Present && v.Modify.Value.Summary.Present {
-			var previous map[string]bool
-			if err := json.Unmarshal(v.Modify.Value.Summary.Value, &previous); err != nil {
-				return err
-			}
-			for operation, enabled := range previous {
-				flags[operation] = flags[operation] || enabled
-			}
-		}
-		raw, err := json.Marshal(flags)
-		if err != nil {
-			return err
 		}
 		v.Modify.Present = true
-		v.Modify.Value.Summary = ahp.Some(json.RawMessage(raw))
+		v.Modify.Value.Summary = ahp.Some(grant)
 		addEffect(v, "modify")
 		return nil
 	}}
@@ -1130,28 +1061,20 @@ func ModifyWorkspace(operations ...ModifyOperation) Grant {
 		if len(operations) == 0 {
 			return fmt.Errorf("modification requires an operation")
 		}
-		flags := map[string]bool{"merge": false, "replace": false}
+		grant := v.Modify.Value.Workspace.Value
 		for _, operation := range operations {
-			if _, known := flags[string(operation)]; !known {
+			switch string(operation) {
+			case "merge":
+				grant.Merge = true
+			case "replace":
+				grant.Replace = true
+
+			default:
 				return fmt.Errorf("unknown modify operation %q", operation)
 			}
-			flags[string(operation)] = true
-		}
-		if v.Modify.Present && v.Modify.Value.Workspace.Present {
-			var previous map[string]bool
-			if err := json.Unmarshal(v.Modify.Value.Workspace.Value, &previous); err != nil {
-				return err
-			}
-			for operation, enabled := range previous {
-				flags[operation] = flags[operation] || enabled
-			}
-		}
-		raw, err := json.Marshal(flags)
-		if err != nil {
-			return err
 		}
 		v.Modify.Present = true
-		v.Modify.Value.Workspace = ahp.Some(json.RawMessage(raw))
+		v.Modify.Value.Workspace = ahp.Some(grant)
 		addEffect(v, "modify")
 		return nil
 	}}

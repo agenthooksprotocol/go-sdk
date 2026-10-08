@@ -87,6 +87,8 @@ func (c *Hooks) scheduleObservations(parent context.Context, event map[string]an
 	}
 	wg.Wait()
 	cancel()
+	// Completed handles must not retain the delivery context and its source store.
+	o.cancel = func() {}
 	close(o.done)
 	return o
 }
