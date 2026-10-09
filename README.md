@@ -367,6 +367,41 @@ together they can retain twice that limit, plus bounded delivery copies. Advance
 bind canonical slots with `client.WithContentSource`; wire references/resolvers
 remain available for already prepared content.
 
+
+### Owned attachments
+
+Use `content.NewAttachment(data)` for a defensive copy of a byte slice, or
+`content.NewLazyAttachment(open, cleanup)` for a context-aware reader factory.
+`content.Attachment` is compatible with `content.Source`: bind it directly to
+existing generated fields such as `event.ToolBeforeInput.ItemsSources`. The
+associated content item supplies ID, kind, media type and other metadata; it has
+no body reference. No caller-side store, scope, staging or reference resolution
+is needed. See [the file attachment example](examples/attachments/main.go).
+
+Construction and metadata-only/no-match delivery do not open lazy attachments.
+The first authorized body delivery or `result.ReadContent(ctx, path)` evaluates
+the factory once; subsequent consumers receive detached copies of the same
+snapshot. `MaxContentBytes` still bounds materialization and the shared original
+source budget. The factory must honor cancellation, and reader `Close` must
+unblock `Read`. The optional cleanup callback releases captured resources even
+if the factory was never called; it must be safe during cancellation.
+
+A successful invocation transfers its effective bytes and unread attachments to
+its result. Always `defer result.Close()` (also when an error returns a non-nil
+result). `ReadContent` works after invocation completion and `Hooks.Close`; lazy
+factories must therefore not depend on resources owned by Hooks. `Content` remains
+the legacy non-reading snapshot accessor. Closing a result interrupts active
+attachment reads and disposes unopened sources. Admission failures, cancellation
+and timeouts dispose invocation-owned sources instead of transferring them.
+An attachment can serve multiple slots/receivers in one invocation, but cannot be
+reused across invocations. There is no session archive or persistent handle store.
+Call `Close` on an attachment that is never submitted.
+
+Attachments do not add binary edit effects. Existing text/JSON modification
+constraints and explicit target bindings still apply; do not advertise a
+modification grant for binary content. Existing source and reference APIs keep
+their prior invocation-scoped behavior.
+
 On the receiver, upload parsing verifies declared size and digest only at
 successful EOF. Early close or a failed read cannot yield a verified receipt.
 The application authorizes scope, stages and commits immutable storage, allocates

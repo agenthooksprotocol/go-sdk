@@ -32,7 +32,7 @@ func WithContentSource(path string, source *ContentSource) InterceptOption {
 }
 
 func contentSourceConfig(options []InterceptOption) interceptConfig {
-	cfg := interceptConfig{}
+	cfg := interceptConfig{claimedSources: map[*ContentSource]bool{}, transferredSources: map[*ContentSource]bool{}}
 	for _, option := range options {
 		if option != nil {
 			option(&cfg)
@@ -43,6 +43,9 @@ func contentSourceConfig(options []InterceptOption) interceptConfig {
 
 func (cfg interceptConfig) closeSources() {
 	for _, source := range cfg.ownedSources {
+		if source.IsAttachment() && (cfg.transferredSources[source] || (source.Claimed() && !cfg.claimedSources[source])) {
+			continue
+		}
 		_ = source.Retire()
 	}
 }
@@ -63,6 +66,7 @@ func (cfg interceptConfig) bindSources(ctx context.Context, event map[string]any
 		if !seen[source] && !source.Claim() {
 			return ctx, errors.New("content source already belongs to an occurrence")
 		}
+		cfg.claimedSources[source] = true
 		seen[source] = true
 	}
 	ctx = context.WithValue(ctx, contentSourcesContextKey{}, cfg.sources)

@@ -16,17 +16,23 @@ import (
 // Close must unblock Read: cancellation may close the reader concurrently.
 // A source must not be reused across occurrences or read by its caller after transfer.
 type Source struct {
-	lifetime  sync.RWMutex
-	retired   bool
-	reader    io.ReadCloser
-	once      sync.Once
-	closeOnce sync.Once
-	claimed   atomic.Bool
-	closed    atomic.Bool
-	ready     atomic.Bool
-	raw       []byte
-	err       error
-	closeErr  error
+	openCancel context.CancelFunc
+	openDone   chan struct{}
+	readerMu   sync.Mutex
+	opener     func(context.Context) (io.ReadCloser, error)
+	cleanup    func() error
+	attachment bool
+	lifetime   sync.RWMutex
+	retired    bool
+	reader     io.ReadCloser
+	once       sync.Once
+	closeOnce  sync.Once
+	claimed    atomic.Bool
+	closed     atomic.Bool
+	ready      atomic.Bool
+	raw        []byte
+	err        error
+	closeErr   error
 }
 
 // NewSource wraps a reader without consuming bytes or uploading anything.
@@ -40,8 +46,22 @@ func (s *Source) Close() error {
 	}
 	s.closeOnce.Do(func() {
 		s.closed.Store(true)
-		if s.reader != nil {
-			s.closeErr = s.reader.Close()
+		s.readerMu.Lock()
+		reader := s.reader
+		cancel := s.openCancel
+		openDone := s.openDone
+		s.readerMu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		if openDone != nil {
+			<-openDone
+		}
+		if reader != nil {
+			s.closeErr = reader.Close()
+		}
+		if s.cleanup != nil {
+			s.closeErr = errors.Join(s.closeErr, s.cleanup())
 		}
 	})
 	return s.closeErr
@@ -61,6 +81,10 @@ func (s *Source) Retire() error {
 	s.retired = true
 	s.raw = nil
 	s.reader = nil
+	s.openCancel = nil
+	s.openDone = nil
+	s.opener = nil
+	s.cleanup = nil
 	s.err = nil
 	return err
 }
@@ -86,8 +110,43 @@ func (s *Source) Snapshot(ctx context.Context, limit int64) ([]byte, error) {
 	}
 	s.once.Do(func() {
 		defer s.ready.Store(true)
+		if err := ctx.Err(); err != nil {
+			s.err = err
+			_ = s.Close()
+			return
+		}
+		if s.opener != nil && !s.closed.Load() {
+			openCtx, cancel := context.WithCancel(ctx)
+			s.readerMu.Lock()
+			if s.closed.Load() {
+				s.readerMu.Unlock()
+				cancel()
+				s.err = errors.New("content source is closed")
+				return
+			}
+			s.openCancel = cancel
+			s.openDone = make(chan struct{})
+			s.readerMu.Unlock()
+			reader, err := s.opener(openCtx)
+			s.readerMu.Lock()
+			closed := s.closed.Load()
+			if !closed {
+				s.reader = reader
+			}
+			s.readerMu.Unlock()
+			if closed && reader != nil {
+				_ = reader.Close()
+			}
+			close(s.openDone)
+			if err != nil {
+				s.err = err
+				_ = s.Close()
+				return
+			}
+		}
 		if s.reader == nil || s.closed.Load() {
 			s.err = errors.New("content source is closed or has no reader")
+			_ = s.Close()
 			return
 		}
 		if err := ctx.Err(); err != nil {
@@ -133,7 +192,9 @@ func (s *Source) Claim() bool {
 	}
 	s.lifetime.RLock()
 	defer s.lifetime.RUnlock()
-	return !s.retired && s.reader != nil && s.claimed.CompareAndSwap(false, true)
+	s.readerMu.Lock()
+	defer s.readerMu.Unlock()
+	return !s.retired && !s.closed.Load() && (s.reader != nil || s.opener != nil) && s.claimed.CompareAndSwap(false, true)
 }
 
 // readOwnedContent closes the SDK-owned reader exactly once on every exit.

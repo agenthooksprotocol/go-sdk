@@ -26,7 +26,7 @@ func (c *Hooks) intercept(ctx context.Context, name string, input any, options .
 	return result, err
 }
 
-func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ...InterceptOption) (*Result, error) {
+func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ...InterceptOption) (out *Result, dispatchErr error) {
 	// Generated inputs expose named source slots without serializing streams.
 	if bound, ok := input.(interface {
 		AHPContentSources() map[string]*content.Source
@@ -40,6 +40,9 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 	cfg := contentSourceConfig(options)
 	admitted := false
 	defer func() {
+		if out != nil && dispatchErr == nil {
+			out.retainAttachments(cfg, ctx, c.opts.MaxContentBytes)
+		}
 		cfg.closeSources()
 		if admitted {
 			c.active.Done()
