@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.1.1...v0.2.0) (2026-10-09)
+
+
+### Features
+
+* add invocation-owned content attachments ([#12](https://github.com/agenthooksprotocol/go-sdk/issues/12)) ([4dd979d](https://github.com/agenthooksprotocol/go-sdk/commit/4dd979db3c09df42c2e0ea9a71b3e4ff78e99edb))
+
 ## [0.1.1](https://github.com/agenthooksprotocol/go-sdk/compare/v0.1.0...v0.1.1) (2026-10-09)
 
 
