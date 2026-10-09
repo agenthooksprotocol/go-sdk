@@ -1,6 +1,7 @@
 package client
 
 import (
+	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 	"testing"
 )
 
@@ -21,16 +22,23 @@ const elicitationForm = `{"message":"choose","requestedSchema":{"type":"object",
 
 func TestElicitationSnapshotAndAnswers(t *testing.T) {
 	event, bodies := elicitationFixture("request", "form", elicitationForm)
-	snapshot, err := prepareElicitation(event, nil, bodies)
+	owners := elicitationOwners(event, bodies)
+	snapshot, err := prepareElicitation(event, nil, owners)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// The semantic contract remains valid after its attachment owner is retired.
+	for _, owner := range owners {
+		if err := owner.Retire(); err != nil {
+			t.Fatal(err)
+		}
 	}
 	// Mutating the original input bytes or event must not mutate the snapshot.
 	bodies["request"][0] = '!'
 	event["id"] = "changed"
 	event["elicitation"].(map[string]any)["server"] = "changed"
 	result, resultBodies := elicitationFixture("result", "form", `{"action":"accept","content":{"x":"a"},"_meta":{"result":true}}`)
-	if _, err = prepareElicitation(result, snapshot, resultBodies); err != nil {
+	if _, err = prepareElicitation(result, snapshot, elicitationOwners(result, resultBodies)); err != nil {
 		t.Fatal(err)
 	}
 	for _, value := range []any{
@@ -59,7 +67,7 @@ func TestElicitationSnapshotAndAnswers(t *testing.T) {
 
 func TestElicitationCorrelation(t *testing.T) {
 	request, bodies := elicitationFixture("request", "form", elicitationForm)
-	snapshot, err := prepareElicitation(request, nil, bodies)
+	snapshot, err := prepareElicitation(request, nil, elicitationOwners(request, bodies))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +84,7 @@ func TestElicitationCorrelation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			result, bodies := elicitationFixture("result", "form", `{"action":"accept","content":{"x":"a"}}`)
 			mutate(result)
-			if _, err := prepareElicitation(result, snapshot, bodies); err == nil {
+			if _, err := prepareElicitation(result, snapshot, elicitationOwners(result, bodies)); err == nil {
 				t.Fatal("mismatched correlation accepted")
 			}
 		})
@@ -97,7 +105,7 @@ func TestElicitationSelectionAndPinnedRequestValidation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if snapshot == nil || snapshot.request != "" {
+		if snapshot == nil || snapshot.requestValid {
 			t.Fatal("metadata falsely established executable request")
 		}
 		if validateElicitationAnswer(event, snapshot, map[string]any{"action": "cancel"}) == nil {
@@ -111,7 +119,7 @@ func TestElicitationSelectionAndPinnedRequestValidation(t *testing.T) {
 		`{"mode":"url","message":"open","url":"https://example.test","elicitationId":"opaque"}`,
 	} {
 		event, bodies := elicitationFixture("request", "form", payload)
-		if _, err := prepareElicitation(event, nil, bodies); err == nil {
+		if _, err := prepareElicitation(event, nil, elicitationOwners(event, bodies)); err == nil {
 			t.Fatal("invalid request or mode accepted")
 		}
 	}
@@ -129,7 +137,7 @@ func TestElicitationSelectionAndPinnedRequestValidation(t *testing.T) {
 
 func TestElicitationURLConsentAndOriginalContract(t *testing.T) {
 	event, bodies := elicitationFixture("request", "url", `{"mode":"url","message":"open","url":"https://example.test","elicitationId":"opaque"}`)
-	snapshot, err := prepareElicitation(event, nil, bodies)
+	snapshot, err := prepareElicitation(event, nil, elicitationOwners(event, bodies))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,12 +150,12 @@ func TestElicitationURLConsentAndOriginalContract(t *testing.T) {
 		}
 	}
 	form, formBodies := elicitationFixture("request", "form", elicitationForm)
-	original, err := prepareElicitation(form, nil, formBodies)
+	original, err := prepareElicitation(form, nil, elicitationOwners(form, formBodies))
 	if err != nil {
 		t.Fatal(err)
 	}
 	rewritten, rewrittenBodies := elicitationFixture("request", "form", `{"message":"changed","requestedSchema":{"type":"object","properties":{"x":{"type":"string"}}}}`)
-	preserved, err := prepareElicitation(rewritten, original, rewrittenBodies)
+	preserved, err := prepareElicitation(rewritten, original, elicitationOwners(rewritten, rewrittenBodies))
 	if err != nil || preserved != original {
 		t.Fatal("original contract replaced", err)
 	}
@@ -158,7 +166,7 @@ func TestElicitationURLConsentAndOriginalContract(t *testing.T) {
 
 func TestElicitationMetadataBeforeBodyResolution(t *testing.T) {
 	request, bodies := elicitationFixture("request", "form", elicitationForm)
-	snapshot, err := prepareElicitation(request, nil, bodies)
+	snapshot, err := prepareElicitation(request, nil, elicitationOwners(request, bodies))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +186,7 @@ func TestElicitationMetadataBeforeBodyResolution(t *testing.T) {
 func TestElicitationOptionalContentAndAbsentSession(t *testing.T) {
 	request, bodies := elicitationFixture("request", "form", `{"message":"optional","requestedSchema":{"type":"object","properties":{"x":{"type":"boolean","default":true}}}}`)
 	delete(request, "session")
-	snapshot, err := prepareElicitation(request, nil, bodies)
+	snapshot, err := prepareElicitation(request, nil, elicitationOwners(request, bodies))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +195,19 @@ func TestElicitationOptionalContentAndAbsentSession(t *testing.T) {
 	}
 	result, resultBodies := elicitationFixture("result", "form", `{"action":"accept"}`)
 	delete(result, "session")
-	if _, err := prepareElicitation(result, snapshot, resultBodies); err != nil {
+	if _, err := prepareElicitation(result, snapshot, elicitationOwners(result, resultBodies)); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func elicitationOwners(event map[string]any, bodies map[string][]byte) map[string]*ContentSource {
+	sources := map[string]*ContentSource{}
+	for _, stage := range []string{"request", "result"} {
+		item := preparedAt(event, "/elicitation/"+stage)
+		ref := compositionString(sdkObj(item["body"])["ref"])
+		if raw, ok := bodies[ref]; ok {
+			sources["/elicitation/"+stage] = ownedcontent.NewAttachment(raw)
+		}
+	}
+	return sources
 }

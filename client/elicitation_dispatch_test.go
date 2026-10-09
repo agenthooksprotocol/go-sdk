@@ -53,8 +53,8 @@ func TestElicitationDispatchSnapshotAndAtomicAnswers(t *testing.T) {
 	if err != nil || result == nil {
 		t.Fatal(err)
 	}
-	if result.Snapshot == nil || result.Snapshot.request != string(original) {
-		t.Fatal("original bytes not snapshotted")
+	if result.Snapshot == nil || !result.Snapshot.requestValid || !compositionEqual(result.Snapshot.requestedSchema, compositionObject(original)["requestedSchema"]) {
+		t.Fatal("original form contract not snapshotted")
 	}
 	if len(result.Errors) != 1 || len(result.Response.Effects) != 1 {
 		t.Fatalf("non-atomic acceptance: %+v", result)
@@ -64,8 +64,9 @@ func TestElicitationDispatchSnapshotAndAtomicAnswers(t *testing.T) {
 	if sdkObj(sdkObj(state["candidate"])["value"])["action"] != "accept" {
 		t.Fatal(state)
 	}
+	schema := sdkJSON(result.Snapshot.requestedSchema)
 	original[1] = 'x'
-	if result.Snapshot.request[1] != '{' {
+	if !bytes.Equal(schema, sdkJSON(result.Snapshot.requestedSchema)) {
 		t.Fatal("snapshot aliases caller bytes")
 	}
 	waitObservations(t, result)
@@ -160,7 +161,7 @@ func TestElicitationResultSerialReceiverUploads(t *testing.T) {
 func TestElicitationCorrelationAdmissionBeforeResolver(t *testing.T) {
 	req, bodies := elicitationFixture("request", "form", elicitationForm)
 	req["source"] = "urn:test:host"
-	snapshot, err := prepareElicitation(req, nil, bodies)
+	snapshot, err := prepareElicitation(req, nil, elicitationOwners(req, bodies))
 	if err != nil {
 		t.Fatal(err)
 	}

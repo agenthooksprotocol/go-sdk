@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 	"io"
 	"math"
 	"math/big"
@@ -54,8 +55,12 @@ func (c *Hooks) projectContent(ctx context.Context, event map[string]any, subscr
 					return nil, errors.New("malformed normalized content item")
 				}
 				item := v
-				if sources, ok := ctx.Value(contentSourcesContextKey{}).(map[string]*ContentSource); ok {
-					if source := sources[path]; source != nil && v["body"] == nil {
+				sources, _ := ctx.Value(contentSourcesContextKey{}).(map[string]*ContentSource)
+				if prepared, ok := ctx.Value(preparedContextKey{}).(*preparedBoundary); ok {
+					sources = prepared.sources
+				}
+				if sources != nil {
+					if source := sources[path]; source != nil {
 						item = contentClone(v).(map[string]any)
 						item["body"] = source
 					}
@@ -71,11 +76,13 @@ func (c *Hooks) projectContent(ctx context.Context, event map[string]any, subscr
 			out := make(map[string]any, len(v))
 			for key, child := range v {
 				childPath := path + "/" + strings.ReplaceAll(strings.ReplaceAll(key, "~", "~0"), "/", "~1")
-				parts := strings.Split(strings.TrimPrefix(childPath, "/"), "/")
-				if event["type"] == "file.changed" && len(parts) == 3 && parts[0] == "changes" && (key == "before" || key == "after") {
+				if event["type"] == "file.changed" && fileChangeReferencePath(childPath) {
 					// Bare file references are not normalized items on the wire. Prepare them
 					// through a private descriptor, emitting only an authorized confirmed body.
 					item := map[string]any{"id": childPath, "kind": "file", "category": "files", "mediaType": "application/octet-stream", "synthesized": true, "body": child}
+					if p, ok := ctx.Value(preparedContextKey{}).(*preparedBoundary); ok && p.sources[childPath] != nil {
+						item["body"] = p.sources[childPath]
+					}
 					prepared, err := c.projectContentItem(ctx, item, selection, subscription, scope)
 					if err != nil {
 						return nil, err
@@ -258,7 +265,7 @@ func (c *Hooks) projectContentItem(ctx context.Context, item, selection, subscri
 		if budget, ok := ctx.Value(contentSourceBudgetKey{}).(*contentSourceBudget); ok {
 			raw, err = budget.snapshot(ctx, source, total, total)
 		} else {
-			raw, err = source.Snapshot(ctx, total)
+			raw, err = ownedcontent.Borrow(source, ctx, total)
 		}
 		if err != nil {
 			return nil, err
@@ -284,18 +291,6 @@ func (c *Hooks) projectContentItem(ctx context.Context, item, selection, subscri
 			return nil, errors.New("invalid host content reference")
 		}
 		resolver := c.opts.Content.Resolver
-		if prepared, ok := ctx.Value(preparedContextKey{}).(*preparedBoundary); ok {
-			fallback := resolver
-			resolver = func(ctx context.Context, ref string) (io.ReadCloser, error) {
-				if raw, ok := prepared.bodies[ref]; ok {
-					return io.NopCloser(bytes.NewReader(raw)), nil
-				}
-				if fallback == nil {
-					return nil, errors.New("content resolver unavailable")
-				}
-				return fallback(ctx, ref)
-			}
-		}
 		if resolver == nil {
 			out["gap"] = map[string]any{"reason": "unavailable"}
 			return out, nil
@@ -503,4 +498,10 @@ func contentClone(value any) any {
 	default:
 		return value
 	}
+}
+
+// fileChangeReferencePath identifies legacy bare wire references, not content items.
+func fileChangeReferencePath(path string) bool {
+	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	return len(parts) == 3 && parts[0] == "changes" && (parts[2] == "before" || parts[2] == "after")
 }

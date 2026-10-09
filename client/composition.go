@@ -10,6 +10,7 @@ import (
 
 	ahp "github.com/agenthooksprotocol/go-sdk"
 	"github.com/agenthooksprotocol/go-sdk/internal/canonical"
+	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 )
 
 // CapabilityAdmissionError reports missing prepared inputs for protocol-only
@@ -35,10 +36,32 @@ type Composition struct {
 	State          ahp.InterceptRequestParamsState
 	EffectiveInput json.RawMessage
 	Response       ahp.InterceptResponseResult
-	// EffectiveValues holds resolved accepted non-input target values.
-	// Descriptor identities remain separate from their effective bytes.
-	EffectiveValues map[string]json.RawMessage
-	prepared        *preparedBoundary
+	prepared       *preparedBoundary
+}
+
+// EffectiveValue encodes an available accepted non-input target on demand.
+// It never opens an unread attachment or retains another copy of its bytes.
+// Protocol-only compositions without prepared owners have no effective values.
+func (c *Composition) EffectiveValue(target string) (json.RawMessage, error) {
+	if c == nil || c.prepared == nil || target == "input" {
+		return nil, fmt.Errorf("effective value %q unavailable", target)
+	}
+	event := compositionObject(c.Event)
+	if event == nil {
+		return nil, fmt.Errorf("effective event unavailable")
+	}
+	// Decoding may materialize an elicitation snapshot; keep that assignment
+	// local while sharing immutable attachment owners.
+	view := c.prepared.clone()
+	values, err := view.values(event)
+	if err != nil {
+		return nil, err
+	}
+	value, ok := values[target]
+	if !ok {
+		return nil, fmt.Errorf("effective value %q unavailable", target)
+	}
+	return sdkJSON(value), nil
 }
 
 func compose(request ahp.InterceptRequest, response ahp.InterceptResponse) (*Composition, error) {
@@ -149,7 +172,11 @@ func composePrepared(request ahp.InterceptRequest, response ahp.InterceptRespons
 			bodyValue := v
 			if kind == "user.elicitation.result" {
 				item := preparedAt(event, "/elicitation/result")
-				original, err := preparedDecode(item, staged.bodies[compositionString(sdkObj(item["body"])["ref"])])
+				raw, available := ownedcontent.Available(staged.sources["/elicitation/result"])
+				if !available {
+					return nil, fmt.Errorf("elicitation result body unavailable")
+				}
+				original, err := preparedDecode(item, raw)
 				if err != nil {
 					return nil, err
 				}
@@ -231,7 +258,7 @@ func composePrepared(request ahp.InterceptRequest, response ahp.InterceptRespons
 	if err := canonical.Validate("intercept-request", sdkJSON(r)); err != nil {
 		return nil, err
 	}
-	out := &Composition{Response: res.Value.Result, EffectiveValues: map[string]json.RawMessage{}, prepared: staged}
+	out := &Composition{Response: res.Value.Result, prepared: staged}
 	stateBytes, err := json.Marshal(state)
 	if err != nil {
 		return nil, err
@@ -239,15 +266,10 @@ func composePrepared(request ahp.InterceptRequest, response ahp.InterceptRespons
 	if err := json.Unmarshal(stateBytes, &out.State); err != nil {
 		return nil, fmt.Errorf("compose state: %w", err)
 	}
-	for target, value := range values {
-		encoded, err := json.Marshal(value)
+	if value, ok := values["input"]; ok {
+		out.EffectiveInput, err = json.Marshal(value)
 		if err != nil {
 			return nil, err
-		}
-		if target == "input" {
-			out.EffectiveInput = encoded
-		} else {
-			out.EffectiveValues[target] = encoded
 		}
 	}
 	out.Event, err = json.Marshal(event)

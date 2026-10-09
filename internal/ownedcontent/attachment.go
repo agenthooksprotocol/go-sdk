@@ -1,4 +1,4 @@
-package content
+package ownedcontent
 
 import (
 	"bytes"
@@ -14,9 +14,13 @@ import (
 type Attachment = Source
 
 // NewAttachment copies data before returning. No store or reference is required.
-func NewAttachment(data []byte) *Attachment {
-	s := NewSource(io.NopCloser(bytes.NewReader(bytes.Clone(data))))
-	s.attachment = true
+func NewAttachment(data []byte) *Attachment { return NewOwned(bytes.Clone(data)) }
+
+// NewOwned consumes a newly allocated SDK buffer. The caller must not mutate it.
+func NewOwned(data []byte) *Source {
+	s := &Source{raw: data}
+	s.once.Do(func() {})
+	s.ready.Store(true)
 	return s
 }
 
@@ -25,11 +29,8 @@ func NewAttachment(data []byte) *Attachment {
 // releases captured resources even when open was never called. Do not capture
 // resources owned by Hooks: results can outlive Hooks.Close.
 func NewLazyAttachment(open func(context.Context) (io.ReadCloser, error), cleanup func() error) *Attachment {
-	return &Source{opener: open, cleanup: cleanup, attachment: true}
+	return &Source{opener: open, cleanup: cleanup}
 }
-
-// IsAttachment reports whether an adapter should transfer this source to a result.
-func (s *Source) IsAttachment() bool { return s != nil && s.attachment }
 
 // Claimed reports whether an adapter has already admitted this source.
 func (s *Source) Claimed() bool { return s != nil && s.claimed.Load() }

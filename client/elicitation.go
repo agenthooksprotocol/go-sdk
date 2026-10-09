@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/agenthooksprotocol/go-sdk/internal/canonical"
+	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 )
 
 // ElicitationRequest is an immutable snapshot of the original MCP request and
@@ -15,13 +16,14 @@ import (
 // The snapshot does not establish transport authentication or URL permission.
 type ElicitationRequest struct {
 	id, source, session, server, mode string
-	request                           string // Original validated bytes; strings cannot alias caller buffers.
+	requestValid                      bool
+	requestedSchema                   any // Parsed form contract, independent of attachment lifetime.
 }
 
 // prepareElicitation runs before any effects or receiver-specific projection.
-// bodies must contain integrity-verified original bytes indexed by body.ref.
+// sources indexes attachment owners by canonical item path.
 // Envelope/schema validation and body authorization remain the caller's job.
-func prepareElicitation(event map[string]any, original *ElicitationRequest, bodies map[string][]byte) (*ElicitationRequest, error) {
+func prepareElicitation(event map[string]any, original *ElicitationRequest, sources map[string]*ContentSource) (*ElicitationRequest, error) {
 	kind, _ := event["type"].(string)
 	if kind != "user.elicitation.request" && kind != "user.elicitation.result" {
 		return nil, nil
@@ -39,7 +41,7 @@ func prepareElicitation(event map[string]any, original *ElicitationRequest, bodi
 		if err := correlateElicitation(event, original); err != nil {
 			return nil, err
 		}
-		value, _, err := selectedElicitation(meta, "result", bodies)
+		value, err := selectedElicitation(meta, "result", sources)
 		if err != nil {
 			return nil, err
 		}
@@ -55,7 +57,7 @@ func prepareElicitation(event map[string]any, original *ElicitationRequest, bodi
 	if id == "" || source == "" {
 		return nil, errors.New("invalid elicitation requester identity")
 	}
-	value, raw, err := selectedElicitation(meta, "request", bodies)
+	value, err := selectedElicitation(meta, "request", sources)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +70,10 @@ func prepareElicitation(event map[string]any, original *ElicitationRequest, bodi
 			return nil, errors.New("elicitation request mode mismatch")
 		}
 	}
-	snapshot := &ElicitationRequest{id: id, source: source, session: elicitationSession(event), server: server, mode: mode, request: string(raw)}
+	snapshot := &ElicitationRequest{id: id, source: source, session: elicitationSession(event), server: server, mode: mode, requestValid: value != nil}
+	if value != nil {
+		snapshot.requestedSchema = value["requestedSchema"]
+	}
 	if original != nil {
 		if err := correlateElicitation(event, original); err != nil {
 			return nil, err
@@ -79,34 +84,35 @@ func prepareElicitation(event map[string]any, original *ElicitationRequest, bodi
 	return snapshot, nil
 }
 
-func selectedElicitation(meta map[string]any, stage string, bodies map[string][]byte) (map[string]any, []byte, error) {
+func selectedElicitation(meta map[string]any, stage string, sources map[string]*ContentSource) (map[string]any, error) {
 	item, _ := meta[stage].(map[string]any)
 	if item == nil {
-		return nil, nil, nil
+		return nil, nil
 	}
 	rawItem, err := json.Marshal(item)
 	if err != nil || canonical.Validate("content-item", rawItem) != nil || item["mediaType"] != "application/json" {
-		return nil, nil, errors.New("invalid elicitation content descriptor")
+		return nil, errors.New("invalid elicitation content descriptor")
 	}
-	if item["selection"] != "body" {
-		return nil, nil, nil
+	raw, present := ownedcontent.Available(sources["/elicitation/"+stage])
+	if !present {
+		if item["selection"] == "body" {
+			return nil, errors.New("selected elicitation body unavailable")
+		}
+		return nil, nil
 	}
-	body, _ := item["body"].(map[string]any)
-	ref, _ := body["ref"].(string)
-	raw, present := bodies[ref]
-	if ref == "" || !present {
-		return nil, nil, errors.New("selected elicitation body unavailable")
+	if err := contentMatches(item, raw); err != nil {
+		return nil, err
 	}
 	if err := canonical.Validate("mcp-elicitation#"+stage, raw); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	var value map[string]any
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.UseNumber()
 	if d.Decode(&value) != nil {
-		return nil, nil, errors.New("invalid elicitation JSON")
+		return nil, errors.New("invalid elicitation JSON")
 	}
-	return value, raw, nil
+	return value, nil
 }
 
 // validateElicitationMetadata must run before any content resolver I/O. It checks
@@ -166,7 +172,7 @@ func validateElicitationAnswer(event map[string]any, snapshot *ElicitationReques
 	if err := correlateElicitation(event, snapshot); err != nil {
 		return err
 	}
-	if snapshot.request == "" {
+	if !snapshot.requestValid {
 		return errors.New("original elicitation request body required")
 	}
 	raw, err := json.Marshal(value)
@@ -188,16 +194,10 @@ func validateElicitationAnswer(event map[string]any, snapshot *ElicitationReques
 		return errors.New("elicitation content only permitted for accepted forms")
 	}
 	if snapshot.mode == "form" && answer["action"] == "accept" {
-		var request map[string]any
-		d := json.NewDecoder(bytes.NewBufferString(snapshot.request))
-		d.UseNumber()
-		if d.Decode(&request) != nil {
-			return errors.New("invalid original elicitation request")
-		}
 		if !present {
 			content = map[string]any{}
 		}
-		return canonical.ValidateFormAnswer(request["requestedSchema"], content)
+		return canonical.ValidateFormAnswer(snapshot.requestedSchema, content)
 	}
 	return nil
 }

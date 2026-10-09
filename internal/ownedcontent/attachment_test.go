@@ -1,4 +1,4 @@
-package content
+package ownedcontent
 
 import (
 	"context"
@@ -147,5 +147,21 @@ func TestLazyAttachmentConcurrentClaim(t *testing.T) {
 		}
 		<-done
 		_ = a.Retire()
+	}
+}
+
+func TestCloseDisposesEagerOwner(t *testing.T) {
+	a := NewAttachment([]byte("private"))
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if a.raw != nil || a.reader != nil || a.opener != nil {
+		t.Fatal("Close retained backing storage")
+	}
+	if _, ok := a.Available(); ok {
+		t.Fatal("closed owner is readable")
+	}
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -108,7 +108,7 @@ func (p *preparedBoundary) applyCollection(event map[string]any, target string, 
 		if err := scalar.apply(event, target, v); err != nil {
 			return err
 		}
-		p.bodies = scalar.bodies
+		p.sources = scalar.sources
 	}
 	p.slots[target] = paths
 	p.prune(event)
@@ -116,27 +116,9 @@ func (p *preparedBoundary) applyCollection(event map[string]any, target string, 
 }
 
 func (p *preparedBoundary) prune(event map[string]any) {
-	live := map[string]bool{}
-	var walk func(any)
-	walk = func(v any) {
-		switch x := v.(type) {
-		case map[string]any:
-			if ref, ok := x["ref"].(string); ok {
-				live[ref] = true
-			}
-			for _, v := range x {
-				walk(v)
-			}
-		case []any:
-			for _, v := range x {
-				walk(v)
-			}
-		}
-	}
-	walk(event)
-	for ref := range p.bodies {
-		if !live[ref] {
-			delete(p.bodies, ref)
+	for path := range p.sources {
+		if preparedAt(event, path) == nil {
+			delete(p.sources, path)
 		}
 	}
 }
