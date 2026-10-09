@@ -1,6 +1,6 @@
 # Agent Hooks Protocol SDK for Go
 
-The active draft also provides MCP-aligned elicitation, automatic short-circuit
+The draft provides MCP-aligned elicitation, automatic short-circuit
 observation delivery, and before/after compaction controls. See the shared
 [boundary API guide](https://github.com/agenthooksprotocol/agent-hooks-protocol/blob/main/docs/accepted-boundary-apis.md)
 for entrypoints, upload binding, trusted-host obligations, and test scope.
@@ -80,12 +80,12 @@ compaction changes. The host remains responsible for those operations.
   proves execution or grants authority.
 - A protocol denial is a result, not a Go error. Operational failures appear in
   `Result.Diagnostics`; fail-closed failures are distinguishable from backend effects.
-  `Result.Errors` remains a compatibility view of interception failures.
+  `Result.Errors` lists interception failures.
   `Result.Permission` is the canonical settled permission: `none` is not approval,
   `ask` requires host approval, and interruption always prevents execution.
   Each `DeliveryError.Code` is a typed `DeliveryCode`: `protocol_rejection`,
   `remote_rpc`, `transport`, `cancelled`, `deadline_exceeded`, `preparation`, or
-  `capacity`. `Stage` still identifies the phase, and `FailClosed` identifies
+  `capacity`. `Stage` identifies the phase, and `FailClosed` identifies
   synthetic denial. Remote RPC codes require a valid, correlated error envelope;
   backend error messages/data are not exposed. Inspect `Code`, not error text.
   Cancellation returns the accepted prefix with `Interrupted` set and a context
@@ -96,9 +96,8 @@ compaction changes. The host remains responsible for those operations.
   treat this as a rejected backend response or use the typed zero value.
 - Each boundary call owns its bounded observation deliveries and finishes them
   before returning. Observation failures appear in `Diagnostics` but never change
-  the settled decision. `Observations` remains an already-completed compatibility
-  handle. Hosts own concurrency: run the whole call in a goroutine and retain its
-  result; never execute a gated operation before obtaining its decision.
+  the settled decision. `Observations` is an already-completed handle. Hosts own
+  concurrency: run the whole call in a goroutine and retain its result; never execute a gated operation before obtaining its decision.
 - The call's `context.Context` bounds queue waits, content preparation/uploads,
   authentication, event delivery, retries and observations with one remaining
   budget. Backend deadlines can shorten that budget, never reset it. Cancellation
@@ -109,9 +108,9 @@ compaction changes. The host remains responsible for those operations.
   Borrowed HTTP clients and harness-owned auth providers are never closed.
 
 Generated semantic packages (`registration`, `transport`, `subscription`,
-`effect`, `content`, `capability`, `event`, and `tool`) construct the existing
+`effect`, `content`, `capability`, `event`, and `tool`) construct the
 wire types. Constructors fill schema literals and annotated defaults; parsers
-continue to preserve presence and never invent omitted required fields. The
+preserve presence and never invent omitted required fields. The
 API targets the draft wire protocol and may evolve with it.
 
 `client.Hooks` is the registration-driven harness. Construct it with ordinary
@@ -148,15 +147,14 @@ result, err := hooks.ToolBefore(ctx, event.ToolBeforeInput[Arguments]{
 // result.Input has type Arguments when result.InputAvailable is true.
 ```
 
-The JSON document uses the unchanged `ahp.Registration` wire model: backend
+The JSON document uses the `ahp.Registration` wire model: backend
 routes, modes, deadlines, failure policies, content selections, and upload
-endpoints remain registration data. The event map grants no effects or elicitation support beyond the supplied
+endpoints are registration data. The event map grants no effects or elicitation support beyond the supplied
 declaration. `capability.Intercept` deliberately advertises both intercept and
 observe modes; `capability.Observe` advertises only observe. Include
 `capability.ElicitationForm()` explicitly when advertising form decisions.
-`Options.Manifest` remains available for advanced full-manifest metadata;
-provide it instead of `Events`, not together with it. `client.Client` is a
-deprecated alias of `Hooks`, not a second runtime or API.
+`Options.Manifest` is available for advanced full-manifest metadata;
+provide it instead of `Events`, not together with it. `client.Client` aliases `Hooks`.
 
 See the executable [JSON registration and typed boundary example](client/example_hooks_test.go),
 [generated constructor examples](facade_generated_test.go), and
@@ -180,7 +178,7 @@ Generated `event.*Input` structs are ergonomic boundary inputs, not copies of
 nested wire envelopes. For tool boundaries, set `CallID`, `Name`, `Origin`,
 `Input`, and `Path` directly instead of constructing `Call` and `Tool` wrappers.
 `ToolBeforeInput[T]` retains the application's typed input. Other event-specific
-fields remain typed; optional fields use `ahp.Some(value)`, including `ID` and
+fields are typed; optional fields use `ahp.Some(value)`, including `ID` and
 `ParentEventID`. Zero optional values mean absent, not an explicit null.
 The generated marshaler restores canonical nested wire fields. Use root `ahp`
 wire models and parsers for decoding protocol JSON, not ergonomic input structs.
@@ -188,7 +186,7 @@ Advanced dynamic callers can use `Hooks.Dispatch(ctx, eventType, input, options.
 with canonical host fields, excluding SDK-owned `type`, `source`, and `manifest`.
 Canonical fixture adapters use this path instead of duplicating generated mappings.
 The SDK owns the protocol envelope and fills permitted identity fields; callers
-still supply required occurrence and application data.
+supply required occurrence and application data.
 
 `capability.Event` is the event declaration used by `client.EventCapabilities`.
 `capability.Intercept(grants...)` returns `(capability.Event, error)` and requires
@@ -204,10 +202,10 @@ explicit grants; always handle its error. Available grants are:
   `capability.NextTurn` delivery timing.
 - `ElicitationForm` and `ElicitationURL`, independently granted.
 
-Construction is not event admission or execution authorization. Hooks still
+Construction is not event admission or execution authorization. Hooks
 checks event compatibility, host support, and per-call narrowing. Pass a checked
 narrower declaration's dereferenced `Capabilities` to `client.WithCapabilities`.
-The lower-level `capability.New` and event-specific wire constructors remain
+The lower-level `capability.New` and event-specific wire constructors are
 available for advanced declarations.
 
 `state.Initial(permission.None)` returns a pointer to state with no candidate.
@@ -235,10 +233,10 @@ error. `Nullable[T]` handles null itself and delegates non-null decoding to `T`.
 Generated model `UnmarshalJSON` methods and named `Parse*` entrypoints enforce the
 same generated **structural** rules: required members, JSON types, literals,
 closed enums, nested models, forbidden property combinations, and union matching.
-For example, decoding a candidate `{}` now fails because `value` is required;
-`null` and `{"value":null}` remain distinct valid candidate states. Open string
-enums and unknown tagged variants remain accepted, and supported extension
-members remain retained. `Parse*` additionally returns structured diagnostics
+For example, decoding a candidate `{}` fails because `value` is required;
+`null` and `{"value":null}` are distinct valid candidate states. Open string
+enums and unknown tagged variants are accepted, and supported extension
+members are retained. `Parse*` additionally returns structured diagnostics
 (including warnings) and the original raw JSON; direct decoding returns an error
 for structural failures without a diagnostics collection.
 
@@ -246,33 +244,30 @@ This is not complete canonical JSON Schema validation. The generated IR does not
 represent string length/pattern/format, numeric bounds, or all array/object
 keywords. Unknown members remain forward-compatible even where the canonical
 schema closes objects. Server-side canonical validation and request-dependent
-checks remain separate and unchanged. Do not substitute decoding for those checks.
+checks are separate. Do not substitute decoding for those checks.
 
-Migration: direct decoding now rejects structurally invalid models that older
-versions accepted. Named primitive models such as `ReverseDnsName` are defined Go
-types rather than aliases so they can own decoders; convert existing string
-variables explicitly (for example, `id := ahp.ReverseDnsName(existingID)`). The
-`registration.NewBackend` convenience constructor still accepts a string.
-`ContextCompactBeforeEvent` and `McpElicitationRequest` now alias target values,
-not pointers, so null cannot bypass the target decoder. Use `*Model` explicitly
-where your own API needs a pointer; Go itself still accepts null into pointer
-variables without invoking the pointed-to model's decoder.
+Named primitive models such as `ReverseDnsName` are defined Go types. Convert
+string variables explicitly, for example `id := ahp.ReverseDnsName(name)`.
+`registration.NewBackend` accepts a string. `ContextCompactBeforeEvent` and
+`McpElicitationRequest` are model values. Use `*Model` where your API needs a
+pointer; Go accepts JSON null into pointer variables without invoking the
+pointed-to model's decoder.
 
 Receiver-side `effect.Modify<Target>Merge(value)` and
 `effect.Modify<Target>Replace(value)` accept typed application values for all
 nine modification targets above. `effect.Return(value)` and
 `effect.InjectContextAppend(effect.Now, value)` (or `effect.NextTurn`) likewise
 encode payloads and return `(*ahp.Effect, error)`; check errors before publishing
-a response. Simple effects retain `NewAllow`, `NewAsk`, `NewDeny`, `NewMessage`,
+a response. Simple effects include `NewAllow`, `NewAsk`, `NewDeny`, `NewMessage`,
 `NewFlowStop`, and `NewFlowContinue`. Raw `NewModify`, `NewReturn`, and
-`NewInjectAppend` remain advanced wire helpers. These constructors neither grant
+`NewInjectAppend` are advanced wire helpers. These constructors neither grant
 capabilities nor establish that a payload satisfies the host application's schema.
 
 Generated content-source companions such as `ItemsSources`, `InstructionsSource`,
 and `SummarySource` bind owned `*content.Source` values to their descriptor slots
 without serializing readers or reading at construction. Sources supplement, not
 replace, canonical descriptors. Explicit host content authorization, disclosure
-policy, size limits, and source ownership rules still apply.
+policy, size limits, and source ownership rules apply.
 
 ### Current composition coverage
 
@@ -303,7 +298,7 @@ is checked before body resolution. URL acceptance is consent, not evidence of
 completion. AHP mode support is independent of effect support: `return`, `deny`,
 and result `modify` require the matching explicit `capabilities.elicitation.form`
 or `.url` grant. An absent mode or empty AHP elicitation object grants nothing;
-MCP's legacy empty-object form fallback does not apply. Passive delivery and
+MCP's empty-object form fallback does not apply. Passive delivery and
 informational `message` effects do not decide or alter the interaction and do not
 require this decision-mode grant. Application schemas for ordinary tools remain
 the host's concern.
@@ -314,7 +309,7 @@ the host's concern.
 and capabilities callbacks. Mount it in an application-owned mux and use normal
 HTTP authentication middleware. `server.ServeStdio` adapts owned input/output
 streams to the **same handler**; it is not a second protocol engine or backend
-registry. The application still owns listener startup, admission policy, and
+registry. The application owns listener startup, admission policy, and
 shutdown. Callback errors are redacted; notifications never receive JSON-RPC
 replies.
 
@@ -331,11 +326,11 @@ resolution is built in; missing secrets and unsupported configured mechanisms
 fail closed. An absent binding starts anonymously; an explicitly supplied provider
 may authorize recovery from an actual challenge according to host trust policy.
 
-Event and upload bindings remain independent: uploads never inherit event
+Event and upload bindings are independent: uploads never inherit event
 credentials. Authenticated interceptor delivery permits one challenge retry with
 the same request identity/body and remaining context budget. Notifications and
-uploads are not replayed. Redirects are never followed. Existing separately scoped
-`auth` transports and `EventTransportResolver` remain advanced compatibility paths;
+uploads are not replayed. Redirects are never followed. Separately scoped
+`auth` transports and `EventTransportResolver` support custom transport configuration;
 deployment-specific TLS/workload mechanisms stay transport-owned. Borrowed HTTP
 clients are never closed.
 
@@ -362,7 +357,7 @@ on the associated content item, which needs no body reference. See the
 [standalone file example](examples/attachments/main.go).
 
 The attachment is the **sole byte owner**. Selection uploads borrow its immutable
-buffer; successful results retain the exact same owner, not a copied byte cache.
+buffer; successful results retain the same owner.
 Lazy factories run at most once on actual body demand. Metadata-only/no-match
 delivery does not open them. `MaxContentBytes` bounds materialization and live
 attachment accounting; per-receiver upload limits are enforced separately.
@@ -378,31 +373,19 @@ once, including when unopened, and waits for active opening to finish. Admission
 failure, cancellation and timeout retire invocation-owned resources.
 
 An attachment may serve multiple slots and receivers in one invocation, but
-cannot be reused across invocations. There is no session archive, content store,
-staging API or reference-to-bytes registry on the host. The optional legacy
-`ContentOptions.Resolver` is only an inbound adapter: a supplied external reference
-becomes one lazy attachment at its canonical slot. It is not used for SDK-created
-references, and is not required by the owned API.
+cannot be reused across invocations. The optional `ContentOptions.Resolver`
+converts a supplied external reference into a lazy attachment at its canonical
+slot. Direct attachment bindings do not require a resolver.
 
-Text/JSON modifications replace a slot's effective attachment owner. Transactional
-composition copies only slot indexes, shares immutable owners, and discards rejected
-or obsolete owners; it does not stage another byte store. Returned effective
-content is read from these owners. No binary editing effects were added, and
-existing explicit target bindings and text/JSON constraints still apply. MCP
-elicitation snapshots retain the parsed original form contract, not a serialized
-copy of the attachment.
+Text/JSON modifications replace a slot's effective attachment owner and require
+explicit target bindings where applicable. Binary editing is not supported. MCP
+elicitation snapshots retain the parsed original form contract for validating
+the corresponding result boundary.
 
-**Lifecycle migration:** successful `NewSource`/`NewContentSource` bindings now
-remain owned by the returned result instead of being retired at invocation return.
-Existing callers must close results, including metadata-only results. `Source.Close`
-now disposes the owner and its cached bytes (equivalent to `Retire`), rather than
-only closing the underlying reader. Internal prepared byte maps, generated
-host-only references, and detached result body snapshots were removed.
-`Result.EffectiveValues` and `Composition.EffectiveValues` were removed: use
-`EffectiveValue(target)` for on-demand encoding of already available target values.
-These accessors do not open unread sources; use `ReadContent` to demand a body first.
-Public constructor and resolver signatures remain; receiver storage and wire
-reference semantics are unchanged. Call `Close` on a source that is never submitted.
+`Result.EffectiveValue(target)` and `Composition.EffectiveValue(target)` encode
+available target values on demand. They do not open unread sources; use
+`Result.ReadContent` to demand a body first. Call `Source.Close` to dispose a
+source that is never submitted.
 
 On the receiver, upload parsing verifies declared size and digest only at
 successful EOF. Early close or a failed read cannot yield a verified receipt.
@@ -415,7 +398,7 @@ not provide a content store or infer publication from verification.
 to explicitly construct the ref-only `ContentReference` carried by events. Body-selected
 items do not carry outer size or digest metadata; metadata-only items and gaps may
 disclose it. Resolve references within authenticated storage scope, not by trusting
-event-provided lengths or hashes. Upload framing and receipt verification still
+event-provided lengths or hashes. Upload framing and receipt verification
 check the exact bytes sent.
 
 ## Development
@@ -453,32 +436,28 @@ Apache-2.0
 
 ### Typed composed payloads
 
-Composed MCP transport payloads are ordinary typed models, not raw JSON arms.
+Composed MCP transport payloads are typed models.
 For example, `ExecutionEventMcpConnection.HTTP` contains
 `Optional[ExecutionEventMcpConnectionHTTP]`; its `URL` and `Gaps` fields expose
 strings and typed gap records. `Sse`, `Stdio`, and `CustomTransport` similarly
 expose their schema-declared location fields. `ModelVisibleItem` exposes typed
 content variants with the required `Role` field.
 
-Migration: replace raw JSON construction for these payloads with typed fields.
-Presence predicates such as “URL or gaps” remain checked by the existing
-structural decoder; optional Go fields are not permission to omit every
-alternative. Genuine application JSON, unknown variants, and extension values
-remain raw and retain their existing round-trip behavior.
+The structural decoder checks presence predicates such as “URL or gaps”; optional
+Go fields are not permission to omit every alternative. Genuine application JSON, unknown variants, and extension values
+use raw JSON for round-trip preservation.
 
 ### Go capability queries
 
 Go exposes `req.Params.Capabilities.Supports(ahp.EffectDeny)` and
 `capabilities.Supports(ahp.EffectName("vendor.custom"))`. The generated
 `EffectNameDeny`, `EffectNameModify`, and the other `EffectName*` constants
-identify effect families; `EffectDeny` aliases `EffectNameDeny`. This avoids
-collisions with existing payload types such as `EffectModify`. Queries inspect typed fields
-without serialization and accept the known and custom string representations.
+identify effect families; `EffectDeny` aliases `EffectNameDeny`. Queries inspect
+typed fields without serialization and accept the known and custom string representations.
 Capability grant builders use the same family membership query for deduplication.
 
 `Supports` reports only advertised family membership: it does not authorize
 execution or imply a target, operation, delivery mode, or per-call grant. A nested
 modify grant without the `modify` family returns false; a `modify` family alone
-does not grant any modification operation. Continue to use the existing grant
-builders and host/request validation for operation constraints. This convenience
-API is currently Go-only; no new operation-query API is introduced.
+does not grant any modification operation. Use grant builders and host/request
+validation for operation constraints.
