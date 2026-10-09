@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/agenthooksprotocol/go-sdk/compare/v0.1.0...v0.1.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* expose semantic typed models with structural decoding ([#9](https://github.com/agenthooksprotocol/go-sdk/issues/9)) ([89c0edc](https://github.com/agenthooksprotocol/go-sdk/commit/89c0edccdc7280a3a488f09d2e2f50e966d95488))
+
 ## 0.1.0 (2026-10-07)
 
 
