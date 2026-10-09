@@ -93,7 +93,7 @@ func TestPublicElicitationModeAdmission(t *testing.T) {
 					} else {
 						request, bodies := elicitationFixture("request", mode, original)
 						request["source"] = c.opts.Source
-						snapshot, snapshotErr := prepareElicitation(request, nil, bodies)
+						snapshot, snapshotErr := prepareElicitation(request, nil, elicitationOwners(request, bodies))
 						if snapshotErr != nil {
 							t.Fatal(snapshotErr)
 						}

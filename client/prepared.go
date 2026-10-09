@@ -11,13 +11,15 @@ import (
 	"mime"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 )
 
-// preparedBoundary is occurrence-owned. Staging clones its indexes; backing byte
-// slices are immutable and never exposed to callers or application resolvers.
+// preparedBoundary indexes occurrence-owned attachments. Edit transactions clone
+// indexes only; byte storage lives exclusively inside the referenced owners.
 type preparedBoundary struct {
 	sources  map[string]*ContentSource
-	bodies   map[string][]byte
+	owned    map[*ContentSource]bool
 	slots    map[string][]string
 	limit    int64
 	snapshot *ElicitationRequest
@@ -27,7 +29,7 @@ type preparedBoundary struct {
 type preparedContextKey struct{}
 
 func (p *preparedBoundary) clone() *preparedBoundary {
-	q := &preparedBoundary{sources: p.sources, bodies: map[string][]byte{}, slots: map[string][]string{}, limit: p.limit, snapshot: p.snapshot, bindings: map[string]ModificationTarget{}, absent: map[string]bool{}}
+	q := &preparedBoundary{sources: map[string]*ContentSource{}, owned: p.owned, slots: map[string][]string{}, limit: p.limit, snapshot: p.snapshot, bindings: map[string]ModificationTarget{}, absent: map[string]bool{}}
 	for k, v := range p.absent {
 		q.absent[k] = v
 	}
@@ -37,8 +39,8 @@ func (p *preparedBoundary) clone() *preparedBoundary {
 	for k, v := range p.slots {
 		q.slots[k] = append([]string(nil), v...)
 	}
-	for k, v := range p.bodies {
-		q.bodies[k] = v
+	for k, v := range p.sources {
+		q.sources[k] = v
 	}
 	return q
 }
@@ -74,8 +76,18 @@ func preparedItemPaths(event map[string]any, target string) ([]string, error) {
 	}
 	return nil, errors.New("ambiguous native target requires WithModificationTarget")
 }
-func (c *Hooks) prepareBoundary(ctx context.Context, event, caps map[string]any, cfg interceptConfig) (*preparedBoundary, error) {
-	p := &preparedBoundary{sources: cfg.sources, bodies: map[string][]byte{}, slots: map[string][]string{}, limit: c.opts.MaxContentBytes, bindings: map[string]ModificationTarget{}, absent: map[string]bool{}}
+func (c *Hooks) prepareBoundary(ctx context.Context, event, caps map[string]any, cfg interceptConfig) (_ *preparedBoundary, err error) {
+	p := &preparedBoundary{sources: map[string]*ContentSource{}, owned: map[*ContentSource]bool{}, slots: map[string][]string{}, limit: c.opts.MaxContentBytes, bindings: map[string]ModificationTarget{}, absent: map[string]bool{}}
+	defer func() {
+		if err != nil {
+			for source := range p.owned {
+				_ = source.Retire()
+			}
+		}
+	}()
+	for path, source := range cfg.sources {
+		p.sources[path] = source
+	}
 	if p.limit == 0 {
 		p.limit = 4 << 20
 	}
@@ -84,6 +96,41 @@ func (c *Hooks) prepareBoundary(ctx context.Context, event, caps map[string]any,
 	}
 	if p.limit < 0 {
 		return nil, errors.New("invalid prepared byte limit")
+	}
+	// Resolve references through lazy owners, never through a reference-byte cache.
+	// Capture only the inbound adapter and reference: results may outlive Hooks.
+	resolver := c.opts.Content.Resolver
+	var index func(any, string)
+	index = func(value any, path string) {
+		switch v := value.(type) {
+		case map[string]any:
+			bare := event["type"] == "file.changed" && fileChangeReferencePath(path)
+			if contentItemPath(path) || bare {
+				ref := compositionString(sdkObj(v["body"])["ref"])
+				if bare {
+					ref = compositionString(v["ref"])
+				}
+				if ref != "" && p.sources[path] == nil && resolver != nil {
+					owner := ownedcontent.NewLazyAttachment(func(ctx context.Context) (io.ReadCloser, error) {
+						return resolver(ctx, ref)
+					}, nil)
+					p.sources[path] = owner
+					p.owned[owner] = true
+				}
+				return
+			}
+			for key, child := range v {
+				index(child, path+"/"+strings.ReplaceAll(strings.ReplaceAll(key, "~", "~0"), "/", "~1"))
+			}
+		case []any:
+			for i, child := range v {
+				index(child, fmt.Sprintf("%s/%d", path, i))
+			}
+		}
+	}
+	index(event, "")
+	if err := p.bound(); err != nil {
+		return nil, err
 	}
 	for target, binding := range cfg.targets {
 		grant := sdkObj(sdkObj(caps["modify"])[target])
@@ -148,7 +195,7 @@ func (c *Hooks) prepareBoundary(ctx context.Context, event, caps map[string]any,
 				}
 				continue
 			}
-			if err := p.resolve(ctx, c, item); err != nil {
+			if err := p.resolve(ctx, c, path, item); err != nil {
 				return nil, err
 			}
 		}
@@ -161,23 +208,26 @@ func (c *Hooks) prepareBoundary(ctx context.Context, event, caps map[string]any,
 		}
 		item := sdkObj(sdkObj(event["elicitation"])[field])
 		if item["selection"] == "body" {
-			if err := p.resolve(ctx, c, item); err != nil {
+			if err := p.resolve(ctx, c, "/elicitation/"+field, item); err != nil {
 				return nil, err
 			}
 		}
-		snapshot, err := prepareElicitation(event, cfg.elicitation, p.bodies)
+		snapshot, err := prepareElicitation(event, cfg.elicitation, p.sources)
 		if err != nil {
 			return nil, err
 		}
 		p.snapshot = snapshot
-		if compositionContains(caps["effects"], "return") && (snapshot == nil || snapshot.request == "") && cfg.sources["/elicitation/request"] == nil {
+		if compositionContains(caps["effects"], "return") && (snapshot == nil || !snapshot.requestValid) && cfg.sources["/elicitation/request"] == nil {
 			return nil, errors.New("elicitation answers require an original request body")
 		}
 	}
 
+	if err := p.bound(); err != nil {
+		return nil, err
+	}
 	return p, nil
 }
-func (p *preparedBoundary) resolve(ctx context.Context, c *Hooks, item map[string]any) error {
+func (p *preparedBoundary) resolve(ctx context.Context, c *Hooks, path string, item map[string]any) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -189,38 +239,24 @@ func (p *preparedBoundary) resolve(ctx context.Context, c *Hooks, item map[strin
 	if ref == "" || len(body) != 1 || item["size"] != nil || item["sha256"] != nil {
 		return errors.New("modification requires an available content body")
 	}
-	raw, ok := p.bodies[ref]
-	if !ok {
-		if c.opts.Content.Resolver == nil {
-			return errors.New("modification requires a content resolver")
-		}
-		reader, err := c.opts.Content.Resolver(ctx, ref)
-		if err != nil {
-			return err
-		}
-		if reader == nil {
-			return errors.New("content resolver returned no reader")
-		}
-		raw, err = readOwnedContent(ctx, reader, p.limit)
-		if err != nil {
-			return err
-		}
-
-		if int64(len(raw)) > p.limit {
-			return errors.New("prepared content exceeds byte limit")
-		}
+	raw, err := ownedcontent.Borrow(p.sources[path], ctx, p.limit)
+	if err != nil {
+		return err
 	}
 	if _, err := preparedDecode(item, raw); err != nil {
 		return err
-	}
-	if !ok {
-		p.bodies[ref] = bytes.Clone(raw)
 	}
 	return p.bound()
 }
 func (p *preparedBoundary) bound() error {
 	var total int64
-	for _, raw := range p.bodies {
+	seen := map[*ContentSource]bool{}
+	for _, source := range p.sources {
+		if seen[source] {
+			continue
+		}
+		seen[source] = true
+		raw, _ := ownedcontent.Available(source)
 		if int64(len(raw)) > p.limit-total {
 			return errors.New("prepared content exceeds occurrence byte limit")
 		}
@@ -255,6 +291,9 @@ func preparedDecode(item map[string]any, raw []byte) (any, error) {
 	return nil, errors.New("modifiable body requires a text or JSON descriptor")
 }
 func (p *preparedBoundary) values(event map[string]any) (map[string]any, error) {
+	if err := p.bound(); err != nil {
+		return nil, err
+	}
 	if err := p.materializeElicitation(event); err != nil {
 		return nil, err
 	}
@@ -279,16 +318,12 @@ targets:
 				vs = append(vs, nil)
 				continue
 			}
-			raw := p.bodies[compositionString(sdkObj(item["body"])["ref"])]
-			if item["body"] == nil && p.sources[path] != nil {
-				var available bool
-				raw, available = p.sources[path].Available()
-				if !available {
-					continue targets
-				}
-				if err := contentMatches(item, raw); err != nil {
-					return nil, err
-				}
+			raw, available := ownedcontent.Available(p.sources[path])
+			if !available {
+				continue targets
+			}
+			if err := contentMatches(item, raw); err != nil {
+				return nil, err
 			}
 			v, err := preparedDecode(item, raw)
 			if err != nil {
@@ -339,13 +374,12 @@ func (p *preparedBoundary) apply(event map[string]any, target string, value any)
 		if !preparedMedia(item) {
 			return errors.New("modified body requires a text or JSON descriptor")
 		}
-		oldRef := compositionString(sdkObj(item["body"])["ref"])
-		old := p.bodies[oldRef]
+		old, available := ownedcontent.Available(p.sources[path])
 		prev, err := preparedDecode(item, old)
-		if err != nil && oldRef != "" {
+		if err != nil && available {
 			return err
 		}
-		if oldRef != "" && compositionEqual(prev, values[i]) {
+		if available && compositionEqual(prev, values[i]) {
 			continue
 		}
 		var raw []byte
@@ -365,18 +399,15 @@ func (p *preparedBoundary) apply(event map[string]any, target string, value any)
 		if !utf8.Valid(raw) || int64(len(raw)) > p.limit {
 			return errors.New("modified body exceeds content constraints")
 		}
-		id, err := sdkID()
-		if err != nil {
-			return err
-		}
-		ref := "ahp-internal:" + id
-		item["body"] = map[string]any{"ref": ref}
+		delete(item, "body")
 		delete(item, "size")
 		delete(item, "sha256")
 		delete(p.absent, path)
-		item["selection"] = "body"
+		item["selection"] = "metadata"
 		delete(item, "gap")
-		p.bodies[ref] = bytes.Clone(raw)
+		owner := ownedcontent.NewOwned(raw)
+		p.sources[path] = owner
+		p.owned[owner] = true
 	}
 	p.prune(event)
 	return p.bound()
@@ -386,25 +417,18 @@ func (p *preparedBoundary) apply(event map[string]any, target string, value any)
 // schema used by reference-backed preparation. The canonical host event is not
 // changed, and no receiver reference is fabricated or published.
 func (p *preparedBoundary) sourceElicitation(event map[string]any, path string, raw []byte) (*ElicitationRequest, error) {
-	detached := contentClone(event).(map[string]any)
-	item := preparedAt(detached, path)
+	item := preparedAt(event, path)
 	if item == nil {
 		return nil, errors.New("elicitation content is absent")
 	}
 	if err := contentMatches(item, raw); err != nil {
 		return nil, err
 	}
-	ref := "ahp-internal:lazy-elicitation"
-	item["selection"] = "body"
-	item["body"] = map[string]any{"ref": ref}
-	delete(item, "size")
-	delete(item, "sha256")
-	delete(item, "gap")
 	original := p.snapshot
-	if event["type"] == "user.elicitation.request" && original != nil && original.request == "" {
+	if event["type"] == "user.elicitation.request" && original != nil && !original.requestValid {
 		original = nil
 	}
-	return prepareElicitation(detached, original, map[string][]byte{ref: raw})
+	return prepareElicitation(event, original, p.sources)
 }
 
 func (p *preparedBoundary) materializeElicitation(event map[string]any) error {
@@ -419,7 +443,7 @@ func (p *preparedBoundary) materializeElicitation(event map[string]any) error {
 	if item := preparedAt(event, path); item != nil && item["body"] != nil {
 		return nil
 	}
-	if raw, ok := p.sources[path].Available(); ok {
+	if raw, ok := ownedcontent.Available(p.sources[path]); ok {
 		snapshot, err := p.sourceElicitation(event, path, raw)
 		if err != nil {
 			return err

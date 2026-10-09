@@ -9,7 +9,7 @@ import (
 
 func TestElicitationContentTargetsAnswerOnly(t *testing.T) {
 	request, bodies := elicitationFixture("request", "form", `{"message":"choose","requestedSchema":{"type":"object","properties":{"x":{"type":"string"},"keep":{"type":"string"}},"required":["x"]}}`)
-	snapshot, err := prepareElicitation(request, nil, bodies)
+	snapshot, err := prepareElicitation(request, nil, elicitationOwners(request, bodies))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestElicitationContentTargetsAnswerOnly(t *testing.T) {
 			}
 			event := compositionObject(accepted.Event)
 			item := preparedAt(event, "/elicitation/result")
-			body, err := preparedDecode(item, accepted.prepared.bodies[compositionString(sdkObj(item["body"])["ref"])])
+			body, err := preparedDecode(item, preparedTestBytes(accepted.prepared, "/elicitation/result"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -49,7 +49,7 @@ func TestElicitationContentTargetsAnswerOnly(t *testing.T) {
 			if keep != (operation == "merge") {
 				t.Fatal("incorrect answer merge/replacement", answer)
 			}
-			if sdkObj(compositionObject(accepted.EffectiveValues["content"]))["x"] != "new" {
+			if sdkObj(compositionObject(compositionTestEffectiveValue(t, accepted, "content")))["x"] != "new" {
 				t.Fatal("effective content not answer fields")
 			}
 		})
@@ -101,5 +101,39 @@ func TestContentPreservesExplicitUnavailableGap(t *testing.T) {
 	original["reason"] = "mutated"
 	if gap["reason"] != "content permission denied" {
 		t.Fatal("explicit gap aliases caller")
+	}
+}
+
+func TestCompositionEffectiveValueKeepsSnapshotLocal(t *testing.T) {
+	event, bodies := elicitationFixture("request", "form", elicitationForm)
+	owners := elicitationOwners(event, bodies)
+	defer func() {
+		for _, owner := range owners {
+			_ = owner.Retire()
+		}
+	}()
+	item := preparedAt(event, "/elicitation/request")
+	item["selection"] = "metadata"
+	delete(item, "body")
+	snapshot, err := prepareElicitation(event, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &preparedBoundary{sources: owners, snapshot: snapshot, limit: 4 << 20}
+	c := &Composition{Event: sdkJSON(event), prepared: p}
+	done := make(chan bool, 16)
+	for i := 0; i < cap(done); i++ {
+		go func() {
+			_, err := c.EffectiveValue("missing")
+			done <- err != nil
+		}()
+	}
+	for i := 0; i < cap(done); i++ {
+		if !<-done {
+			t.Fatal("unavailable target became available")
+		}
+	}
+	if p.snapshot != snapshot || p.snapshot.requestValid {
+		t.Fatal("accessor mutated the shared elicitation snapshot")
 	}
 }

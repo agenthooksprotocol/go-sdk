@@ -1,162 +1,30 @@
 package content
 
 import (
-	"bytes"
 	"context"
-	"errors"
+	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 	"io"
-	"math"
-	"sync"
-	"sync/atomic"
 )
 
-// Source is an owned, single-occurrence readable body, not a wire reference.
-// Construction does not read it. Passing it to a boundary transfers ownership to
-// the SDK, including when the boundary fails or no receiver selects its body.
-// Close must unblock Read: cancellation may close the reader concurrently.
-// A source must not be reused across occurrences or read by its caller after transfer.
-type Source struct {
-	lifetime  sync.RWMutex
-	retired   bool
-	reader    io.ReadCloser
-	once      sync.Once
-	closeOnce sync.Once
-	claimed   atomic.Bool
-	closed    atomic.Bool
-	ready     atomic.Bool
-	raw       []byte
-	err       error
-	closeErr  error
-}
+// Source owns a single-invocation body. Binding transfers ownership to the SDK;
+// successful results retain the same owner and must be closed. Snapshot and
+// Available return defensive copies. A source cannot be reused across invocations.
+type Source = ownedcontent.Source
 
-// NewSource wraps a reader without consuming bytes or uploading anything.
-// Call Close if the source is never passed to a boundary.
-func NewSource(reader io.ReadCloser) *Source { return &Source{reader: reader} }
+// Attachment is the owned body used with existing generated source fields.
+// Content item metadata remains on the item, not on the attachment.
+type Attachment = Source
 
-// Close releases the owned reader exactly once, including unused sources.
-func (s *Source) Close() error {
-	if s == nil {
-		return nil
-	}
-	s.closeOnce.Do(func() {
-		s.closed.Store(true)
-		if s.reader != nil {
-			s.closeErr = s.reader.Close()
-		}
-	})
-	return s.closeErr
-}
+// NewSource takes ownership of reader without reading. Close must unblock Read.
+func NewSource(reader io.ReadCloser) *Source { return ownedcontent.NewSource(reader) }
 
-// Retire ends the occurrence after all receiver fan-out and result extraction.
-// Unlike Close, which preserves the snapshot for other receivers, Retire releases
-// both the cached bytes and the reader. Detached snapshots remain valid.
-// It also interrupts and joins an in-progress snapshot before releasing storage.
-func (s *Source) Retire() error {
-	if s == nil {
-		return nil
-	}
-	err := s.Close()
-	s.lifetime.Lock()
-	defer s.lifetime.Unlock()
-	s.retired = true
-	s.raw = nil
-	s.reader = nil
-	s.err = nil
-	return err
-}
+// NewAttachment copies data defensively into its immutable backing buffer.
+func NewAttachment(data []byte) *Attachment { return ownedcontent.NewAttachment(data) }
 
-type contentSourceReader struct{ *Source }
-
-func (s contentSourceReader) Read(p []byte) (int, error) { return s.reader.Read(p) }
-
-// Snapshot reads a bounded immutable snapshot once. SDK adapters call it only after
-// receiver selection and authorization. The returned bytes are detached from the cached snapshot.
-func (s *Source) Snapshot(ctx context.Context, limit int64) ([]byte, error) {
-	if s == nil {
-		return nil, errors.New("nil content source")
-	}
-	s.lifetime.RLock()
-	defer s.lifetime.RUnlock()
-	if s.retired {
-		return nil, errors.New("content source is retired")
-	}
-	if limit < 0 || limit == math.MaxInt64 {
-		_ = s.Close()
-		return nil, errors.New("invalid content byte limit")
-	}
-	s.once.Do(func() {
-		defer s.ready.Store(true)
-		if s.reader == nil || s.closed.Load() {
-			s.err = errors.New("content source is closed or has no reader")
-			return
-		}
-		if err := ctx.Err(); err != nil {
-			s.err = err
-			_ = s.Close()
-			return
-		}
-		s.raw, s.err = readOwnedContent(ctx, contentSourceReader{s}, limit)
-		if s.err == nil && int64(len(s.raw)) > limit {
-			s.raw = nil
-			s.err = errors.New("content exceeds byte limit")
-		}
-	})
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if s.err != nil {
-		return nil, s.err
-	}
-	if int64(len(s.raw)) > limit {
-		return nil, errors.New("content exceeds byte limit")
-	}
-	return bytes.Clone(s.raw), nil
-}
-
-// Available observes an immutable completed snapshot without starting a read.
-func (s *Source) Available() ([]byte, bool) {
-	if s == nil {
-		return nil, false
-	}
-	s.lifetime.RLock()
-	defer s.lifetime.RUnlock()
-	if s.retired || !s.ready.Load() || s.err != nil {
-		return nil, false
-	}
-	return bytes.Clone(s.raw), true
-}
-
-// Claim transfers this source to one SDK occurrence. Adapters must reject reuse.
-func (s *Source) Claim() bool {
-	if s == nil {
-		return false
-	}
-	s.lifetime.RLock()
-	defer s.lifetime.RUnlock()
-	return !s.retired && s.reader != nil && s.claimed.CompareAndSwap(false, true)
-}
-
-// readOwnedContent closes the SDK-owned reader exactly once on every exit.
-// Cancellation closes it concurrently with Read, so resolvers must return readers
-// whose Close unblocks Read. sync.Once also joins a cancellation-triggered Close
-// before its error is inspected; Close completes before this function returns.
-// Callers validate limit and reserve room for the one-byte overflow probe.
-func readOwnedContent(ctx context.Context, reader io.ReadCloser, limit int64) ([]byte, error) {
-	var once sync.Once
-	var closeErr error
-	closeReader := func() { once.Do(func() { closeErr = reader.Close() }) }
-	stop := context.AfterFunc(ctx, closeReader)
-	raw, err := io.ReadAll(io.LimitReader(reader, limit+1))
-	stop()
-	closeReader()
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-	if err != nil {
-		return nil, err
-	}
-	if closeErr != nil {
-		return nil, closeErr
-	}
-	return raw, nil
+// NewLazyAttachment opens at most once on actual demand. open must honor its
+// context and return a reader whose Close unblocks Read. cleanup, when non-nil,
+// runs exactly once even if open is never called, and after active opening ends.
+// Factories must not capture resources owned by Hooks: results can outlive it.
+func NewLazyAttachment(open func(context.Context) (io.ReadCloser, error), cleanup func() error) *Attachment {
+	return ownedcontent.NewLazyAttachment(open, cleanup)
 }

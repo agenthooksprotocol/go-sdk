@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"github.com/agenthooksprotocol/go-sdk/content"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -35,11 +36,8 @@ func TestPublicDispatchRetainedResultsAndSources(t *testing.T) {
 		if err != nil || len(result.Diagnostics) != 0 {
 			t.Fatalf("call %d: %v %+v", i, err, result)
 		}
-		if _, ok := source.Available(); ok {
-			t.Fatalf("call %d retained source snapshot", i)
-		}
-		if _, err := source.Snapshot(context.Background(), 64); err == nil {
-			t.Fatal("completed source not retired")
+		if result.attachments["/items/0"] != source {
+			t.Fatal("result replaced the attachment owner")
 		}
 		sources = append(sources, source)
 		results = append(results, result)
@@ -59,20 +57,42 @@ func TestPublicDispatchRetainedResultsAndSources(t *testing.T) {
 		if sources[i].Claim() {
 			t.Fatal("retained source reusable")
 		}
+		_ = result.Close()
+		if _, ok := sources[i].Available(); ok {
+			t.Fatal("closed result retained source bytes")
+		}
 	}
 }
 
-func TestPreparedResultOwnsReplacementBytes(t *testing.T) {
-	raw := []byte("replacement")
-	p := &preparedBoundary{bodies: map[string][]byte{"local": raw}}
-	event := map[string]any{"items": []any{contentTestItem(map[string]any{"ref": "local"})}}
-	result := &Result{content: preparedContent(event, p)}
-	raw[0] = 'X'
-	delete(p.bodies, "local")
+func TestPreparedResultRetainsReplacementOwner(t *testing.T) {
+	source := content.NewAttachment([]byte("replacement"))
+	p := &preparedBoundary{sources: map[string]*ContentSource{"/items/0": source}, slots: map[string][]string{"output": {"/items/0"}}}
+	event := map[string]any{"items": []any{contentTestItem(nil)}}
+	result := &Result{Event: sdkJSON(event)}
+	result.retainAttachments(contentSourceConfig(nil), context.Background(), p, 64)
+	delete(p.sources, "/items/0")
+	if result.attachments["/items/0"] != source {
+		t.Fatal("result created a second owner")
+	}
+	encoded, err := result.EffectiveValue("output")
+	if err != nil || string(encoded) != `"replacement"` {
+		t.Fatal(err, string(encoded))
+	}
+	encoded[0] = 'X'
+	againValue, err := result.EffectiveValue("output")
+	if err != nil || string(againValue) != `"replacement"` {
+		t.Fatal("effective value shared caller bytes", err)
+	}
 	got, ok := result.Content("/items/0")
 	if !ok || string(got) != "replacement" {
-		t.Fatalf("replacement aliased preparation: %q", got)
+		t.Fatal(string(got))
 	}
+	got[0] = 'X'
+	again, _ := result.Content("/items/0")
+	if string(again) != "replacement" {
+		t.Fatal("caller mutated owner")
+	}
+	_ = result.Close()
 }
 
 func TestPublicDispatchCancellationRetiresSource(t *testing.T) {

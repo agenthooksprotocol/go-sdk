@@ -26,7 +26,7 @@ func (c *Hooks) intercept(ctx context.Context, name string, input any, options .
 	return result, err
 }
 
-func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ...InterceptOption) (*Result, error) {
+func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ...InterceptOption) (out *Result, dispatchErr error) {
 	// Generated inputs expose named source slots without serializing streams.
 	if bound, ok := input.(interface {
 		AHPContentSources() map[string]*content.Source
@@ -39,8 +39,19 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 	}
 	cfg := contentSourceConfig(options)
 	admitted := false
+	var prepared *preparedBoundary
 	defer func() {
+		if out != nil && dispatchErr == nil {
+			out.retainAttachments(cfg, ctx, prepared, c.opts.MaxContentBytes)
+		}
 		cfg.closeSources()
+		if prepared != nil {
+			for source := range prepared.owned {
+				if !cfg.transferredSources[source] {
+					_ = source.Retire()
+				}
+			}
+		}
 		if admitted {
 			c.active.Done()
 		}
@@ -164,8 +175,15 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 	if err != nil {
 		return nil, err
 	}
-	prepared, err := c.prepareBoundary(ctx, event, caps, cfg)
+	prepared, err = c.prepareBoundary(ctx, event, caps, cfg)
 	if err != nil {
+		return nil, err
+	}
+	for _, source := range cfg.sources {
+		prepared.owned[source] = true
+	}
+	budget, _ := ctx.Value(contentSourceBudgetKey{}).(*contentSourceBudget)
+	if err := budget.reconcile(prepared.sources, prepared.limit); err != nil {
 		return nil, err
 	}
 	if interceptable {
@@ -235,9 +253,11 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 								e = callCtx.Err()
 							}
 							if e == nil {
+								e = budget.reconcile(accepted.prepared.sources, accepted.prepared.limit)
+							}
+							if e == nil {
 								prepared = accepted.prepared
 								ctx = context.WithValue(ctx, preparedContextKey{}, prepared)
-								result.EffectiveValues = accepted.EffectiveValues
 								state, _ = sdkMap(accepted.State)
 								statePresent = true
 								if len(accepted.Event) > 0 {
@@ -245,6 +265,7 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 								}
 								result.Response.Effects = append(result.Response.Effects, accepted.Response.Effects...)
 							}
+							prepared.releaseUnused(budget)
 						}
 					}
 					done()
@@ -271,7 +292,6 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 	if ctx.Err() != nil {
 		result.Interrupted = true
 	}
-	result.content = preparedContent(event, prepared)
 	result.Snapshot = prepared.snapshot
 	result.Event = sdkJSON(event)
 	if tool := sdkObj(event["tool"]); tool != nil {
@@ -282,19 +302,12 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 	}
 	result.Permission = result.State.Permission
 	result.Diagnostics = append([]DeliveryError(nil), result.Errors...)
-	if result.EffectiveValues == nil {
-		values, e := prepared.values(event)
-		if e != nil {
-			return result, e
-		}
-		result.EffectiveValues = map[string]json.RawMessage{}
-		for k, v := range values {
-			result.EffectiveValues[k] = sdkJSON(v)
-		}
+	if _, err := prepared.values(event); err != nil {
+		return result, err
 	}
+
 	result.Snapshot = prepared.snapshot
 	result.Observations = c.scheduleObservations(ctx, event, pending, prepared)
-	result.content = preparedContent(event, prepared)
 	// Observer preparation can make original request bytes available, but a
 	// failed observer must never reopen settlement or publish an invalid snapshot.
 	if prepared.materializeElicitation(event) == nil {

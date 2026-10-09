@@ -282,7 +282,7 @@ Invalid capability grants and missing target bindings fail before delivery.
 
 Descriptor-backed modifications use verified, occurrence-owned bytes. Each
 receiver gets its own uploaded reference; logical item identity is preserved.
-`Result.EffectiveValues` exposes accepted target values, and
+`Result.EffectiveValue(target)` encodes available accepted target values on demand, and
 `Result.Content("/canonical/item/path")` returns detached effective body bytes.
 Compaction instructions and summaries have fixed canonical bindings. When
 instructions are absent, `WithCompactionInstructions` supplies a host-owned
@@ -350,22 +350,59 @@ modifications or validating an elicitation exchange can require verified host
 bodies regardless of receiver selection. Upload credentials are never inferred
 from event credentials.
 
-For an unread stream, `content.NewSource(io.ReadCloser)` (also
-`client.NewContentSource`) transfers ownership when bound to a boundary. Construction
-performs no reads. Only an authorized selected body snapshots bytes, within the
-configured limit, computes actual size/SHA-256 and uploads independently to each
-receiver before publishing its event. Fan-out reuses the immutable snapshot. Unused,
-failed and cancelled sources are closed, and a source cannot be reused across
-occurrences. Completion, failure, cancellation and timeout retire the source,
-releasing its reader and cached snapshot after receiver fan-out joins. Keeping a
-source or result does not keep the occurrence preparation store alive; results
-own detached effective content. `Source.Close` closes the reader but preserves a
-snapshot for fan-out; adapters use `Source.Retire` when the occurrence ends.
-Reader `Close` must unblock a pending `Read`. Original source snapshots
-and rewritten prepared bodies each have an aggregate `MaxContentBytes` bound;
-together they can retain twice that limit, plus bounded delivery copies. Advanced callers may
-bind canonical slots with `client.WithContentSource`; wire references/resolvers
-remain available for already prepared content.
+### Owned attachments
+
+Use `content.NewAttachment(data)` for a defensive copy of a byte slice, or
+`content.NewLazyAttachment(open, cleanup)` for a context-aware reader factory.
+`content.NewSource(reader)` (also `client.NewContentSource`) takes ownership of
+an already opened reader. All three construct the same owned body type. Bind it
+directly through generated fields such as `event.ToolBeforeInput.ItemsSources`,
+or use `client.WithContentSource` for an advanced canonical slot. Metadata stays
+on the associated content item, which needs no body reference. See the
+[standalone file example](examples/attachments/main.go).
+
+The attachment is the **sole byte owner**. Selection uploads borrow its immutable
+buffer; successful results retain the exact same owner, not a copied byte cache.
+Lazy factories run at most once on actual body demand. Metadata-only/no-match
+delivery does not open them. `MaxContentBytes` bounds materialization and live
+attachment accounting; per-receiver upload limits are enforced separately.
+Public reads return defensive copies, never shared mutable backing bytes.
+
+Always `defer result.Close()` when an invocation returns a non-nil result.
+`result.ReadContent(ctx, path)` evaluates unread content and works after invocation
+completion and `Hooks.Close`. `result.Content(path)` reads only an already
+materialized owner. Closing results disposes unopened sources and interrupts
+active reads. Factories must honor their context and must not depend on resources
+owned by Hooks; reader `Close` must unblock `Read`. Optional factory cleanup runs
+once, including when unopened, and waits for active opening to finish. Admission
+failure, cancellation and timeout retire invocation-owned resources.
+
+An attachment may serve multiple slots and receivers in one invocation, but
+cannot be reused across invocations. There is no session archive, content store,
+staging API or reference-to-bytes registry on the host. The optional legacy
+`ContentOptions.Resolver` is only an inbound adapter: a supplied external reference
+becomes one lazy attachment at its canonical slot. It is not used for SDK-created
+references, and is not required by the owned API.
+
+Text/JSON modifications replace a slot's effective attachment owner. Transactional
+composition copies only slot indexes, shares immutable owners, and discards rejected
+or obsolete owners; it does not stage another byte store. Returned effective
+content is read from these owners. No binary editing effects were added, and
+existing explicit target bindings and text/JSON constraints still apply. MCP
+elicitation snapshots retain the parsed original form contract, not a serialized
+copy of the attachment.
+
+**Lifecycle migration:** successful `NewSource`/`NewContentSource` bindings now
+remain owned by the returned result instead of being retired at invocation return.
+Existing callers must close results, including metadata-only results. `Source.Close`
+now disposes the owner and its cached bytes (equivalent to `Retire`), rather than
+only closing the underlying reader. Internal prepared byte maps, generated
+host-only references, and detached result body snapshots were removed.
+`Result.EffectiveValues` and `Composition.EffectiveValues` were removed: use
+`EffectiveValue(target)` for on-demand encoding of already available target values.
+These accessors do not open unread sources; use `ReadContent` to demand a body first.
+Public constructor and resolver signatures remain; receiver storage and wire
+reference semantics are unchanged. Call `Close` on a source that is never submitted.
 
 On the receiver, upload parsing verifies declared size and digest only at
 successful EOF. Early close or a failed read cannot yield a verified receipt.

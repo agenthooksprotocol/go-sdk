@@ -132,7 +132,7 @@ func TestContentSourceDeferredModificationBaseline(t *testing.T) {
 	ctx, event, cfg := sourceTestBinding(t, source)
 	defer cfg.closeSources()
 	event["type"] = "model.response.complete"
-	p := &preparedBoundary{sources: cfg.sources, slots: map[string][]string{"content": {"/items/0"}}, bodies: map[string][]byte{}, absent: map[string]bool{}}
+	p := &preparedBoundary{sources: cfg.sources, limit: 128, slots: map[string][]string{"content": {"/items/0"}}, absent: map[string]bool{}}
 	values, err := p.values(event)
 	if err != nil || len(values) != 0 || reader.reads.Load() != 0 {
 		t.Fatalf("eager values: %#v %v", values, err)
@@ -198,9 +198,15 @@ func TestContentSourceFailureAndUnusedBoundaryClose(t *testing.T) {
 			if mode == "closed" {
 				_ = c.Close()
 			}
-			_, err := c.Dispatch(context.Background(), "tool.before", input, WithContentSource("/items/0", source))
+			result, err := c.Dispatch(context.Background(), "tool.before", input, WithContentSource("/items/0", source))
 			if (mode == "invalid" || mode == "closed") && err == nil {
 				t.Fatal("invalid call accepted")
+			}
+			if result != nil {
+				if reader.reads.Load() != 0 || reader.closes.Load() != 0 {
+					t.Fatal("successful result did not retain unread owner")
+				}
+				_ = result.Close()
 			}
 			if _, snapshotErr := source.Snapshot(context.Background(), 128); snapshotErr == nil {
 				t.Fatal("terminal boundary did not retire source")
@@ -230,7 +236,7 @@ func TestContentSourceElicitationLazyPinnedContract(t *testing.T) {
 	if err != nil || reader.reads.Load() != 0 {
 		t.Fatalf("eager preparation: %v", err)
 	}
-	if _, err = p.values(event); err != nil || p.snapshot.request != "" {
+	if _, err = p.values(event); err != nil || p.snapshot.requestValid {
 		t.Fatalf("metadata preparation: %v", err)
 	}
 	if _, err = source.Snapshot(ctx, 4096); err != nil {

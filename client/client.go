@@ -82,13 +82,19 @@ func (e DeliveryError) Error() string {
 func (e DeliveryError) Unwrap() error { return e.Err }
 
 type Result struct {
-	content map[string][]byte
-	// Snapshot retains the original MCP request, never an effective result.
-	Snapshot        *ElicitationRequest
-	EffectiveValues map[string]json.RawMessage
-	Event           json.RawMessage
-	EffectiveInput  json.RawMessage
-	State           ahp.InterceptRequestParamsState
+	effectiveTargets  map[string][]string
+	effectiveBindings map[string]ModificationTarget
+	contentMu         sync.Mutex
+	contentClosed     bool
+	attachments       map[string]*ContentSource
+	attachmentItems   map[string]map[string]any
+	attachmentBudget  *contentSourceBudget
+	attachmentLimit   int64
+	// Snapshot retains the original MCP semantic contract, not body bytes.
+	Snapshot       *ElicitationRequest
+	Event          json.RawMessage
+	EffectiveInput json.RawMessage
+	State          ahp.InterceptRequestParamsState
 	// Permission is the settled canonical permission, not proof of execution.
 	// None and Ask are not grants; Interrupted always gates execution.
 	Permission ahp.InterceptRequestParamsStatePermission

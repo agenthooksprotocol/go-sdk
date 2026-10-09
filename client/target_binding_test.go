@@ -111,9 +111,11 @@ func TestTargetBindingMappings(t *testing.T) {
 				effects := string(sdkJSON([]any{map[string]any{"type": "modify", "target": tc.target, "operation": "replace", "value": replacement}}))
 				out := targetTestCompose(t, event, tc.target, p, effects)
 				path := tc.path + "/0"
-				changed := preparedAt(compositionObject(out.Event), path)
-				ref := compositionString(sdkObj(changed["body"])["ref"])
-				if !compositionEqual(compositionObject(out.prepared.bodies[ref]), map[string]any{"changed": true}) {
+				if item := preparedAt(compositionObject(out.Event), path); item["body"] != nil || item["selection"] != "metadata" {
+					t.Fatal("edited host descriptor contains transport body", item)
+				}
+
+				if !compositionEqual(compositionObject(preparedTestBytes(out.prepared, path)), map[string]any{"changed": true}) {
 					t.Fatalf("wrong canonical body changed: %s", path)
 				}
 			}
@@ -134,7 +136,7 @@ func TestTargetScalarMergeAndExactUntouchedBytes(t *testing.T) {
 	p := targetTestPrepare(t, event, "output", bodies, ModificationTarget{Path: "/items/0"})
 	for _, effects := range []string{`[]`, `[{"type":"modify","target":"output","operation":"replace","value":{"keep":1,"nested":{"old":true}}}]`} {
 		out := targetTestCompose(t, event, "output", p, effects)
-		if !reflect.DeepEqual(out.prepared.bodies, p.bodies) {
+		if !reflect.DeepEqual(out.prepared.sources, p.sources) {
 			t.Fatal("unchanged semantic value rewrote exact JSON bytes")
 		}
 		if !compositionEqual(compositionObject(out.Event), compositionObject(sdkJSON(event))) {
@@ -143,25 +145,25 @@ func TestTargetScalarMergeAndExactUntouchedBytes(t *testing.T) {
 	}
 	out := targetTestCompose(t, event, "output", p, `[{"type":"modify","target":"output","operation":"merge","value":{"nested":{"new":2},"literal":null}}]`)
 	expected := compositionObject([]byte(`{"keep":1,"nested":{"new":2},"literal":null}`))
-	if !compositionEqual(compositionObject(out.EffectiveValues["output"]), expected) {
-		t.Fatalf("merge used descriptor: %s", out.EffectiveValues["output"])
+	if !compositionEqual(compositionObject(compositionTestEffectiveValue(t, out, "output")), expected) {
+		t.Fatalf("merge used descriptor: %s", compositionTestEffectiveValue(t, out, "output"))
 	}
 	changed := preparedAt(compositionObject(out.Event), "/items/0")
-	ref := compositionString(sdkObj(changed["body"])["ref"])
-	if !compositionEqual(compositionObject(out.prepared.bodies[ref]), expected) {
+
+	if !compositionEqual(compositionObject(preparedTestBytes(out.prepared, "/items/0")), expected) {
 		t.Fatal("effective body not updated")
 	}
 	if changed["id"] != item["id"] || changed["mediaType"] != item["mediaType"] {
 		t.Fatal("host descriptor identity lost")
 	}
-	if string(p.bodies["urn:test:one"]) != original {
+	if string(preparedTestBytes(p, "/items/0")) != original {
 		t.Fatal("caller prepared store mutated")
 	}
 	text, textBodies := targetTestItem("text", "text/plain", "before")
 	textEvent := targetTestEvent(t, []any{text})
 	textP := targetTestPrepare(t, textEvent, "output", textBodies, ModificationTarget{Path: "/items/0"})
 	textOut := targetTestCompose(t, textEvent, "output", textP, `[{"type":"modify","target":"output","operation":"replace","value":"after"}]`)
-	if string(textOut.EffectiveValues["output"]) != `"after"` {
+	if string(compositionTestEffectiveValue(t, textOut, "output")) != `"after"` {
 		t.Fatal("scalar string replacement failed")
 	}
 }
@@ -177,12 +179,11 @@ func TestTargetCollectionAddRemoveAndRollback(t *testing.T) {
 	if len(items) != 2 || sdkObj(items[0])["id"] != "one" || sdkObj(items[1])["id"] != "added" {
 		t.Fatalf("wrong host templates: %#v", items)
 	}
-	addedRef := compositionString(sdkObj(sdkObj(items[1])["body"])["ref"])
-	if string(out.prepared.bodies[addedRef]) != "new" {
+	if string(preparedTestBytes(out.prepared, "/items/1")) != "new" {
 		t.Fatal("template body reused instead of new bytes")
 	}
 	removed := targetTestCompose(t, gotEvent, "output", out.prepared, `[{"type":"modify","target":"output","operation":"replace","value":[]}]`)
-	if len(sdkArray(compositionObject(removed.Event)["items"])) != 0 || len(removed.prepared.bodies) != 0 || string(removed.EffectiveValues["output"]) != "[]" {
+	if len(sdkArray(compositionObject(removed.Event)["items"])) != 0 || len(removed.prepared.sources) != 0 || string(compositionTestEffectiveValue(t, removed, "output")) != "[]" {
 		t.Fatal("empty replacement failed to remove descriptors and bodies")
 	}
 	for _, tc := range []struct {
@@ -201,13 +202,13 @@ func TestTargetCollectionAddRemoveAndRollback(t *testing.T) {
 			}
 			prepared := targetTestPrepare(t, event, "output", bodies, b)
 			beforeEvent := string(sdkJSON(event))
-			beforeBodies := string(sdkJSON(prepared.bodies))
+			beforeSources := prepared.clone().sources
 			beforeSlots := string(sdkJSON(prepared.slots))
 			result, err := composePrepared(targetTestRequest(t, event, "output"), compositionTestResponse(t, tc.effects), prepared)
 			if err == nil || result != nil {
 				t.Fatal("invalid modification published")
 			}
-			if string(sdkJSON(event)) != beforeEvent || string(sdkJSON(prepared.bodies)) != beforeBodies || string(sdkJSON(prepared.slots)) != beforeSlots {
+			if string(sdkJSON(event)) != beforeEvent || !reflect.DeepEqual(prepared.sources, beforeSources) || string(sdkJSON(prepared.slots)) != beforeSlots {
 				t.Fatal("failed response mutated original event/store")
 			}
 		})
@@ -251,7 +252,7 @@ func TestTargetParamsAndWorkspaceMappings(t *testing.T) {
 	if err := p.apply(event, "request", replacement); err != nil {
 		t.Fatal(err)
 	}
-	if !compositionEqual(event["params"], replacement) || len(p.bodies) != 0 {
+	if !compositionEqual(event["params"], replacement) || len(p.sources) != 0 {
 		t.Fatal("params replaced as descriptor or retained omitted keys")
 	}
 	if err := p.apply(event, "request", []any{}); err == nil {
@@ -322,7 +323,7 @@ func TestTargetParamsCompositionMergeAndReplace(t *testing.T) {
 			if !compositionEqual(sdkObj(compositionObject(out.Event)["params"]), compositionObject([]byte(tc.want))) {
 				t.Fatalf("params semantics: %s", out.Event)
 			}
-			if len(out.prepared.bodies) != 0 {
+			if len(out.prepared.sources) != 0 {
 				t.Fatal("params modification invented content bodies")
 			}
 		})
@@ -330,5 +331,67 @@ func TestTargetParamsCompositionMergeAndReplace(t *testing.T) {
 	result, err := composePrepared(targetTestRequest(t, event, "request"), compositionTestResponse(t, `[{"type":"modify","target":"request","operation":"replace","value":[]}]`), p)
 	if err == nil || result != nil {
 		t.Fatal("nonobject params replacement accepted")
+	}
+}
+
+func compositionTestEffectiveValue(t *testing.T, c *Composition, target string) []byte {
+	t.Helper()
+	raw, err := c.EffectiveValue(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func TestCompositionEffectiveValueUsesOwnerOnDemand(t *testing.T) {
+	item, bodies := targetTestItem("one", "text/plain", "original")
+	event := targetTestEvent(t, []any{item})
+	p := targetTestPrepare(t, event, "output", bodies, ModificationTarget{Path: "/items/0"})
+	result := targetTestCompose(t, event, "output", p, `[]`)
+	raw := compositionTestEffectiveValue(t, result, "output")
+	raw[1] = 'X'
+	if got := string(compositionTestEffectiveValue(t, result, "output")); got != `"original"` {
+		t.Fatal("accessor returned shared mutable bytes", got)
+	}
+	if _, err := result.EffectiveValue("missing"); err == nil {
+		t.Fatal("unknown target available")
+	}
+	if _, err := result.EffectiveValue("input"); err == nil {
+		t.Fatal("non-input accessor exposed input")
+	}
+	for owner := range p.owned {
+		_ = owner.Retire()
+	}
+	if _, err := result.EffectiveValue("output"); err == nil {
+		t.Fatal("accessor retained duplicate body bytes after retirement")
+	}
+	if _, err := (&Composition{Event: sdkJSON(event)}).EffectiveValue("output"); err == nil {
+		t.Fatal("protocol-only composition exposed prepared value")
+	}
+}
+
+func TestCompositionEffectiveValueDoesNotOpenLazyOwner(t *testing.T) {
+	item, bodies := targetTestItem("one", "text/plain", "original")
+	event := targetTestEvent(t, []any{item})
+	var opens int
+	c := targetTestClient(bodies)
+	resolver := c.opts.Content.Resolver
+	c.opts.Content.Resolver = func(ctx context.Context, ref string) (io.ReadCloser, error) { opens++; return resolver(ctx, ref) }
+	p, err := c.prepareBoundary(context.Background(), event, nil, interceptConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		for owner := range p.owned {
+			_ = owner.Retire()
+		}
+	}()
+	p.slots["output"] = []string{"/items/0"}
+	result := &Composition{Event: sdkJSON(event), prepared: p}
+	if _, err := result.EffectiveValue("output"); err == nil {
+		t.Fatal("unread owner exposed a value")
+	}
+	if opens != 0 {
+		t.Fatal("accessor opened lazy owner")
 	}
 }

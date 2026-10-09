@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/agenthooksprotocol/go-sdk/content"
+	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 )
 
 // ContentSource is an owned single-occurrence stream. It is not a wire reference.
@@ -32,7 +33,7 @@ func WithContentSource(path string, source *ContentSource) InterceptOption {
 }
 
 func contentSourceConfig(options []InterceptOption) interceptConfig {
-	cfg := interceptConfig{}
+	cfg := interceptConfig{claimedSources: map[*ContentSource]bool{}, transferredSources: map[*ContentSource]bool{}}
 	for _, option := range options {
 		if option != nil {
 			option(&cfg)
@@ -43,6 +44,9 @@ func contentSourceConfig(options []InterceptOption) interceptConfig {
 
 func (cfg interceptConfig) closeSources() {
 	for _, source := range cfg.ownedSources {
+		if cfg.transferredSources[source] || (source.Claimed() && !cfg.claimedSources[source]) {
+			continue
+		}
 		_ = source.Retire()
 	}
 }
@@ -63,6 +67,7 @@ func (cfg interceptConfig) bindSources(ctx context.Context, event map[string]any
 		if !seen[source] && !source.Claim() {
 			return ctx, errors.New("content source already belongs to an occurrence")
 		}
+		cfg.claimedSources[source] = true
 		seen[source] = true
 	}
 	ctx = context.WithValue(ctx, contentSourcesContextKey{}, cfg.sources)
@@ -88,7 +93,7 @@ func (b *contentSourceBudget) snapshot(ctx context.Context, source *ContentSourc
 	if !b.seen[source] && total-b.used < limit {
 		limit = total - b.used
 	}
-	raw, err := source.Snapshot(ctx, limit)
+	raw, err := ownedcontent.Borrow(source, ctx, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -97,4 +102,47 @@ func (b *contentSourceBudget) snapshot(ctx context.Context, source *ContentSourc
 		b.used += int64(len(raw))
 	}
 	return raw, nil
+}
+
+// forget removes accounting for an owner retired after an edit transaction.
+// This index never owns bytes; each live attachment owns its own snapshot.
+func (b *contentSourceBudget) forget(source *ContentSource) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.seen[source] {
+		raw, _ := ownedcontent.Available(source)
+		b.used -= int64(len(raw))
+		delete(b.seen, source)
+	}
+}
+
+// reconcile accounts all materialized effective owners, including eager inputs,
+// preparation reads and edits. It owns no buffers and never opens lazy sources.
+func (b *contentSourceBudget) reconcile(sources map[string]*ContentSource, limit int64) error {
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	seen := map[*ContentSource]bool{}
+	var used int64
+	for _, source := range sources {
+		if seen[source] {
+			continue
+		}
+		raw, available := ownedcontent.Available(source)
+		if !available {
+			continue
+		}
+		if int64(len(raw)) > limit-used {
+			return errors.New("content exceeds occurrence byte limit")
+		}
+		seen[source] = true
+		used += int64(len(raw))
+	}
+	b.seen, b.used = seen, used
+	return nil
 }

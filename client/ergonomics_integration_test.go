@@ -198,6 +198,9 @@ func TestNamedSourcesReachAuthorizedReceiverReferences(t *testing.T) {
 				if result.Permission != permission.None || !result.InputAvailable || result.Input["count"] != 1 || deliveries.Load() != 1 {
 					t.Fatalf("settlement=%+v", result)
 				}
+				if err := result.Close(); err != nil {
+					t.Fatal(err)
+				}
 				if reader.closes.Load() != 1 {
 					t.Fatal("owned source not closed")
 				}
