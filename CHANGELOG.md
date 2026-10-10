@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.2.0...v0.3.0) (2026-10-10)
+
+
+### Features
+
+* support inline messages and coordinated attachment uploads ([#16](https://github.com/agenthooksprotocol/go-sdk/issues/16)) ([61da293](https://github.com/agenthooksprotocol/go-sdk/commit/61da293e94646472d017254e859b92f19bf9b7ae))
+
 ## [0.2.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.1.1...v0.2.0) (2026-10-09)
 
 
