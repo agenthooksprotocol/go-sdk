@@ -24,9 +24,9 @@ func TestCatalogueWireFixtures(t *testing.T) {
 	for _, kind := range catalogueEvents {
 		t.Run(kind, func(t *testing.T) {
 			var message Object
-			path := "../../agent-hooks-protocol/fixtures/draft/http/catalogue-" + kind + ".valid.json"
+			path := interopFixturePath("../fixtures/draft/http/catalogue-" + kind + ".valid.json")
 			if kind == "tool.after" {
-				path = "../../agent-hooks-protocol/fixtures/draft/http/observe-tool-after.valid.json"
+				path = interopFixturePath("../fixtures/draft/http/observe-tool-after.valid.json")
 			}
 			if kind == "tool.before" {
 				message = Object{"jsonrpc": "2.0", "method": "hooks/observe", "params": Object{"protocolVersion": "draft", "event": obj(request("typed-tool")["params"])["event"]}}
@@ -158,7 +158,7 @@ func TestReviewedExecutionWire(t *testing.T) {
 	for _, kind := range []string{"turn.progress", "tool.progress", "context.compact.after", "model.response.after"} {
 		t.Run(kind, func(t *testing.T) {
 			var notification Object
-			if e := Load("../../agent-hooks-protocol/fixtures/draft/http/catalogue-"+kind+".valid.json", &notification); e != nil {
+			if e := Load(interopFixturePath("../fixtures/draft/http/catalogue-"+kind+".valid.json"), &notification); e != nil {
 				t.Fatal(e)
 			}
 			if e := v.validate("observe", notification); e != nil {
@@ -172,7 +172,11 @@ func TestReviewedExecutionWire(t *testing.T) {
 				}
 			} else {
 				field := map[string]string{"turn.progress": "delta", "tool.progress": "partialOutput", "context.compact.after": "summary"}[kind]
-				delete(obj(event[field]), "role")
+				if kind == "context.compact.after" {
+					delete(obj(array(event[field])[0]), "id")
+				} else {
+					delete(obj(event[field]), "role")
+				}
 				if e := v.validate("observe", notification); e == nil {
 					t.Fatal("missing model-visible role accepted")
 				}
@@ -187,7 +191,7 @@ func TestContentReferenceRejectsUploadMetadata(t *testing.T) {
 		t.Fatal(e)
 	}
 	good := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	item := Object{"id": "i", "kind": "text", "mediaType": "text/plain", "selection": "body", "body": Object{"ref": "r"}}
+	item := Object{"id": "i", "kind": "attachment", "mediaType": "application/octet-stream", "selection": "body", "body": Object{"ref": "r"}}
 	if e := v.item.Validate(item); e != nil {
 		t.Fatal(e)
 	}

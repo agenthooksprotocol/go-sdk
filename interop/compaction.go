@@ -4,11 +4,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	ahp "github.com/agenthooksprotocol/go-sdk"
-	hooks "github.com/agenthooksprotocol/go-sdk/client"
 	"github.com/agenthooksprotocol/go-sdk/server"
 	"io"
 	"net/http"
@@ -41,7 +39,7 @@ func CompactionCapabilities(boundary string, observeOnly bool) (Object, error) {
 
 // RunCompaction runs the before pipeline, generation/substitution, then after
 // controls. Only applied=true permits downstream use. Returned bodies are
-// immutable UTF-8 content; upload them before exposing their references on ahp.
+// inline text parts; no upload or reference cache is needed.
 // Observe-only after callbacks run on detached goroutines after settlement; their
 // results, errors and panics cannot change settlement or delay downstream use.
 func RunCompaction(instructions, itemID string, before, after []CompactionHook, generate func(string) (string, error), observeOnly bool) (Object, error) {
@@ -55,14 +53,9 @@ func RunCompaction(instructions, itemID string, before, after []CompactionHook, 
 			}
 		}
 	}
-	state := Object{"instructions": instructions, "candidate": nil, "summary": nil, "bodies": Object{}, "messages": []any{}, "denied": false}
+	state := Object{"instructions": textParts(instructions), "candidate": nil, "summary": nil, "messages": []any{}, "denied": false}
 	seen := []any{}
 	failures := []any{}
-	summary := func(staged Object, body string) Object {
-		ref := "urn:ahp:compaction:utf8:" + hex.EncodeToString([]byte(body))
-		obj(staged["bodies"])[ref] = body
-		return Object{"id": itemID, "ref": ref}
-	}
 	pipeline := func(boundary string, hooks []CompactionHook) bool {
 		caps, _ := CompactionCapabilities(boundary, observeOnly && boundary == "after")
 		for _, h := range hooks {
@@ -91,15 +84,16 @@ func RunCompaction(instructions, itemID string, before, after []CompactionHook, 
 						if boundary == "before" {
 							target = "instructions"
 						}
-						value, ok := e["value"].(string)
+						value := e["value"]
+						ok := validTextParts(value)
 						if str(e["target"]) != target || str(e["operation"]) != "replace" || !ok {
 							err = fmt.Errorf("invalid modification")
 							break
 						}
 						if boundary == "before" {
-							staged["instructions"] = value
+							staged["instructions"] = clone(value)
 						} else {
-							staged["summary"] = summary(staged, value)
+							staged["summary"] = clone(value)
 						}
 					} else if kind == "deny" {
 						if str(e["reason"]) == "" {
@@ -107,7 +101,7 @@ func RunCompaction(instructions, itemID string, before, after []CompactionHook, 
 							break
 						}
 					} else if kind == "return" {
-						if _, ok := e["value"].(string); !ok {
+						if !validTextParts(e["value"]) {
 							err = fmt.Errorf("summary must be text")
 							break
 						}
@@ -126,13 +120,13 @@ func RunCompaction(instructions, itemID string, before, after []CompactionHook, 
 				}
 				continue
 			}
-			if staged["instructions"] != state["instructions"] {
+			if !bytes.Equal(jsonBytes(staged["instructions"]), jsonBytes(state["instructions"])) {
 				staged["candidate"] = nil
 			}
 			for _, e := range effects {
 				switch str(e["type"]) {
 				case "return":
-					staged["candidate"] = Object{"body": e["value"], "supplier": h.Supplier}
+					staged["candidate"] = Object{"body": clone(e["value"]), "supplier": h.Supplier}
 				case "deny":
 					staged["denied"] = true
 				case "message":
@@ -151,14 +145,14 @@ func RunCompaction(instructions, itemID string, before, after []CompactionHook, 
 	if pipeline("before", before) {
 		body := ""
 		if candidate := obj(state["candidate"]); candidate != nil {
-			body = str(candidate["body"])
+			body = partsText(candidate["body"])
 			provenance = Object{"kind": "supplied", "supplier": candidate["supplier"]}
 		} else {
 			var err error
 			if generate == nil {
-				body = "summary:" + str(state["instructions"])
+				body = "summary:" + partsText(state["instructions"])
 			} else {
-				body, err = generate(str(state["instructions"]))
+				body, err = generate(partsText(state["instructions"]))
 			}
 			if err != nil {
 				return nil, err
@@ -166,7 +160,7 @@ func RunCompaction(instructions, itemID string, before, after []CompactionHook, 
 			generated = true
 			provenance = Object{"kind": "generated"}
 		}
-		state["summary"] = summary(state, body)
+		state["summary"] = textParts(body)
 		if observeOnly {
 			applied = true
 		} else {
@@ -262,15 +256,11 @@ func (memoryUpload) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func acceptCompactionEffects(snapshot Object, effects []Object) error {
 	boundary := str(snapshot["boundary"])
-	target, body, role := "instructions", str(snapshot["instructions"]), "system"
+	target := "instructions"
 	if boundary == "after" {
 		target = "summary"
-		role = "assistant"
-		body = str(obj(snapshot["bodies"])[str(obj(snapshot["summary"])["ref"])])
 	}
-	raw := []byte(body)
-	descriptor := Object{"id": "fixture-" + target, "kind": target, "role": role, "mediaType": "text/plain", "selection": "body", "body": Object{"ref": "urn:host:body"}}
-	ev := Object{"id": "fixture-" + boundary, "source": "urn:fixture:compaction", "time": "2026-09-15T12:00:00Z", "type": "context.compact." + boundary, target: descriptor}
+	ev := Object{"id": "fixture-" + boundary, "source": "urn:fixture:compaction", "time": "2026-09-15T12:00:00Z", "type": "context.compact." + boundary, target: clone(snapshot[target])}
 	if boundary == "before" {
 		ev["trigger"] = "manual"
 		ev["items"] = []any{}
@@ -289,7 +279,7 @@ func acceptCompactionEffects(snapshot Object, effects []Object) error {
 			return nil, err
 		}
 		return jsonBytes(Object{"jsonrpc": "2.0", "id": req["id"], "result": Object{"protocolVersion": "draft", "effects": effects}}), nil
-	}, PublicBoundaryOptions{Content: hooks.ContentOptions{Resolver: func(context.Context, string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(raw)), nil }}, Upload: Object{"endpoint": "https://fixture.invalid/upload", "timeoutMs": 1000, "maxBytes": 4 << 20}, UploadClient: &http.Client{Transport: memoryUpload{}}})
+	})
 	return err
 }
 
@@ -297,3 +287,35 @@ func acceptCompactionEffects(snapshot Object, effects []Object) error {
 type boundaryOutput struct{ bytes.Buffer }
 
 func (*boundaryOutput) Close() error { return nil }
+
+// textParts keeps host convenience strings at the canonical inline boundary.
+func textParts(text string) []any {
+	return []any{Object{"id": "text", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": text}}
+}
+func validTextParts(value any) bool {
+	parts, ok := value.([]any)
+	if !ok {
+		return false
+	}
+	for _, part := range parts {
+		p := obj(part)
+		if p["kind"] != "text" || p["selection"] != "body" || p["mediaType"] != "text/plain" || str(p["id"]) == "" {
+			return false
+		}
+		if _, ok := p["text"].(string); !ok {
+			return false
+		}
+	}
+	return true
+}
+func partsText(value any) string {
+	var result string
+	for _, part := range array(value) {
+		result += str(obj(part)["text"])
+	}
+	return result
+}
+
+func contextMessages(text string) []any {
+	return []any{Object{"id": "context", "role": "system", "parts": textParts(text)}}
+}

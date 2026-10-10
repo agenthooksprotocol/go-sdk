@@ -55,6 +55,8 @@ func TestNamedSourceOuterBudgetThroughAuthRetryAndOwnedObservation(t *testing.T)
 	var firstBody []byte
 	var firstID any
 	uploads, intercepts, observations := 0, 0, 0
+	var interceptRef, observationRef string
+	confirmed := map[string]bool{}
 	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -73,7 +75,9 @@ func TestNamedSourceOuterBudgetThroughAuthRetryAndOwnedObservation(t *testing.T)
 			}
 			uploads++
 			sequence = append(sequence, fmt.Sprintf("upload-%d", uploads))
-			contentTestConfirm(w, fmt.Sprintf("receiver-%d", uploads), raw)
+			ref := fmt.Sprintf("receiver-%d", uploads)
+			confirmed[ref] = true
+			contentTestConfirm(w, ref, raw)
 			return
 		}
 		if r.URL.Path != "/hooks" {
@@ -95,7 +99,8 @@ func TestNamedSourceOuterBudgetThroughAuthRetryAndOwnedObservation(t *testing.T)
 		if request["method"] == "hooks/observe" {
 			observations++
 			sequence = append(sequence, "observe")
-			if uploads != 2 || sdkObj(item["body"])["ref"] != "receiver-2" {
+			observationRef = compositionString(sdkObj(item["body"])["ref"])
+			if uploads != 2 || !confirmed[observationRef] || observationRef == interceptRef {
 				t.Error("observer published without its verified receiver upload")
 			}
 			if r.Header.Get("Authorization") != "Bearer event-observer" {
@@ -109,7 +114,11 @@ func TestNamedSourceOuterBudgetThroughAuthRetryAndOwnedObservation(t *testing.T)
 		}
 		intercepts++
 		sequence = append(sequence, fmt.Sprintf("intercept-%d", intercepts))
-		if uploads != 1 || sdkObj(item["body"])["ref"] != "receiver-1" {
+		ref := compositionString(sdkObj(item["body"])["ref"])
+		if interceptRef == "" {
+			interceptRef = ref
+		}
+		if uploads != 2 || !confirmed[ref] || ref != interceptRef {
 			t.Error("intercept/retry did not retain verified first upload")
 		}
 		if intercepts == 1 {
@@ -224,7 +233,7 @@ func TestNamedSourceOuterBudgetThroughAuthRetryAndOwnedObservation(t *testing.T)
 	}
 	defer hooks.Close()
 	var descriptor ahp.ContentItem
-	if err := json.Unmarshal([]byte(`{"id":"budget-item","kind":"message","mediaType":"text/plain","selection":"metadata"}`), &descriptor); err != nil {
+	if err := json.Unmarshal([]byte(`{"id":"budget-item","kind":"attachment","mediaType":"application/octet-stream","selection":"metadata"}`), &descriptor); err != nil {
 		t.Fatal(err)
 	}
 	reader := &sourceTestReader{Reader: strings.NewReader("owned budget bytes")}
@@ -245,12 +254,12 @@ func TestNamedSourceOuterBudgetThroughAuthRetryAndOwnedObservation(t *testing.T)
 	if reader.reads.Load() != 2 || reader.closes.Load() != 1 {
 		t.Fatalf("source was reread or not closed: reads=%d closes=%d", reader.reads.Load(), reader.closes.Load())
 	}
-	if uploadCredentials.Load() != 2 || eventCredentials.Load() != 2 || challenges.Load() != 1 || authorizations.Load() != 2 || transport.calls.Load() != 5 {
+	if uploadCredentials.Load() != 2 || eventCredentials.Load() != 2 || challenges.Load() != 1 || authorizations.Load() != 4 || transport.calls.Load() != 5 {
 		t.Fatalf("auth/transport counts: uploads=%d events=%d challenges=%d authorizations=%d exchanges=%d", uploadCredentials.Load(), eventCredentials.Load(), challenges.Load(), authorizations.Load(), transport.calls.Load())
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	want := []string{"upload-1", "intercept-1", "intercept-2", "upload-2", "observe"}
+	want := []string{"upload-1", "upload-2", "intercept-1", "intercept-2", "observe"}
 	if uploads != 2 || intercepts != 2 || observations != 1 || !reflect.DeepEqual(sequence, want) {
 		t.Fatalf("delivery order=%v; want %v", sequence, want)
 	}

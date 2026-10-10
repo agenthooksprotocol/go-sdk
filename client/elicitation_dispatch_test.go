@@ -72,7 +72,7 @@ func TestElicitationDispatchSnapshotAndAtomicAnswers(t *testing.T) {
 	waitObservations(t, result)
 }
 
-func TestElicitationResultSerialReceiverUploads(t *testing.T) {
+func TestElicitationResultSerialInlineReceivers(t *testing.T) {
 	request := `{"message":"choose","requestedSchema":{"type":"object","properties":{"x":{"type":"string","enum":["a","b"]}},"required":["x"]}}`
 	c, transports := testClient(t, "fail-open", "fail-open")
 	setDispatchBoundary(c, "user.elicitation.request", elicitationDispatchCaps("request", "form"))
@@ -120,11 +120,7 @@ func TestElicitationResultSerialReceiverUploads(t *testing.T) {
 		tr.reply = func(req map[string]any) []any {
 			event := sdkObj(sdkObj(req["params"])["event"])
 			item := sdkObj(sdkObj(event["elicitation"])["result"])
-			ref := compositionString(sdkObj(item["body"])["ref"])
-			mu.Lock()
-			raw := uploaded[ref]
-			mu.Unlock()
-			seen = append(seen, string(raw))
+			seen = append(seen, compositionString(item["text"]))
 			if index == 0 {
 				return []any{map[string]any{"type": "modify", "target": "content", "operation": "merge", "value": map[string]any{"x": "b"}}}
 			}
@@ -132,8 +128,7 @@ func TestElicitationResultSerialReceiverUploads(t *testing.T) {
 		}
 	}
 	input := elicitationDispatchInput("result", "form", initial)
-	item := sdkObj(sdkObj(input["elicitation"])["result"])
-	item["body"] = map[string]any{"ref": "result-ref"}
+
 	result, err := c.intercept(context.Background(), "user.elicitation.result", input, WithElicitationRequest(before.Snapshot))
 	if err != nil || result == nil || len(result.Errors) != 0 {
 		t.Fatalf("result: %+v %v", result, err)
@@ -146,15 +141,19 @@ func TestElicitationResultSerialReceiverUploads(t *testing.T) {
 	if sdkObj(second["content"])["x"] != "b" || sdkObj(second["_meta"])["preserved"] != true {
 		t.Fatal(second)
 	}
-	raw, ok := result.Content("/elicitation/result")
-	if !ok || string(raw) != seen[1] {
-		t.Fatal("effective bytes inaccessible")
+	raw := []byte(compositionString(sdkObj(sdkObj(compositionObject(result.Event)["elicitation"])["result"])["text"]))
+	if string(raw) != seen[1] {
+		t.Fatal("effective inline bytes inaccessible")
 	}
 	raw[0] = 'x'
-	again, _ := result.Content("/elicitation/result")
-	if again[0] == 'x' {
-		t.Fatal("effective bytes alias result backing store")
+	again := compositionString(sdkObj(sdkObj(compositionObject(result.Event)["elicitation"])["result"])["text"])
+	if again != seen[1] {
+		t.Fatal("effective bytes alias caller buffer")
 	}
+	if count != 0 {
+		t.Fatalf("inline JSON uploaded %d times", count)
+	}
+
 	waitObservations(t, result)
 }
 
@@ -187,5 +186,124 @@ func TestElicitationCorrelationAdmissionBeforeResolver(t *testing.T) {
 				t.Fatal("uncorrelated occurrence admitted")
 			}
 		})
+	}
+}
+
+func TestElicitationStructuredEditPrivacy(t *testing.T) {
+	for _, operation := range []string{"replace", "merge"} {
+		for _, tc := range []struct {
+			name, defaultSelection, categorySelection                                    string
+			read, write, writeError, noAuthorizer, hostMetadata, invalidAnswer, accepted bool
+		}{
+			{name: "body-authorized", defaultSelection: "body", read: true, write: true, accepted: true},
+			{name: "metadata", defaultSelection: "metadata", read: true, write: true},
+			{name: "omit", defaultSelection: "omit", read: true, write: true},
+			{name: "category-metadata", defaultSelection: "body", categorySelection: "metadata", read: true, write: true},
+			{name: "category-body", defaultSelection: "metadata", categorySelection: "body", read: true, write: true, accepted: true},
+			{name: "read-denied", defaultSelection: "body", write: true},
+			{name: "write-denied", defaultSelection: "body", read: true},
+			{name: "write-error", defaultSelection: "body", read: true, writeError: true},
+			{name: "no-authorizer", defaultSelection: "body", noAuthorizer: true},
+			{name: "host-metadata", defaultSelection: "body", read: true, write: true, hostMetadata: true},
+			{name: "pinned-invalid-answer", defaultSelection: "body", read: true, write: true, invalidAnswer: true},
+		} {
+			t.Run(operation+"/"+tc.name, func(t *testing.T) {
+				c, transports := testClient(t, "fail-open")
+				request, _ := elicitationFixture("request", "form", `{"message":"choose","requestedSchema":{"type":"object","properties":{"x":{"type":"string","enum":["old","new"]},"keep":{"type":"string"}},"required":["x"]}}`)
+				request["source"] = c.opts.Source
+				snapshot, err := prepareElicitation(request, nil, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				setDispatchBoundary(c, "user.elicitation.result", elicitationDispatchCaps("result", "form"))
+				sub := c.backends[0].subscriptions[0]
+				selection := map[string]any{"default": tc.defaultSelection}
+				if tc.categorySelection != "" {
+					selection["answers"] = tc.categorySelection
+				}
+				sub["content"] = selection
+				reads, writes := 0, 0
+				if !tc.noAuthorizer {
+					c.opts.Content.AuthorizeContent = func(_ context.Context, scope ContentAuthorization) (bool, error) {
+						if scope.Item["kind"] != "text" || scope.Item["mediaType"] != "text/plain" || scope.Item["category"] != "answers" {
+							t.Error("wrong answer authorization item", scope.Item)
+						}
+						switch scope.Operation {
+						case "read":
+							reads++
+							return tc.read, nil
+						case "write":
+							writes++
+							if scope.BackendID != c.backends[0].id || scope.SubscriptionID != compositionString(sub["id"]) || scope.Item["body"] != nil {
+								t.Error("write authority lost backend scope or became an upload", scope)
+							}
+							if tc.writeError {
+								return false, errors.New("write denied by host")
+							}
+							return tc.write, nil
+						default:
+							t.Error("unspecified content operation", scope.Operation)
+							return false, nil
+						}
+					}
+				}
+				initial := ` {"action":"accept","content":{"x":"old","keep":"retained"},"_meta":{"preserved":true},"extension":{"untouched":true}} `
+				input := elicitationDispatchInput("result", "form", initial)
+				item := sdkObj(sdkObj(input["elicitation"])["result"])
+				item["category"] = "answers"
+				if tc.hostMetadata {
+					item["selection"] = "metadata"
+					delete(item, "text")
+				}
+				before := string(sdkJSON(input))
+				value := "new"
+				if tc.invalidAnswer {
+					value = "outside"
+				}
+				visibleBody := false
+				transports[0].reply = func(req map[string]any) []any {
+					visible := preparedAt(sdkObj(sdkObj(req["params"])["event"]), "/elicitation/result")
+					visibleBody = visible["selection"] == "body" && visible["text"] != nil && visible["gap"] == nil
+					return []any{map[string]any{"type": "message", "text": "atomic prefix"}, map[string]any{"type": "modify", "target": "content", "operation": operation, "value": map[string]any{"x": value}}}
+				}
+				result, err := c.intercept(context.Background(), "user.elicitation.result", input, WithElicitationRequest(snapshot))
+				if err != nil || result == nil {
+					t.Fatal("result admission failed before privacy test", err)
+				}
+				defer result.Close()
+				waitObservations(t, result)
+				if string(sdkJSON(input)) != before {
+					t.Fatal("caller result mutated")
+				}
+				effectiveItem := preparedAt(compositionObject(result.Event), "/elicitation/result")
+				if tc.accepted {
+					if len(result.Errors) != 0 || len(result.Response.Effects) != 2 || !visibleBody || writes != 1 {
+						t.Fatalf("authorized answer rejected: errors=%v visible=%v writes=%d reads=%d", result.Errors, visibleBody, writes, reads)
+					}
+					answer := compositionObject([]byte(compositionString(effectiveItem["text"])))
+					content := sdkObj(answer["content"])
+					_, keep := content["keep"]
+					if answer["action"] != "accept" || sdkObj(answer["_meta"])["preserved"] != true || sdkObj(answer["extension"])["untouched"] != true || content["x"] != "new" || keep != (operation == "merge") {
+						t.Fatal("structured edit changed wrapper or used wrong object operation", answer)
+					}
+				} else {
+					if len(result.Errors) == 0 || len(result.Response.Effects) != 0 {
+						t.Fatal("unauthorized/invalid edit published atomic prefix", result.Errors, result.Response.Effects)
+					}
+					if effectiveItem["text"] != item["text"] || effectiveItem["selection"] != item["selection"] {
+						t.Fatal("rejected structured edit changed host answer", effectiveItem)
+					}
+					if !visibleBody && writes != 0 {
+						t.Fatal("write callback received undisclosed answer", writes)
+					}
+					if visibleBody && !tc.noAuthorizer && writes != 1 {
+						t.Fatal("visible edit bypassed host write decision", writes)
+					}
+				}
+				if len(result.attachments) != 0 {
+					t.Fatal("structured inline edit acquired attachment owner")
+				}
+			})
+		}
 	}
 }

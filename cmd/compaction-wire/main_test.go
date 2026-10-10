@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	ahp "github.com/agenthooksprotocol/go-sdk/interop"
+	"io"
 	"mime"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -29,6 +32,9 @@ func TestUploadFailureSuppressesEvent(t *testing.T) {
 			calls := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
+				if body, err := io.ReadAll(r.Body); err != nil || !bytes.Equal(body, []byte("conversation")) {
+					t.Errorf("immutable attachment upload: %q %v", body, err)
+				}
 				if r.URL.Path != "/upload" {
 					t.Error("dependent event sent")
 				}
@@ -48,7 +54,7 @@ func TestUploadFailureSuppressesEvent(t *testing.T) {
 			}))
 			defer server.Close()
 			trace := []any{}
-			_, err := exchange(O{"endpoint": server.URL, "transport": "http", "credentials": O{"scope": O{"token": "event-secret", "uploadToken": "upload-secret"}}}, "scope", "case", O{"boundary": "before", "instructions": "base", "capabilities": compactionTestCaps()}, nil, &trace)
+			_, err := exchange(O{"endpoint": server.URL, "transport": "http", "credentials": O{"scope": O{"token": "event-secret", "uploadToken": "upload-secret"}}}, "scope", "case", O{"boundary": "before", "instructions": "base", "attachment": "conversation", "capabilities": compactionTestCaps()}, nil, &trace)
 			if err == nil || calls != 1 || len(trace) != 0 {
 				t.Fatalf("err=%v calls=%d trace=%v", err, calls, trace)
 			}
@@ -63,7 +69,7 @@ func TestStorageScopeIsIndependentOfReference(t *testing.T) {
 }
 
 func TestCompactionHTTPRepliesUseJSON(t *testing.T) {
-	validator, err := ahp.NewValidator("../../../agent-hooks-protocol/schema/draft")
+	validator, err := compactionTestValidator(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,3 +122,75 @@ func TestCompactionHTTPRepliesUseJSON(t *testing.T) {
 }
 
 func compactionTestCaps() O { caps, _ := ahp.CompactionCapabilities("before", false); return caps }
+
+func TestCompactionInlineTextDoesNotUpload(t *testing.T) {
+	validator, err := compactionTestValidator(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AHP_COMPACTION_TOKENS", `{"event-token":"scope"}`)
+	for _, boundary := range []string{"before", "after"} {
+		t.Run(boundary, func(t *testing.T) {
+			target := "instructions"
+			if boundary == "after" {
+				target = "summary"
+			}
+			handler := compactionHTTPHandler(O{"scope": O{"kind": "append", "target": target, "suffix": " accepted"}}, t.TempDir(), validator)
+			events := 0
+			peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/upload" {
+					t.Error("inline text uploaded")
+					w.WriteHeader(500)
+					return
+				}
+				events++
+				handler.ServeHTTP(w, r)
+			}))
+			defer peer.Close()
+			caps, err := ahp.CompactionCapabilities(boundary, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot := O{"boundary": boundary, "instructions": "base", "capabilities": caps}
+			if boundary == "after" {
+				snapshot["summary"] = O{"id": "summary-1", "ref": "host-summary"}
+				snapshot["bodies"] = O{"host-summary": "base"}
+			}
+			trace := []any{}
+			effects, err := exchange(O{"endpoint": peer.URL, "transport": "http", "credentials": O{"scope": O{"token": "event-token", "uploadToken": "upload-token"}}}, "scope", "inline", snapshot, nil, &trace)
+			if err != nil || events != 1 || len(effects) != 1 {
+				t.Fatalf("exchange: %v events=%d effects=%v", err, events, effects)
+			}
+			value := arr(effects[0]["value"])
+			if len(value) != 1 || obj(value[0])["text"] != "base accepted" || obj(value[0])["body"] != nil {
+				t.Fatalf("not a canonical inline text list: %v", value)
+			}
+		})
+	}
+}
+
+func compactionTestValidator(t *testing.T) (*ahp.Validator, error) {
+	t.Helper()
+	// Use this SDK's generated snapshot, not an unrelated sibling checkout.
+	raw, err := os.ReadFile("../../internal/canonical/schemas.json")
+	if err != nil {
+		return nil, err
+	}
+	var documents []json.RawMessage
+	if err = json.Unmarshal(raw, &documents); err != nil {
+		return nil, err
+	}
+	dir := t.TempDir()
+	for _, doc := range documents {
+		var metadata struct {
+			ID string `json:"$id"`
+		}
+		if err = json.Unmarshal(doc, &metadata); err != nil {
+			return nil, err
+		}
+		if err = os.WriteFile(filepath.Join(dir, filepath.Base(metadata.ID)), doc, 0600); err != nil {
+			return nil, err
+		}
+	}
+	return ahp.NewValidator(dir)
+}

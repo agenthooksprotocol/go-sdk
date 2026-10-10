@@ -10,7 +10,7 @@ func TestReceiveBoundaryPublicAdmission(t *testing.T) {
 	called := false
 	callback := func(req Object) (Object, error) {
 		called = true
-		return Object{"result": Object{"protocolVersion": "draft", "effects": []any{Object{"type": "return", "value": "candidate"}}}}, nil
+		return Object{"result": Object{"protocolVersion": "draft", "effects": []any{Object{"type": "return", "value": textParts("candidate")}}}}, nil
 	}
 	accepted, err := ReceiveBoundary(context.Background(), request, callback)
 	if err != nil || !called || accepted["id"] != "compact" {
@@ -25,7 +25,7 @@ func TestReceiveBoundaryPublicAdmission(t *testing.T) {
 	called = false
 	if _, err = ReceiveBoundary(context.Background(), request, func(Object) (Object, error) {
 		called = true
-		return Object{"result": Object{"protocolVersion": "draft", "effects": []any{Object{"type": "modify", "target": "summary", "operation": "replace", "value": "wrong"}}}}, nil
+		return Object{"result": Object{"protocolVersion": "draft", "effects": []any{Object{"type": "modify", "target": "summary", "operation": "replace", "value": textParts("wrong")}}}}, nil
 	}); err == nil || !called {
 		t.Fatalf("ungranted effect accepted: called=%v err=%v", called, err)
 	}

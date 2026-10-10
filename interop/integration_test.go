@@ -272,7 +272,7 @@ func TestCanonicalEvaluatorScenarios(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	ss, e := scenarios("../../agent-hooks-protocol/interop/scenarios.json")
+	ss, e := scenarios(interopFixturePath("scenarios.json"))
 	if e != nil {
 		t.Fatal(e)
 	}

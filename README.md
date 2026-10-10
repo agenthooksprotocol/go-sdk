@@ -162,9 +162,9 @@ See the executable [JSON registration and typed boundary example](client/example
 initial state, capability narrowing, decode-error handling, observation drain,
 shutdown, and a standard owned-stream stdio server. The compiled
 [resolved-content walkthrough](public_protocol_completion_test.go) shows verified
-host bytes, explicit receiver authorization, independent upload routes,
-`WithCompactionInstructions`, and detached `Result.Content` retrieval side by
-side with the receiving HTTP handlers.
+inline `TextParts` instructions, accepted list replacement, verified attachment
+bytes, explicit receiver authorization, and independent upload routes alongside
+the receiving HTTP handlers.
 
 Duration constructors preserve exact decimal milliseconds. Canonical admission
 rejects fractional milliseconds and nonpositive deadlines. Use the generated
@@ -263,45 +263,46 @@ a response. Simple effects include `NewAllow`, `NewAsk`, `NewDeny`, `NewMessage`
 `NewInjectAppend` are advanced wire helpers. These constructors neither grant
 capabilities nor establish that a payload satisfies the host application's schema.
 
-Generated content-source companions such as `ItemsSources`, `InstructionsSource`,
-and `SummarySource` bind owned `*content.Source` values to their descriptor slots
-without serializing readers or reading at construction. Sources supplement, not
-replace, canonical descriptors. Explicit host content authorization, disclosure
-policy, size limits, and source ownership rules apply.
+Generated host inputs accept canonical messages with a role and ordered parts.
+Use `event.ContentPartInput.Text` for inline text and
+`event.ContentPartInput.Attachment` for an owned binary body. Encoding does not
+read attachment bytes. Explicit host authorization, receiver disclosure policy,
+size limits, and source ownership rules apply.
 
 ### Current composition coverage
 
-The client composes input and resolved non-input modifications, protocol
-permission/candidate decisions, messages, injections, and bounded flow effects.
-Invalid capability grants and missing target bindings fail before delivery.
+The client composes object-valued input and workspace modifications, canonical
+message and text-part list modifications, protocol permission/candidate decisions,
+messages, injections, and bounded flow effects. Invalid capability grants fail
+before delivery. Output modifications operate on `tool.after.items` as canonical
+message lists. Application structures are serialized as inline text, not exposed
+as native JSON output fields.
 
-Descriptor-backed modifications use verified, occurrence-owned bytes. Each
-receiver gets its own uploaded reference; logical item identity is preserved.
-`Result.EffectiveValue(target)` encodes available accepted target values on demand, and
-`Result.Content("/canonical/item/path")` returns detached effective body bytes.
-Compaction instructions and summaries have fixed canonical bindings. When
-instructions are absent, `WithCompactionInstructions` supplies a host-owned
-descriptor template; the SDK does not invent one. A returned compaction summary
-is only a pending candidate, not installed context.
-
-Ambiguous native targets require `WithModificationTarget(target, binding)`.
-`ModificationTarget.Path` selects an allowed canonical descriptor, collection,
-or model-request `/params`. Collection effects always contain an array, even
-for zero or one item; additions require host-owned `Templates`. These bindings
-are an SDK mapping contract, not additional protocol wire fields.
+Attachments remain immutable across edits. Selected receivers receive their own
+uploaded reference to the exact owned attachment. `Result.EffectiveValue(target)`
+encodes accepted canonical target values on demand, and
+`Result.Content("/canonical/item/path")` returns detached available attachment bytes.
+Canonical message-list modifications use `merge` to append in order, preserving
+duplicates, and `replace` to substitute the list. Text-part lists use the same
+operations. Compaction instructions and summaries contain inline text parts.
+Supplied compaction results contain a text-part list; supplied model results
+contain a canonical message list. A returned summary is a pending candidate,
+not installed context.
 
 Elicitation request results retain an immutable `Snapshot` of the original
 exchange. Pass it with `WithElicitationRequest(result.Snapshot)` for the
 corresponding result boundary. Answer validation uses the pinned MCP schemas
 and original requested form schema, without network schema loading. Correlation
 is checked before body resolution. URL acceptance is consent, not evidence of
-completion. AHP mode support is independent of effect support: `return`, `deny`,
-and result `modify` require the matching explicit `capabilities.elicitation.form`
+completion. AHP mode support is independent of effect support: `return`, `deny`, and result `modify`
+require the matching explicit `capabilities.elicitation.form`
 or `.url` grant. An absent mode or empty AHP elicitation object grants nothing;
 MCP's empty-object form fallback does not apply. Passive delivery and
 informational `message` effects do not decide or alter the interaction and do not
 require this decision-mode grant. Application schemas for ordinary tools remain
-the host's concern.
+the host's concern. At `user.elicitation.result`, `content` modifications operate on
+the accepted form MCP answer object and preserve its result wrapper. At
+`user.message.outbound`, `content` modifications operate on canonical message lists.
 
 ### Receiving hooks
 
@@ -335,15 +336,32 @@ deployment-specific TLS/workload mechanisms stay transport-owned. Borrowed HTTP
 clients are never closed.
 
 Content selection does not grant access. `client.ContentOptions` supplies
-receiver-scoped disclosure decisions and host-owned content resolution. The
+receiver-scoped disclosure decisions and host-owned content resolution.
+`ContentAuthorization.Operation` is `"read"` for disclosure and `"write"` for
+new or changed inline text. Authorize these operations explicitly in
+`AuthorizeContent`; permitting a read does not permit a write. Incoming canonical
+text requires body selection for its content category and explicit write
+authorization. List replacement cannot overwrite receiver-hidden text. The
 zero value does not disclose bodies or opaque application payloads; provide an
 explicit projection policy for tool inputs and other opaque fields. Resolver
 references are opaque handles, not URLs the SDK automatically fetches. Selected
-uploads complete before delivery and hash the original bytes. Metadata-only
-delivery does not itself read bodies; preparing advertised descriptor-backed
-modifications or validating an elicitation exchange can require verified host
-bodies regardless of receiver selection. Upload credentials are never inferred
-from event credentials.
+uploads hash the original bytes. Before the first interceptor, Hooks plans all
+matched, authorized attachment-body transfers and waits for their confirmed
+receipts. `client.Options.MaxConcurrentUploads` bounds transfers across calls on
+the same Hooks instance: zero uses the default of 8; negative values are invalid.
+Interceptors still run in registration order. Upload failures follow the affected
+subscription's failure policy when its delivery is reached; observation failures
+do not change the settled decision.
+
+Confirmed references are reused for the same attachment owner, backend, and
+subscription during serial projection and settled observations. Sharing an
+upload URL does not share references or credentials between receivers. A later
+interceptor can remove an attachment after its planned upload; that upload is
+not undone. Metadata-only delivery does not itself read bodies, and attachment
+bodies with no authorized body demand remain unread. Inline text is projected
+without uploads;
+validating an elicitation exchange can require verified host bodies regardless
+of receiver selection. Upload credentials are never inferred from event credentials.
 
 ### Owned attachments
 
@@ -351,10 +369,34 @@ Use `content.NewAttachment(data)` for a defensive copy of a byte slice, or
 `content.NewLazyAttachment(open, cleanup)` for a context-aware reader factory.
 `content.NewSource(reader)` (also `client.NewContentSource`) takes ownership of
 an already opened reader. All three construct the same owned body type. Bind it
-directly through generated fields such as `event.ToolBeforeInput.ItemsSources`,
-or use `client.WithContentSource` for an advanced canonical slot. Metadata stays
-on the associated content item, which needs no body reference. See the
-[standalone file example](examples/attachments/main.go).
+directly through the generated host input API:
+
+```go
+attachment := content.NewAttachment(pdfBytes)
+messages := []*event.ModelVisibleItemInput{{
+    ModelVisibleItem: ahp.ModelVisibleItem{ID: "review-1", Role: ahp.ModelVisibleItemRoleUser},
+    Parts: []*event.ContentPartInput{
+        {Text: &ahp.TextBodyPart{ID: "request-text", Text: "Review this report."}},
+        {Attachment: &event.AttachmentBodyInput{
+            AttachmentBodyPart: ahp.AttachmentBodyPart{ID: "report", MediaType: "application/pdf"},
+            Body: attachment,
+        }},
+    },
+}}
+result, err := hooks.ModelRequestBefore(ctx, event.ModelRequestBeforeInput{
+    Attempt: &ahp.ExecutionEventAttempt{ID: "attempt-1", Number: json.Number("1")},
+    Model: &ahp.ExecutionEventModel{ID: "model-1", Provider: "example"},
+    ItemsHost: &messages,
+})
+if result != nil { defer result.Close() }
+if err != nil { return err }
+// Check interruption and the settled decision before sending the model request.
+```
+
+Configure the `model.request.before` event grant and receiver content selections
+on `hooks`. Metadata-only selection does not open a lazy attachment. See the
+[standalone file example](examples/attachments/main.go). `WithContentSource` is
+an advanced binding for a canonical part path, not needed for generated host inputs.
 
 The attachment is the **sole byte owner**. Selection uploads borrow its immutable
 buffer; successful results retain the same owner.
@@ -377,8 +419,8 @@ cannot be reused across invocations. The optional `ContentOptions.Resolver`
 converts a supplied external reference into a lazy attachment at its canonical
 slot. Direct attachment bindings do not require a resolver.
 
-Text/JSON modifications replace a slot's effective attachment owner and require
-explicit target bindings where applicable. Binary editing is not supported. MCP
+Canonical list modifications preserve existing immutable attachment descriptors;
+attachment bytes cannot be edited or replaced by an effect. MCP
 elicitation snapshots retain the parsed original form contract for validating
 the corresponding result boundary.
 
@@ -440,8 +482,8 @@ Composed MCP transport payloads are typed models.
 For example, `ExecutionEventMcpConnection.HTTP` contains
 `Optional[ExecutionEventMcpConnectionHTTP]`; its `URL` and `Gaps` fields expose
 strings and typed gap records. `Sse`, `Stdio`, and `CustomTransport` similarly
-expose their schema-declared location fields. `ModelVisibleItem` exposes typed
-content variants with the required `Role` field.
+expose their schema-declared location fields. `ModelVisibleItem` exposes a canonical
+`Role` and ordered `Parts` with typed content variants.
 
 The structural decoder checks presence predicates such as “URL or gaps”; optional
 Go fields are not permission to omit every alternative. Genuine application JSON, unknown variants, and extension values

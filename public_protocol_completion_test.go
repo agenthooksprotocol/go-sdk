@@ -25,13 +25,17 @@ import (
 	"github.com/agenthooksprotocol/go-sdk/transport"
 )
 
-// This exercises public APIs and actual receiver-allocated uploads, rather than
-// deriving a passing result from the fixture's own composition implementation.
+// This exercises inline instruction composition and actual receiver-allocated
+// attachment uploads through public APIs, preserving receiver isolation coverage.
 func TestPublicResolvedInstructionsAcrossReceivers(t *testing.T) {
 	original := []byte("original instructions\n")
-	const hostRef = "urn:test:host:instructions"
-	var instruction ahp.ContentItem
-	if err := json.Unmarshal(completionJSON(map[string]any{"id": "instructions-1", "kind": "text", "mediaType": "text/plain", "selection": "body", "body": map[string]any{"ref": hostRef}}), &instruction); err != nil {
+	const hostRef = "urn:test:host:report"
+	var instructions ahp.TextParts
+	var attachment ahp.ContentItem
+	if err := json.Unmarshal(completionJSON(map[string]any{"id": "report-1", "kind": "attachment", "mediaType": "application/pdf", "selection": "body", "body": map[string]any{"ref": hostRef}}), &attachment); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(completionJSON([]any{map[string]any{"id": "instructions-1", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": string(original)}}), &instructions); err != nil {
 		t.Fatal(err)
 	}
 	var mu sync.Mutex
@@ -71,22 +75,23 @@ func TestPublicResolvedInstructionsAcrossReceivers(t *testing.T) {
 			var wire map[string]any
 			_ = json.Unmarshal(completionJSON(req), &wire)
 			ev := wire["params"].(map[string]any)["event"].(map[string]any)
-			descriptor := ev["instructions"].(map[string]any)
+			instruction := ev["instructions"].([]any)[0].(map[string]any)
+			descriptor := ev["items"].([]any)[0].(map[string]any)["parts"].([]any)[0].(map[string]any)
 			ref := descriptor["body"].(map[string]any)["ref"].(string)
 			if !strings.HasPrefix(ref, "urn:test:receiver:"+receiver+":") {
 				return ahp.InterceptResponseResult{}, fmt.Errorf("wrong receiver ref")
 			}
 			mu.Lock()
 			raw, ok := stored[ref]
-			seen = append(seen, string(raw))
+			seen = append(seen, instruction["text"].(string))
 			mu.Unlock()
-			if !ok || descriptor["id"] != "instructions-1" {
+			if !ok || !bytes.Equal(raw, original) || descriptor["id"] != "report-1" || instruction["id"] != "instructions-1" {
 				return ahp.InterceptResponseResult{}, fmt.Errorf("unknown bytes or changed logical identity")
 			}
 			version := ahp.ProtocolVersion("draft")
 			effects := []*ahp.Effect{}
 			if receiver == "a" {
-				modification, err := effect.ModifyInstructionsReplace("accepted instructions\n")
+				modification, err := effect.ModifyInstructionsReplace([]any{map[string]any{"id": "instructions-1", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": "accepted instructions\n"}})
 				if err != nil {
 					return ahp.InterceptResponseResult{}, err
 				}
@@ -125,13 +130,14 @@ func TestPublicResolvedInstructionsAcrossReceivers(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer hooks.Close()
-	result, err := hooks.ContextCompactBefore(context.Background(), event.ContextCompactBeforeInput{ID: ahp.Some("compact-public"), Trigger: "manual", Items: []*ahp.ModelVisibleItem{}, Instructions: ahp.Some(&instruction)})
+	result, err := hooks.ContextCompactBefore(context.Background(), event.ContextCompactBeforeInput{ID: ahp.Some("compact-public"), Trigger: "manual", Items: []*ahp.ModelVisibleItem{{ID: "report-message", Role: ahp.ModelVisibleItemRoleUser, Parts: []*ahp.ContentItem{&attachment}}}, Instructions: ahp.Some(&instructions)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result == nil || len(result.Errors) != 0 {
 		t.Fatalf("not accepted: %+v", result)
 	}
+	defer result.Close()
 	mu.Lock()
 	defer mu.Unlock()
 	if len(seen) != 2 || seen[0] != string(original) || seen[1] != "accepted instructions\n" {

@@ -7,12 +7,17 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"strings"
 	"testing"
 
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 )
 
 func targetTestItem(id, media, raw string) (map[string]any, map[string][]byte) {
+	if strings.HasPrefix(media, "text/") || strings.Contains(media, "json") {
+		return targetInlineText(id, raw), map[string][]byte{}
+	}
 	ref := "urn:test:" + id
 	item := contentTestItem(map[string]any{"ref": ref})
 	item["id"], item["mediaType"], item["selection"] = id, media, "body"
@@ -71,7 +76,10 @@ func targetTestCompose(t *testing.T, event map[string]any, target string, p *pre
 }
 func targetTestTemplate(t *testing.T, id, media string) ahp.ContentItem {
 	t.Helper()
-	item, _ := targetTestItem(id, media, "old template bytes")
+	item := targetInlineText(id, "old template bytes")
+	if media != "text/plain" {
+		item["mediaType"] = media
+	}
 	var v ahp.ContentItem
 	if err := json.Unmarshal(sdkJSON(item), &v); err != nil {
 		t.Fatal(err)
@@ -80,44 +88,33 @@ func targetTestTemplate(t *testing.T, id, media string) ahp.ContentItem {
 }
 
 func TestTargetBindingMappings(t *testing.T) {
+
 	for _, tc := range []struct{ event, target, path string }{
 		{"tool.after", "output", "/items"}, {"turn.start", "prompt", "/items"}, {"turn.finish.before", "response", "/items"},
 		{"model.request.before", "request", "/items"}, {"model.response.after", "response", "/items"},
-		{"user.message.inbound", "prompt", "/message/text"}, {"user.message.outbound", "content", "/message/payload"},
+		{"user.message.inbound", "prompt", "/message/messages"}, {"user.message.outbound", "content", "/message/messages"},
 	} {
 		t.Run(tc.event, func(t *testing.T) {
-			item, bodies := targetTestItem("one", "application/json", ` { "native": 1 } `)
-			event := targetTestCanonicalEvent(t, tc.event, []any{item})
-			if _, err := targetTestClient(bodies).prepareBoundary(context.Background(), event, targetTestCaps(tc.target), interceptConfig{}); err == nil {
-				t.Fatal("ambiguous target admitted without binding")
+			messages := []any{targetInlineMessage("one", targetInlineText("part", ` { "native": 1 } `))}
+			if tc.event == "user.message.inbound" {
+				sdkObj(messages[0])["role"] = "user"
 			}
-			for _, suffix := range []string{"", "/0"} {
-				p := targetTestPrepare(t, event, tc.target, bodies, ModificationTarget{Path: tc.path + suffix})
-				values, err := p.values(event)
-				if err != nil {
-					t.Fatal(err)
-				}
-				expected := any(map[string]any{"native": json.Number("1")})
-				if suffix == "" {
-					expected = []any{expected}
-				}
-				if !reflect.DeepEqual(values[tc.target], expected) {
-					t.Fatalf("%s resolved descriptor instead of body: %#v", suffix, values)
-				}
-				replacement := any(map[string]any{"changed": true})
-				if suffix == "" {
-					replacement = []any{replacement}
-				}
-				effects := string(sdkJSON([]any{map[string]any{"type": "modify", "target": tc.target, "operation": "replace", "value": replacement}}))
-				out := targetTestCompose(t, event, tc.target, p, effects)
-				path := tc.path + "/0"
-				if item := preparedAt(compositionObject(out.Event), path); item["body"] != nil || item["selection"] != "metadata" {
-					t.Fatal("edited host descriptor contains transport body", item)
-				}
-
-				if !compositionEqual(compositionObject(preparedTestBytes(out.prepared, path)), map[string]any{"changed": true}) {
-					t.Fatalf("wrong canonical body changed: %s", path)
-				}
+			event := targetTestCanonicalEvent(t, tc.event, messages)
+			p := targetInlinePrepare(t, event, tc.target, nil)
+			values, err := p.values(event)
+			if err != nil || !compositionEqual(values[tc.target], messages) {
+				t.Fatalf("canonical list mapping: %#v %v", values, err)
+			}
+			replacement := []any{targetInlineMessage("changed", targetInlineText("new", "replacement"))}
+			if tc.event == "user.message.inbound" {
+				sdkObj(replacement[0])["role"] = "user"
+			}
+			out := targetTestCompose(t, event, tc.target, p, string(sdkJSON([]any{map[string]any{"type": "modify", "target": tc.target, "operation": "replace", "value": replacement}})))
+			if !compositionEqual(inlineAt(compositionObject(out.Event), tc.path), replacement) || len(out.prepared.sources) != 0 || len(out.prepared.owned) != 0 {
+				t.Fatal("inline modification allocated a body owner", string(out.Event))
+			}
+			if !compositionEqual(inlineAt(event, tc.path), messages) {
+				t.Fatal("host input mutated")
 			}
 		})
 	}
@@ -130,138 +127,136 @@ func TestTargetBindingMappings(t *testing.T) {
 }
 
 func TestTargetScalarMergeAndExactUntouchedBytes(t *testing.T) {
-	original := " { \"keep\": 1, \"nested\": {\"old\": true} }\n"
-	item, bodies := targetTestItem("one", "application/json", original)
-	event := targetTestEvent(t, []any{item})
-	p := targetTestPrepare(t, event, "output", bodies, ModificationTarget{Path: "/items/0"})
-	for _, effects := range []string{`[]`, `[{"type":"modify","target":"output","operation":"replace","value":{"keep":1,"nested":{"old":true}}}]`} {
-		out := targetTestCompose(t, event, "output", p, effects)
-		if !reflect.DeepEqual(out.prepared.sources, p.sources) {
-			t.Fatal("unchanged semantic value rewrote exact JSON bytes")
-		}
-		if !compositionEqual(compositionObject(out.Event), compositionObject(sdkJSON(event))) {
-			t.Fatal("unchanged event descriptor was rewritten")
-		}
-	}
-	out := targetTestCompose(t, event, "output", p, `[{"type":"modify","target":"output","operation":"merge","value":{"nested":{"new":2},"literal":null}}]`)
-	expected := compositionObject([]byte(`{"keep":1,"nested":{"new":2},"literal":null}`))
-	if !compositionEqual(compositionObject(compositionTestEffectiveValue(t, out, "output")), expected) {
-		t.Fatalf("merge used descriptor: %s", compositionTestEffectiveValue(t, out, "output"))
-	}
-	changed := preparedAt(compositionObject(out.Event), "/items/0")
 
-	if !compositionEqual(compositionObject(preparedTestBytes(out.prepared, "/items/0")), expected) {
-		t.Fatal("effective body not updated")
+	original := " { \"keep\": 1, \"nested\": {\"old\": true} }\n"
+	messages := []any{targetInlineMessage("one", targetInlineText("json", original))}
+	event := targetTestCanonicalEvent(t, "model.request.before", messages)
+	p := targetInlinePrepare(t, event, "request", nil)
+	for _, operation := range []string{"none", "replace"} {
+		effects := `[]`
+		if operation == "replace" {
+			effects = string(sdkJSON([]any{map[string]any{"type": "modify", "target": "request", "operation": "replace", "value": messages}}))
+		}
+		out := targetTestCompose(t, event, "request", p, effects)
+		part := sdkObj(sdkArray(sdkObj(sdkArray(compositionObject(out.Event)["items"])[0])["parts"])[0])
+		if part["text"] != original || part["body"] != nil || len(out.prepared.sources) != 0 || len(out.prepared.owned) != 0 {
+			t.Fatal("exact inline JSON rewritten or snapshotted", part)
+		}
 	}
-	if changed["id"] != item["id"] || changed["mediaType"] != item["mediaType"] {
-		t.Fatal("host descriptor identity lost")
+	// Lists append whole messages, preserving duplicate identities and text bytes.
+	appended := targetTestCompose(t, event, "request", p, string(sdkJSON([]any{map[string]any{"type": "modify", "target": "request", "operation": "merge", "value": messages}})))
+	if len(sdkArray(compositionObject(appended.Event)["items"])) != 2 {
+		t.Fatal("merge did not append duplicate messages")
 	}
-	if string(preparedTestBytes(p, "/items/0")) != original {
-		t.Fatal("caller prepared store mutated")
+	// Actual objects still merge shallowly, retaining literal null and replacing nested values.
+	req := compositionTestRequest(t)
+	out, err := compose(req, compositionTestResponse(t, `[{"type":"modify","target":"input","operation":"merge","value":{"nested":{"new":2},"literal":null}}]`))
+	if err != nil {
+		t.Fatal(err)
 	}
-	text, textBodies := targetTestItem("text", "text/plain", "before")
-	textEvent := targetTestEvent(t, []any{text})
-	textP := targetTestPrepare(t, textEvent, "output", textBodies, ModificationTarget{Path: "/items/0"})
-	textOut := targetTestCompose(t, textEvent, "output", textP, `[{"type":"modify","target":"output","operation":"replace","value":"after"}]`)
-	if string(compositionTestEffectiveValue(t, textOut, "output")) != `"after"` {
-		t.Fatal("scalar string replacement failed")
+	input := compositionObject(out.EffectiveInput)
+	nested := sdkObj(input["nested"])
+	if nested["a"] != nil || !compositionEqual(nested["new"], json.Number("2")) {
+		t.Fatal("nested object merged recursively", input)
+	}
+	if value, ok := input["literal"]; !ok || value != nil {
+		t.Fatal("literal null removed", input)
+	}
+	parsed := ahp.ParseInterceptResponse([]byte(`{"jsonrpc":"2.0","id":"test","result":{"effects":[{"type":"modify","target":"request","operation":"merge","value":"not a message list"}]}}`))
+	if parsed.OK {
+		t.Fatal("scalar list merge accepted")
 	}
 }
 
 func TestTargetCollectionAddRemoveAndRollback(t *testing.T) {
-	item, bodies := targetTestItem("one", "application/json", `{"n":1}`)
-	event := targetTestEvent(t, []any{item})
-	binding := ModificationTarget{Path: "/items", Templates: []ahp.ContentItem{targetTestTemplate(t, "unused", "application/json"), targetTestTemplate(t, "added", "text/plain")}}
-	p := targetTestPrepare(t, event, "output", bodies, binding)
-	out := targetTestCompose(t, event, "output", p, `[{"type":"modify","target":"output","operation":"replace","value":[{"n":2},"new"]}]`)
-	gotEvent := compositionObject(out.Event)
-	items := sdkArray(gotEvent["items"])
-	if len(items) != 2 || sdkObj(items[0])["id"] != "one" || sdkObj(items[1])["id"] != "added" {
-		t.Fatalf("wrong host templates: %#v", items)
+
+	attachment := map[string]any{"id": "binary", "kind": "attachment", "mediaType": "application/octet-stream", "selection": "body", "body": map[string]any{"ref": "original-ref"}}
+	textMessage := targetInlineMessage("text", targetInlineText("part", "original text"))
+	binaryMessage := targetInlineMessage("binary-message", attachment)
+	event := targetTestCanonicalEvent(t, "model.request.before", []any{textMessage, binaryMessage})
+	p := targetInlinePrepare(t, event, "request", map[string][]byte{"original-ref": []byte("immutable binary")})
+	owner := p.sources["/items/1/parts/0"]
+	if owner == nil {
+		t.Fatal("binary owner missing")
 	}
-	if string(preparedTestBytes(out.prepared, "/items/1")) != "new" {
-		t.Fatal("template body reused instead of new bytes")
+	defer owner.Retire()
+	replacement := []any{binaryMessage, targetInlineMessage("new", targetInlineText("new-part", "new text"))}
+	out := targetTestCompose(t, event, "request", p, string(sdkJSON([]any{map[string]any{"type": "modify", "target": "request", "operation": "replace", "value": replacement}})))
+	if out.prepared.sources["/items/0/parts/0"] != owner || len(out.prepared.sources) != 1 || len(out.prepared.owned) != 1 {
+		t.Fatal("reordering replaced immutable owner")
 	}
-	removed := targetTestCompose(t, gotEvent, "output", out.prepared, `[{"type":"modify","target":"output","operation":"replace","value":[]}]`)
-	if len(sdkArray(compositionObject(removed.Event)["items"])) != 0 || len(removed.prepared.sources) != 0 || string(compositionTestEffectiveValue(t, removed, "output")) != "[]" {
-		t.Fatal("empty replacement failed to remove descriptors and bodies")
+	if _, ok := ownedcontent.Available(owner); ok {
+		t.Fatal("text edit materialized binary owner")
 	}
 	for _, tc := range []struct {
-		name, effects string
-		templates     bool
+		name  string
+		value any
 	}{
-		{"singleton-object", `[{"type":"modify","target":"output","operation":"replace","value":{"n":2}}]`, true},
-		{"missing-template", `[{"type":"modify","target":"output","operation":"replace","value":[{"n":2},"new"]}]`, false},
-		{"wrong-template-body", `[{"type":"modify","target":"output","operation":"replace","value":[{"n":2},{"not":"text"}]}]`, true},
-		{"later-invalid-shape", `[{"type":"modify","target":"output","operation":"replace","value":[{"n":2}]},{"type":"message","text":"must not publish"},{"type":"modify","target":"output","operation":"replace","value":null}]`, true},
+		{"introduced-attachment", []any{targetInlineMessage("new", map[string]any{"id": "unknown", "kind": "attachment", "mediaType": "application/octet-stream", "selection": "metadata"})}},
+		{"retargeted-attachment", []any{targetInlineMessage("binary-message", map[string]any{"id": "binary", "kind": "attachment", "mediaType": "application/octet-stream", "selection": "body", "body": map[string]any{"ref": "different"}})}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			b := binding
-			if !tc.templates {
-				b.Templates = nil
-			}
-			prepared := targetTestPrepare(t, event, "output", bodies, b)
-			beforeEvent := string(sdkJSON(event))
-			beforeSources := prepared.clone().sources
-			beforeSlots := string(sdkJSON(prepared.slots))
-			result, err := composePrepared(targetTestRequest(t, event, "output"), compositionTestResponse(t, tc.effects), prepared)
+			before := string(sdkJSON(event))
+			beforeSources := p.clone().sources
+			effects := []any{map[string]any{"type": "modify", "target": "request", "operation": "replace", "value": []any{textMessage}}, map[string]any{"type": "message", "text": "must not publish"}, map[string]any{"type": "modify", "target": "request", "operation": "replace", "value": tc.value}}
+			result, err := composePrepared(targetTestRequest(t, event, "request"), compositionTestResponse(t, string(sdkJSON(effects))), p)
 			if err == nil || result != nil {
-				t.Fatal("invalid modification published")
+				t.Fatal("invalid staged attachment edit published")
 			}
-			if string(sdkJSON(event)) != beforeEvent || !reflect.DeepEqual(prepared.sources, beforeSources) || string(sdkJSON(prepared.slots)) != beforeSlots {
-				t.Fatal("failed response mutated original event/store")
+			if string(sdkJSON(event)) != before || !reflect.DeepEqual(p.sources, beforeSources) || len(p.owned) != 1 {
+				t.Fatal("atomic failure changed original owner index")
 			}
 		})
 	}
-	// Appending to an empty collection still requires a template at output index zero.
-	empty := targetTestEvent(t, []any{})
-	emptyP := targetTestPrepare(t, empty, "output", nil, ModificationTarget{Path: "/items", Templates: []ahp.ContentItem{targetTestTemplate(t, "first", "text/plain")}})
-	added := targetTestCompose(t, empty, "output", emptyP, `[{"type":"modify","target":"output","operation":"replace","value":["hello"]}]`)
-	if len(sdkArray(compositionObject(added.Event)["items"])) != 1 {
-		t.Fatal("empty collection append failed")
+	removed := targetTestCompose(t, compositionObject(out.Event), "request", out.prepared, `[{"type":"modify","target":"request","operation":"replace","value":[]}]`)
+	if len(sdkArray(compositionObject(removed.Event)["items"])) != 0 || len(removed.prepared.sources) != 0 || string(compositionTestEffectiveValue(t, removed, "request")) != "[]" {
+		t.Fatal("empty replacement retained content positions")
+	}
+	empty := targetTestCanonicalEvent(t, "model.request.before", []any{})
+	emptyP := targetInlinePrepare(t, empty, "request", nil)
+	added := targetTestCompose(t, empty, "request", emptyP, string(sdkJSON([]any{map[string]any{"type": "modify", "target": "request", "operation": "merge", "value": []any{textMessage}}})))
+	if len(sdkArray(compositionObject(added.Event)["items"])) != 1 || len(added.prepared.sources) != 0 {
+		t.Fatal("empty list append required a host template")
 	}
 }
 
 func TestTargetBadPathsRejected(t *testing.T) {
-	item, bodies := targetTestItem("one", "application/json", `{}`)
-	event := targetTestEvent(t, []any{item})
-	for _, path := range []string{"", "items", "/items/-1", "/items/01", "/items/1", "/items/0/body", "/items/0/", "/tool/input", "/message/text", "/params", "/items/+0", "/items/0~1body"} {
+
+	event := targetTestEvent(t, []any{targetInlineMessage("one", targetInlineText("text", "{}"))})
+	for _, path := range []string{"", "items", "/items/-1", "/items/01", "/items/1", "/items/0/body", "/items/0/", "/tool/input", "/message/text", "/params", "/items/+0", "/items/0~1body", "/items/0"} {
 		t.Run(path, func(t *testing.T) {
 			cfg := interceptConfig{}
 			WithModificationTarget("output", ModificationTarget{Path: path})(&cfg)
-			if _, err := targetTestClient(bodies).prepareBoundary(context.Background(), event, targetTestCaps("output"), cfg); err == nil {
-				t.Fatalf("bad path admitted: %q", path)
+			if _, err := targetTestClient(nil).prepareBoundary(context.Background(), event, targetTestCaps("output"), cfg); err == nil {
+				t.Fatal("legacy indexed body target accepted", path)
 			}
 		})
 	}
 	cfg := interceptConfig{}
 	WithModificationTarget("output", ModificationTarget{Path: "/items/0", Templates: []ahp.ContentItem{targetTestTemplate(t, "bad", "text/plain")}})(&cfg)
-	if _, err := targetTestClient(bodies).prepareBoundary(context.Background(), event, targetTestCaps("output"), cfg); err == nil {
-		t.Fatal("scalar binding admitted templates")
+	if _, err := targetTestClient(nil).prepareBoundary(context.Background(), event, targetTestCaps("output"), cfg); err == nil {
+		t.Fatal("scalar legacy target accepted item templates")
 	}
 }
 
 func TestTargetParamsAndWorkspaceMappings(t *testing.T) {
-	event := map[string]any{"type": "model.request.before", "params": map[string]any{"temperature": json.Number("1"), "nested": map[string]any{"old": true}}, "items": []any{}}
-	p := targetTestPrepare(t, event, "request", nil, ModificationTarget{Path: "/params"})
+
+	event := targetTestCanonicalEvent(t, "model.request.before", []any{})
+	opaque := map[string]any{"temperature": json.Number("1"), "nested": map[string]any{"old": true}, "lookalike": map[string]any{"kind": "text", "text": "native", "body": map[string]any{"ref": "never-resolve"}}}
+	event["params"] = opaque
+	p := targetInlinePrepare(t, event, "request", nil)
 	values, err := p.values(event)
-	if err != nil || !compositionEqual(values["request"], event["params"]) {
-		t.Fatalf("params not resolved: %v %v", values, err)
+	if err != nil || !compositionEqual(values["request"], []any{}) || len(p.sources) != 0 {
+		t.Fatalf("native params treated as canonical content: %v %v", values, err)
 	}
-	replacement := map[string]any{"temperature": json.Number("2")}
-	if err := p.apply(event, "request", replacement); err != nil {
-		t.Fatal(err)
-	}
-	if !compositionEqual(event["params"], replacement) || len(p.sources) != 0 {
-		t.Fatal("params replaced as descriptor or retained omitted keys")
-	}
-	if err := p.apply(event, "request", []any{}); err == nil {
-		t.Fatal("params accepted nonobject")
+	out := targetTestCompose(t, event, "request", p, string(sdkJSON([]any{map[string]any{"type": "modify", "target": "request", "operation": "replace", "value": []any{targetInlineMessage("new", targetInlineText("part", "new"))}}})))
+	if !compositionEqual(compositionObject(out.Event)["params"], opaque) {
+		t.Fatal("canonical edit changed opaque params")
 	}
 	cfg := interceptConfig{}
 	WithModificationTarget("request", ModificationTarget{Path: "/params", Templates: []ahp.ContentItem{targetTestTemplate(t, "bad", "text/plain")}})(&cfg)
 	if _, err := targetTestClient(nil).prepareBoundary(context.Background(), event, targetTestCaps("request"), cfg); err == nil {
-		t.Fatal("params accepted descriptor templates")
+		t.Fatal("native params accepted descriptor templates")
 	}
 	workspace := map[string]any{"type": "workspace.change.before", "workspace": map[string]any{"kind": "cwd", "change": map[string]any{"cwd": "/old"}, "prior": map[string]any{"cwd": "/prior"}}}
 	wp, err := targetTestClient(nil).prepareBoundary(context.Background(), workspace, targetTestCaps("workspace"), interceptConfig{})
@@ -302,35 +297,37 @@ func targetTestCanonicalEvent(t *testing.T, kind string, items []any) map[string
 		}
 	case "user.message.inbound":
 		delete(event, "items")
-		event["message"] = map[string]any{"channel": "test", "sender": "user", "text": items}
+		event["message"] = map[string]any{"channel": "test", "sender": "user", "messages": items}
 	case "user.message.outbound":
 		delete(event, "items")
-		event["message"] = map[string]any{"channel": "test", "payload": items}
+		event["message"] = map[string]any{"channel": "test", "messages": items}
 	}
 	return event
 }
 
 func TestTargetParamsCompositionMergeAndReplace(t *testing.T) {
-	event := targetTestCanonicalEvent(t, "model.request.before", []any{})
+
+	event := targetTestCanonicalEvent(t, "model.request.before", []any{targetInlineMessage("original", targetInlineText("part", "old"))})
 	event["params"] = compositionObject([]byte(`{"temperature":1,"nested":{"old":true},"keep":1}`))
-	p := targetTestPrepare(t, event, "request", nil, ModificationTarget{Path: "/params"})
-	for _, tc := range []struct{ name, op, value, want string }{
-		{"merge", "merge", `{"nested":{"new":2},"literal":null}`, `{"temperature":1,"nested":{"new":2},"keep":1,"literal":null}`},
-		{"replace", "replace", `{"temperature":2}`, `{"temperature":2}`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			out := targetTestCompose(t, event, "request", p, `[{"type":"modify","target":"request","operation":"`+tc.op+`","value":`+tc.value+`}]`)
-			if !compositionEqual(sdkObj(compositionObject(out.Event)["params"]), compositionObject([]byte(tc.want))) {
-				t.Fatalf("params semantics: %s", out.Event)
+	p := targetInlinePrepare(t, event, "request", nil)
+	for _, operation := range []string{"merge", "replace"} {
+		t.Run(operation, func(t *testing.T) {
+			legacy := `{"jsonrpc":"2.0","id":"test","result":{"effects":[{"type":"modify","target":"request","operation":"` + operation + `","value":{"temperature":2}}]}}`
+			if ahp.ParseInterceptResponse([]byte(legacy)).OK {
+				t.Fatal("legacy native params object edit accepted")
 			}
-			if len(out.prepared.sources) != 0 {
-				t.Fatal("params modification invented content bodies")
+			out := targetTestCompose(t, event, "request", p, string(sdkJSON([]any{map[string]any{"type": "modify", "target": "request", "operation": operation, "value": []any{targetInlineMessage("new", targetInlineText("new-part", "new"))}}})))
+			if !compositionEqual(compositionObject(out.Event)["params"], event["params"]) || len(out.prepared.sources) != 0 || len(out.prepared.owned) != 0 {
+				t.Fatal("canonical edit mutated native params or invented bodies")
+			}
+			want := 1
+			if operation == "merge" {
+				want = 2
+			}
+			if len(sdkArray(compositionObject(out.Event)["items"])) != want {
+				t.Fatal("wrong list operation")
 			}
 		})
-	}
-	result, err := composePrepared(targetTestRequest(t, event, "request"), compositionTestResponse(t, `[{"type":"modify","target":"request","operation":"replace","value":[]}]`), p)
-	if err == nil || result != nil {
-		t.Fatal("nonobject params replacement accepted")
 	}
 }
 
@@ -344,14 +341,18 @@ func compositionTestEffectiveValue(t *testing.T, c *Composition, target string) 
 }
 
 func TestCompositionEffectiveValueUsesOwnerOnDemand(t *testing.T) {
-	item, bodies := targetTestItem("one", "text/plain", "original")
-	event := targetTestEvent(t, []any{item})
-	p := targetTestPrepare(t, event, "output", bodies, ModificationTarget{Path: "/items/0"})
-	result := targetTestCompose(t, event, "output", p, `[]`)
-	raw := compositionTestEffectiveValue(t, result, "output")
+
+	event := targetTestCanonicalEvent(t, "model.request.before", []any{targetInlineMessage("one", targetInlineText("part", "original"))})
+	p := targetInlinePrepare(t, event, "request", nil)
+	result := targetTestCompose(t, event, "request", p, `[]`)
+	raw := compositionTestEffectiveValue(t, result, "request")
+	original := string(raw)
 	raw[1] = 'X'
-	if got := string(compositionTestEffectiveValue(t, result, "output")); got != `"original"` {
+	if got := string(compositionTestEffectiveValue(t, result, "request")); got != original {
 		t.Fatal("accessor returned shared mutable bytes", got)
+	}
+	if len(p.sources) != 0 || len(p.owned) != 0 {
+		t.Fatal("inline accessor created content owners")
 	}
 	if _, err := result.EffectiveValue("missing"); err == nil {
 		t.Fatal("unknown target available")
@@ -359,25 +360,17 @@ func TestCompositionEffectiveValueUsesOwnerOnDemand(t *testing.T) {
 	if _, err := result.EffectiveValue("input"); err == nil {
 		t.Fatal("non-input accessor exposed input")
 	}
-	for owner := range p.owned {
-		_ = owner.Retire()
-	}
-	if _, err := result.EffectiveValue("output"); err == nil {
-		t.Fatal("accessor retained duplicate body bytes after retirement")
-	}
-	if _, err := (&Composition{Event: sdkJSON(event)}).EffectiveValue("output"); err == nil {
-		t.Fatal("protocol-only composition exposed prepared value")
-	}
 }
 
 func TestCompositionEffectiveValueDoesNotOpenLazyOwner(t *testing.T) {
-	item, bodies := targetTestItem("one", "text/plain", "original")
-	event := targetTestEvent(t, []any{item})
+
+	attachment := map[string]any{"id": "binary", "kind": "attachment", "mediaType": "application/octet-stream", "selection": "body", "body": map[string]any{"ref": "inbound"}}
+	event := targetTestCanonicalEvent(t, "model.request.before", []any{targetInlineMessage("one", targetInlineText("text", "inline"), attachment)})
 	var opens int
-	c := targetTestClient(bodies)
+	c := targetTestClient(map[string][]byte{"inbound": []byte("binary bytes")})
 	resolver := c.opts.Content.Resolver
 	c.opts.Content.Resolver = func(ctx context.Context, ref string) (io.ReadCloser, error) { opens++; return resolver(ctx, ref) }
-	p, err := c.prepareBoundary(context.Background(), event, nil, interceptConfig{})
+	p, err := c.prepareBoundary(context.Background(), event, targetTestCaps("request"), interceptConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,12 +379,104 @@ func TestCompositionEffectiveValueDoesNotOpenLazyOwner(t *testing.T) {
 			_ = owner.Retire()
 		}
 	}()
-	p.slots["output"] = []string{"/items/0"}
 	result := &Composition{Event: sdkJSON(event), prepared: p}
-	if _, err := result.EffectiveValue("output"); err == nil {
-		t.Fatal("unread owner exposed a value")
+	raw, err := result.EffectiveValue("request")
+	if err != nil || !compositionEqual(sdkArray(jsonMustDecode(t, raw)), event["items"]) {
+		t.Fatalf("canonical value unavailable: %s %v", raw, err)
 	}
 	if opens != 0 {
-		t.Fatal("accessor opened lazy owner")
+		t.Fatal("accessor opened lazy binary owner")
+	}
+	if _, ok := ownedcontent.Available(p.sources["/items/0/parts/1"]); ok {
+		t.Fatal("accessor snapshotted lazy owner")
+	}
+}
+
+func targetInlineText(id, text string) map[string]any {
+	return map[string]any{"id": id, "kind": "text", "mediaType": "text/plain", "selection": "body", "text": text}
+}
+func targetInlineMessage(id string, parts ...any) map[string]any {
+	return map[string]any{"id": id, "role": "assistant", "parts": parts}
+}
+func targetInlinePrepare(t *testing.T, event map[string]any, target string, bodies map[string][]byte) *preparedBoundary {
+	t.Helper()
+	c := targetTestClient(bodies)
+	c.opts.Content.AuthorizeContent = contentTestAllow
+	p, err := c.prepareBoundary(context.Background(), event, targetTestCaps(target), interceptConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+func jsonMustDecode(t *testing.T, raw []byte) any {
+	t.Helper()
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		t.Fatal(err)
+	}
+	return value
+}
+
+func TestToolAfterOutputCanonicalLists(t *testing.T) {
+	for _, operation := range []string{"replace", "merge"} {
+		t.Run(operation, func(t *testing.T) {
+			attachment := map[string]any{"id": "binary", "kind": "attachment", "mediaType": "application/octet-stream", "selection": "body", "body": map[string]any{"ref": "host-binary"}}
+			first := map[string]any{"id": "first", "role": "assistant", "parts": []any{map[string]any{"id": "first-text", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": "first"}, attachment}}
+			second := map[string]any{"id": "second", "role": "assistant", "parts": []any{map[string]any{"id": "second-text", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": "second"}}}
+			original := []any{first, second}
+			event := map[string]any{"id": "test", "source": "urn:test", "time": "2026-01-01T00:00:00Z", "type": "tool.after", "call": map[string]any{"id": "call"}, "path": "execute", "tool": map[string]any{"name": "task", "kind": "task", "origin": "native", "input": map[string]any{"native": "opaque"}}, "outcome": "ok", "execution": map[string]any{"status": "executed"}, "items": original}
+			before := string(sdkJSON(event))
+			caps := map[string]any{"effects": []any{"modify"}, "modify": map[string]any{"output": map[string]any{"replace": true, "merge": true}}}
+			opens := 0
+			c := &Client{opts: Options{Content: ContentOptions{Resolver: func(context.Context, string) (io.ReadCloser, error) {
+				opens++
+				return io.NopCloser(strings.NewReader("immutable binary")), nil
+			}}}}
+			p, err := c.prepareBoundary(context.Background(), event, caps, interceptConfig{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			owner := p.sources["/items/0/parts/1"]
+			if owner == nil {
+				t.Fatal("existing binary owner missing")
+			}
+			defer owner.Retire()
+			request := ahp.ParseInterceptRequest(sdkJSON(map[string]any{"jsonrpc": "2.0", "id": "test", "method": "hooks/intercept", "params": map[string]any{"protocolVersion": "draft", "event": event, "capabilities": caps}}))
+			if !request.OK {
+				t.Fatal(request.Diagnostics)
+			}
+			incoming := []any{second, first, first}
+			response := ahp.ParseInterceptResponse(sdkJSON(map[string]any{"jsonrpc": "2.0", "id": "test", "result": map[string]any{"protocolVersion": "draft", "effects": []any{map[string]any{"type": "modify", "target": "output", "operation": operation, "value": incoming}}}}))
+			if !response.OK {
+				t.Fatal(response.Diagnostics)
+			}
+			encodedRequest, _ := ahp.EncodeInterceptRequest(request.Value)
+			if parsed := ahp.ParseInterceptRequest(encodedRequest); !parsed.OK {
+				t.Fatalf("encoded request invalid: %v %s", parsed.Diagnostics, encodedRequest)
+			}
+			accepted, err := composePrepared(request.Value, response.Value, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := incoming
+			if operation == "merge" {
+				want = append(append([]any{}, original...), incoming...)
+			}
+			effective := compositionObject(accepted.Event)
+			if !compositionEqual(effective["items"], want) {
+				t.Fatal("output list lost ordering or duplicate messages", effective["items"])
+			}
+			for i, message := range sdkArray(effective["items"]) {
+				if sdkObj(message)["id"] == "first" && accepted.prepared.sources[fmt.Sprintf("/items/%d/parts/1", i)] != owner {
+					t.Fatal("output edit replaced existing immutable owner", i)
+				}
+			}
+			if len(accepted.prepared.owned) != 1 || opens != 0 {
+				t.Fatal("output edit created/snapshotted owners", len(accepted.prepared.owned), opens)
+			}
+			if string(sdkJSON(event)) != before || !compositionEqual(sdkObj(effective["tool"])["input"], sdkObj(event["tool"])["input"]) {
+				t.Fatal("output list edit changed host/native JSON")
+			}
+		})
 	}
 }

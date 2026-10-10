@@ -19,7 +19,7 @@ func TestLifecycleObserveValidationAndAuthorization(t *testing.T) {
 	event := obj(clone(obj(request("observe-test")["params"])["event"]))
 	text := "immutable bytes"
 	ref := Object{"ref": "urn:test:body"}
-	event["items"] = []any{Object{"id": "item", "kind": "text", "mediaType": "text/plain", "selection": "body", "body": ref}}
+	event["items"] = []any{Object{"id": "item", "kind": "attachment", "mediaType": "application/octet-stream", "selection": "body", "body": ref}}
 	notification := Object{"jsonrpc": "2.0", "method": "hooks/observe", "params": Object{"protocolVersion": "draft", "event": event}}
 	if _, e = s.dispatch(context.Background(), notification); e == nil {
 		t.Fatal("missing upload accepted")
@@ -86,7 +86,7 @@ func TestLifecycleStagingCancellationAndUpload(t *testing.T) {
 	prefix := obj(obj(req["params"])["state"])
 	prefix["flow"] = "stop"
 	prefix["instructions"] = []any{"accepted-prefix"}
-	prefix["injections"] = []any{Object{"type": "inject", "target": "context", "operation": "append", "deliverAt": "next_turn", "value": "retained-context"}}
+	prefix["injections"] = []any{Object{"type": "inject", "target": "context", "operation": "append", "deliverAt": "next_turn", "value": contextMessages("retained-context")}}
 	validator, err := newLifecycleValidator(schemaPath(t))
 	if err != nil {
 		t.Fatal(err)

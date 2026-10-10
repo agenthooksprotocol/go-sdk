@@ -65,34 +65,43 @@ func TestPublicDispatchRetainedResultsAndSources(t *testing.T) {
 }
 
 func TestPreparedResultRetainsReplacementOwner(t *testing.T) {
+	// Canonical text is inline; existing binary bytes remain owned by the same attachment.
 	source := content.NewAttachment([]byte("replacement"))
-	p := &preparedBoundary{sources: map[string]*ContentSource{"/items/0": source}, slots: map[string][]string{"output": {"/items/0"}}}
-	event := map[string]any{"items": []any{contentTestItem(nil)}}
+	path := "/items/0/parts/1"
+	attachment := map[string]any{"id": "binary", "kind": "attachment", "mediaType": "application/octet-stream", "selection": "metadata"}
+	event := targetTestCanonicalEvent(t, "model.request.before", []any{targetInlineMessage("message", targetInlineText("text", "inline replacement"), attachment)})
+	p := &preparedBoundary{sources: map[string]*ContentSource{path: source}, slots: map[string][]string{"request": {"/items"}}}
 	result := &Result{Event: sdkJSON(event)}
 	result.retainAttachments(contentSourceConfig(nil), context.Background(), p, 64)
-	delete(p.sources, "/items/0")
-	if result.attachments["/items/0"] != source {
-		t.Fatal("result created a second owner")
+	delete(p.sources, path)
+	if result.attachments[path] != source || len(result.attachments) != 1 {
+		t.Fatal("result created a second owner or text snapshot")
 	}
-	encoded, err := result.EffectiveValue("output")
-	if err != nil || string(encoded) != `"replacement"` {
+	encoded, err := result.EffectiveValue("request")
+	want := string(sdkJSON(event["items"]))
+	if err != nil || string(encoded) != want {
 		t.Fatal(err, string(encoded))
 	}
 	encoded[0] = 'X'
-	againValue, err := result.EffectiveValue("output")
-	if err != nil || string(againValue) != `"replacement"` {
+	againValue, err := result.EffectiveValue("request")
+	if err != nil || string(againValue) != want {
 		t.Fatal("effective value shared caller bytes", err)
 	}
-	got, ok := result.Content("/items/0")
+	got, ok := result.Content(path)
 	if !ok || string(got) != "replacement" {
 		t.Fatal(string(got))
 	}
 	got[0] = 'X'
-	again, _ := result.Content("/items/0")
+	again, _ := result.Content(path)
 	if string(again) != "replacement" {
-		t.Fatal("caller mutated owner")
+		t.Fatal("caller mutated binary owner")
 	}
-	_ = result.Close()
+	if _, ok := result.Content("/items/0/parts/0"); ok {
+		t.Fatal("inline text acquired attachment bytes")
+	}
+	if err := result.Close(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestPublicDispatchCancellationRetiresSource(t *testing.T) {

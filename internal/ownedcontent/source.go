@@ -16,48 +16,35 @@ import (
 // Close must unblock Read: cancellation may close the reader concurrently.
 // A source must not be reused across occurrences or read by its caller after transfer.
 type Source struct {
-	openCancel context.CancelFunc
-	openDone   chan struct{}
-	readerMu   sync.Mutex
-	opener     func(context.Context) (io.ReadCloser, error)
-	cleanup    func() error
-	lifetime   sync.RWMutex
-	retired    bool
-	reader     io.ReadCloser
-	once       sync.Once
-	closeOnce  sync.Once
-	claimed    atomic.Bool
-	closed     atomic.Bool
-	ready      atomic.Bool
-	raw        []byte
-	err        error
-	closeErr   error
+	lifetime  sync.RWMutex
+	retired   bool
+	cancelled bool
+	done      chan struct{}
+	cancel    context.CancelFunc
+	waiters   int
+	reader    io.ReadCloser
+	opener    func(context.Context) (io.ReadCloser, error)
+	cleanup   func() error
+	once      sync.Once // retained for eager construction
+	closeOnce sync.Once
+	claimed   atomic.Bool
+	closed    atomic.Bool
+	ready     atomic.Bool
+	raw       []byte
+	err       error
+	closeErr  error
 }
 
 // NewSource wraps a reader without consuming bytes or uploading anything.
 // Call Close if the source is never passed to a boundary.
 func NewSource(reader io.ReadCloser) *Source { return &Source{reader: reader} }
 
-// closeReader releases I/O but leaves the immutable snapshot available to fan-out.
+// closeReader is called by the materializer, or retirement of an idle owner.
 func (s *Source) closeReader() error {
-	if s == nil {
-		return nil
-	}
 	s.closeOnce.Do(func() {
 		s.closed.Store(true)
-		s.readerMu.Lock()
-		reader := s.reader
-		cancel := s.openCancel
-		openDone := s.openDone
-		s.readerMu.Unlock()
-		if cancel != nil {
-			cancel()
-		}
-		if openDone != nil {
-			<-openDone
-		}
-		if reader != nil {
-			s.closeErr = reader.Close()
+		if s.reader != nil {
+			s.closeErr = s.reader.Close()
 		}
 		if s.cleanup != nil {
 			s.closeErr = errors.Join(s.closeErr, s.cleanup())
@@ -70,30 +57,71 @@ func (s *Source) closeReader() error {
 // Do not call it after transferring ownership to a boundary; close its result.
 func (s *Source) Close() error { return s.Retire() }
 
-// Retire is the adapter-compatible spelling of Close. It interrupts and joins
-// active materialization before releasing backing storage.
+// Retire interrupts and joins active materialization before releasing storage.
 func (s *Source) Retire() error {
 	if s == nil {
 		return nil
 	}
-	err := s.closeReader()
+	s.lifetime.Lock()
+	s.retired = true
+	done := s.done
+	if s.cancel != nil {
+		s.cancel()
+	}
+	if done == nil {
+		_ = s.closeReader()
+	}
+	s.lifetime.Unlock()
+	if done != nil {
+		<-done
+	}
 	s.lifetime.Lock()
 	defer s.lifetime.Unlock()
-	s.retired = true
-	s.raw = nil
-	s.reader = nil
-	s.openCancel = nil
-	s.openDone = nil
-	s.opener = nil
-	s.cleanup = nil
-	s.err = nil
-	return err
+	s.raw, s.reader, s.opener, s.cleanup = nil, nil, nil, nil
+	s.cancel = nil
+	return s.closeErr
 }
 
 type contentSourceReader struct{ *Source }
 
 func (s contentSourceReader) Read(p []byte) (int, error) { return s.reader.Read(p) }
 func (s contentSourceReader) Close() error               { return s.closeReader() }
+
+// materialize is the single bounded worker owned and joined by its consumers.
+func (s *Source) materialize(ctx context.Context, limit int64) {
+	var raw []byte
+	var err error
+	if err = ctx.Err(); err == nil && s.opener != nil {
+		s.reader, err = s.opener(ctx)
+	}
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err == nil && s.reader == nil {
+		err = errors.New("content source is closed or has no reader")
+	}
+	if err == nil {
+		raw, err = readOwnedContent(ctx, contentSourceReader{s}, limit)
+	}
+	_ = s.closeReader()
+	if err == nil && int64(len(raw)) > limit {
+		raw = nil
+		err = errors.New("content exceeds byte limit")
+	}
+	s.lifetime.Lock()
+	defer s.lifetime.Unlock()
+	if ctx.Err() != nil {
+		s.cancelled = true
+		raw = nil
+		err = ctx.Err()
+	}
+	s.raw, s.err = raw, err
+	s.reader, s.opener, s.cleanup = nil, nil, nil
+	s.ready.Store(true)
+	s.cancel() // release the bounded worker context after publishing its state
+	s.cancel = nil
+	close(s.done)
+}
 
 // Snapshot reads a bounded immutable snapshot once. SDK adapters call it only after
 // receiver selection and authorization. The returned bytes are detached from the cached snapshot.
@@ -103,80 +131,69 @@ func (s *Source) Snapshot(ctx context.Context, limit int64) ([]byte, error) {
 }
 
 // Borrow lends immutable bytes to SDK internals without another backing owner.
+// Overlapping callers join one bounded materialization. Cancelling one waiter
+// interrupts only that waiter; the last cancelling waiter cancels and joins the
+// worker. Cancellation is terminal, like a completed read failure.
 func Borrow(s *Source, ctx context.Context, limit int64) ([]byte, error) {
 	if s == nil {
 		return nil, errors.New("nil content source")
 	}
-	s.lifetime.RLock()
-	defer s.lifetime.RUnlock()
+	s.lifetime.Lock()
 	if s.retired {
+		s.lifetime.Unlock()
 		return nil, errors.New("content source is retired")
 	}
 	if limit < 0 || limit == math.MaxInt64 {
-		_ = s.closeReader()
+		s.lifetime.Unlock()
+		_ = s.Retire()
 		return nil, errors.New("invalid content byte limit")
 	}
-	s.once.Do(func() {
-		defer s.ready.Store(true)
-		if err := ctx.Err(); err != nil {
-			s.err = err
-			_ = s.closeReader()
-			return
+	if s.cancelled {
+		s.lifetime.Unlock()
+		return nil, context.Canceled
+	}
+	if !s.ready.Load() && s.done == nil {
+		// A waiter's context must not govern other consumers or a retained result.
+		workCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+		s.cancel = cancel
+		if ctx.Err() != nil {
+			cancel()
 		}
-		if s.opener != nil && !s.closed.Load() {
-			openCtx, cancel := context.WithCancel(ctx)
-			s.readerMu.Lock()
-			if s.closed.Load() {
-				s.readerMu.Unlock()
-				cancel()
-				s.err = errors.New("content source is closed")
-				return
+		s.done = make(chan struct{})
+		go s.materialize(workCtx, limit)
+	}
+	if !s.ready.Load() {
+		s.waiters++
+		done := s.done
+		s.lifetime.Unlock()
+		select {
+		case <-done:
+		case <-ctx.Done():
+		}
+		s.lifetime.Lock()
+		s.waiters--
+		lastCancelled := ctx.Err() != nil && s.waiters == 0 && !s.ready.Load()
+		if lastCancelled {
+			s.cancelled = true
+			s.cancel()
+		}
+		if ctx.Err() != nil {
+			s.lifetime.Unlock()
+			if lastCancelled {
+				<-done
 			}
-			s.openCancel = cancel
-			s.openDone = make(chan struct{})
-			s.readerMu.Unlock()
-			reader, err := s.opener(openCtx)
-			s.readerMu.Lock()
-			closed := s.closed.Load()
-			if !closed {
-				s.reader = reader
-			}
-			s.readerMu.Unlock()
-			if closed && reader != nil {
-				_ = reader.Close()
-			}
-			close(s.openDone)
-			if err != nil {
-				s.err = err
-				_ = s.closeReader()
-				return
-			}
+			return nil, ctx.Err()
 		}
-		if s.reader == nil || s.closed.Load() {
-			s.err = errors.New("content source is closed or has no reader")
-			_ = s.closeReader()
-			return
-		}
-		if err := ctx.Err(); err != nil {
-			s.err = err
-			_ = s.closeReader()
-			return
-		}
-		s.raw, s.err = readOwnedContent(ctx, contentSourceReader{s}, limit)
-		s.readerMu.Lock()
-		s.reader = nil
-		s.opener = nil
-		s.cleanup = nil
-		s.openCancel = nil
-		s.openDone = nil
-		s.readerMu.Unlock()
-		if s.err == nil && int64(len(s.raw)) > limit {
-			s.raw = nil
-			s.err = errors.New("content exceeds byte limit")
-		}
-	})
+	}
+	defer s.lifetime.Unlock()
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if s.retired {
+		return nil, errors.New("content source is retired")
+	}
+	if s.cancelled {
+		return nil, context.Canceled
 	}
 	if s.err != nil {
 		return nil, s.err
@@ -213,9 +230,7 @@ func (s *Source) Claim() bool {
 	}
 	s.lifetime.RLock()
 	defer s.lifetime.RUnlock()
-	s.readerMu.Lock()
-	defer s.readerMu.Unlock()
-	return !s.retired && !s.closed.Load() && (s.reader != nil || s.opener != nil || s.ready.Load()) && s.claimed.CompareAndSwap(false, true)
+	return !s.retired && !s.closed.Load() && (s.done != nil || s.reader != nil || s.opener != nil || s.ready.Load()) && s.claimed.CompareAndSwap(false, true)
 }
 
 // readOwnedContent closes the SDK-owned reader exactly once on every exit.

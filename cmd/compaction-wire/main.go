@@ -19,7 +19,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 type O = map[string]any
@@ -75,20 +74,32 @@ func receiveAccepted(request O, sub string, config O, store string, v *ahp.Valid
 	}
 	event := obj(obj(request["params"])["event"])
 	bodies := O{}
-	items := append([]any{}, arr(event["items"])...)
-	for _, key := range []string{"instructions", "summary"} {
-		if i, ok := event[key]; ok {
-			items = append(items, i)
-		}
+	parts := []any{}
+	for _, message := range arr(event["items"]) {
+		parts = append(parts, arr(obj(message)["parts"])...)
 	}
-	for _, raw := range items {
-		item := obj(raw)
-		ref := obj(item["body"])
+	for _, key := range []string{"instructions", "summary"} {
+		parts = append(parts, arr(event[key])...)
+	}
+	for _, raw := range parts {
+		part := obj(raw)
+		if part["selection"] != "body" || part["gap"] != nil {
+			continue
+		}
+		if part["kind"] == "text" {
+			text, ok := part["text"].(string)
+			if !ok {
+				return failure
+			}
+			bodies[str(part["id"])] = text
+			continue
+		}
+		ref := obj(part["body"])
 		body, e := os.ReadFile(location(store, sub, str(ref["ref"])))
-		if e != nil || len(ref) != 1 || !utf8.Valid(body) {
+		if e != nil || len(ref) != 1 {
 			return failure
 		}
-		bodies[str(item["id"])] = string(body)
+		bodies[str(part["id"])] = string(body)
 	}
 	action := obj(config[sub])
 	if action == nil {
@@ -97,12 +108,23 @@ func receiveAccepted(request O, sub string, config O, store string, v *ahp.Valid
 	effects := action["effects"]
 	if action["kind"] == "append" {
 		target := str(action["target"])
-		item := obj(event[target])
-		body, ok := bodies[str(item["id"])].(string)
+		parts := arr(event[target])
+		if len(parts) == 0 {
+			return failure
+		}
+		value := append([]any{}, parts...)
+		last := obj(value[len(value)-1])
+		text, ok := bodies[str(last["id"])].(string)
 		if !ok {
 			return failure
 		}
-		effects = []any{O{"type": "modify", "target": target, "operation": "replace", "value": body + str(action["suffix"])}}
+		updated := O{}
+		for key, value := range last {
+			updated[key] = value
+		}
+		updated["text"] = text + str(action["suffix"])
+		value[len(value)-1] = updated
+		effects = []any{O{"type": "modify", "target": target, "operation": "replace", "value": value}}
 	}
 	response := O{"jsonrpc": "2.0", "id": request["id"], "result": O{"protocolVersion": "draft", "effects": effects}}
 	if validate(v, "intercept-response", response) != nil {
@@ -146,36 +168,25 @@ func exchange(plan O, sub, name string, snapshot O, v *ahp.Validator, trace *[]a
 	boundary := str(snapshot["boundary"])
 	event := O{"id": name + ":" + boundary, "source": "urn:ahp:compaction-host", "time": "2026-09-15T12:00:00Z", "session": O{"id": name}, "type": "context.compact." + boundary}
 	bodies := map[string][]byte{}
-	item := func(id, kind, text, role string) (O, error) {
-		raw := []byte(text)
-		ref := "urn:host:" + id
-		bodies[ref] = raw
-		return O{"id": id, "kind": kind, "mediaType": "text/plain", "role": role, "selection": "body", "body": O{"ref": ref}}, nil
+	textPart := func(id, text string) O {
+		return O{"id": id, "kind": "text", "mediaType": "text/plain", "selection": "body", "text": text}
 	}
-
 	if boundary == "before" {
-		context, e := item(name+":context", "user", "conversation", "user")
-		if e != nil {
-			return nil, e
-		}
-		instructions, e := item(name+":instructions", "instructions", str(snapshot["instructions"]), "system")
-		if e != nil {
-			return nil, e
+		parts := []any{textPart(name+":context-text", "conversation")}
+		if binary, ok := snapshot["attachment"].(string); ok {
+			ref := "urn:host:" + name + ":attachment"
+			bodies[ref] = []byte(binary)
+			parts = append(parts, O{"id": name + ":attachment", "kind": "attachment", "mediaType": "application/octet-stream", "selection": "body", "body": O{"ref": ref}})
 		}
 		event["trigger"] = "manual"
-		event["items"] = []any{context}
-		event["instructions"] = instructions
+		event["items"] = []any{O{"id": name + ":context", "role": "user", "parts": parts}}
+		event["instructions"] = []any{textPart(name+":instructions", str(snapshot["instructions"]))}
 	} else {
 		handle := obj(snapshot["summary"])
-		summary, e := item(str(handle["id"]), "summary", str(obj(snapshot["bodies"])[str(handle["ref"])]), "assistant")
-		if e != nil {
-			return nil, e
-		}
-		event["summary"] = summary
+		event["summary"] = []any{textPart(str(handle["id"]), str(obj(snapshot["bodies"])[str(handle["ref"])]))}
 		event["parentEventId"] = name + ":before"
 		event["removed"] = []any{O{"id": name + ":context"}}
-		candidate := obj(snapshot["candidate"])
-		if candidate == nil {
+		if obj(snapshot["candidate"]) == nil {
 			event["execution"] = O{"status": "executed"}
 		} else {
 			event["execution"] = O{"status": "skipped", "reason": "supplied_result"}

@@ -238,7 +238,7 @@ func main() {
 						return nil, fmt.Errorf("host elicitation rejected")
 					}
 					if payload != nil {
-						body, _ = resolve(obj(obj(meta["request"])["body"]))
+						body = []byte(str(obj(meta["request"])["text"]))
 						summary = O{"request": payload}
 					} else {
 						selection := str(obj(meta["request"])["selection"])
@@ -258,8 +258,8 @@ func main() {
 					if err != nil {
 						return nil, fmt.Errorf("host elicitation rejected")
 					}
-					if item := obj(meta["result"]); obj(item["body"]) != nil {
-						body, _ = resolve(obj(item["body"]))
+					if item := obj(meta["result"]); item["selection"] == "body" && item["gap"] == nil {
+						body = []byte(str(item["text"]))
 					}
 					delete(pending, key)
 				default:

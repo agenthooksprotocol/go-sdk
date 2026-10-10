@@ -6,7 +6,6 @@ import (
 	"errors"
 
 	"github.com/agenthooksprotocol/go-sdk/internal/canonical"
-	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 )
 
 // ElicitationRequest is an immutable snapshot of the original MCP request and
@@ -90,10 +89,11 @@ func selectedElicitation(meta map[string]any, stage string, sources map[string]*
 		return nil, nil
 	}
 	rawItem, err := json.Marshal(item)
-	if err != nil || canonical.Validate("content-item", rawItem) != nil || item["mediaType"] != "application/json" {
+	if err != nil || canonical.Validate("content-item", rawItem) != nil || item["kind"] != "text" {
 		return nil, errors.New("invalid elicitation content descriptor")
 	}
-	raw, present := ownedcontent.Available(sources["/elicitation/"+stage])
+	text, present := item["text"].(string)
+	raw := []byte(text)
 	if !present {
 		if item["selection"] == "body" {
 			return nil, errors.New("selected elicitation body unavailable")

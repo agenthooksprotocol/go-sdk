@@ -10,6 +10,7 @@ import (
 
 type interceptConfig struct {
 	sources            map[string]*ContentSource
+	hostSources        map[string]bool
 	ownedSources       []*ContentSource
 	claimedSources     map[*ContentSource]bool
 	transferredSources map[*ContentSource]bool

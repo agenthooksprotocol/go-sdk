@@ -8,7 +8,7 @@ import (
 )
 
 func compactModify(target, value string) Object {
-	return Object{"type": "modify", "target": target, "operation": "replace", "value": value}
+	return Object{"type": "modify", "target": target, "operation": "replace", "value": textParts(value)}
 }
 func TestCompactionCallbacks(t *testing.T) {
 	before := []CompactionHook{{Supplier: "edit", FailurePolicy: "fail-closed", Run: func(s Object) ([]Object, error) {
@@ -16,9 +16,9 @@ func TestCompactionCallbacks(t *testing.T) {
 		return []Object{compactModify("instructions", "new")}, nil
 	}}}
 	after := []CompactionHook{{Supplier: "redact", FailurePolicy: "fail-closed", Run: func(s Object) ([]Object, error) {
-		return []Object{compactModify("summary", str(obj(s["bodies"])[str(obj(s["summary"])["ref"])])+":redacted")}, nil
+		return []Object{compactModify("summary", partsText(s["summary"])+":redacted")}, nil
 	}}, {Supplier: "watch", FailurePolicy: "fail-closed", Run: func(s Object) ([]Object, error) {
-		if obj(s["bodies"])[str(obj(s["summary"])["ref"])] != "generated:new:redacted" {
+		if partsText(s["summary"]) != "generated:new:redacted" {
 			return nil, fmt.Errorf("stale result")
 		}
 		return []Object{}, nil
@@ -34,14 +34,13 @@ func TestCompactionCallbacks(t *testing.T) {
 	if !reflect.DeepEqual(generated, []string{"new"}) || r["applied"] != true || len(array(r["failures"])) != 0 {
 		t.Fatalf("bad settlement: %v", r)
 	}
-	old := obj(obj(array(r["seen"])[1])["summary"])
-	current := obj(r["summary"])
-	if old["id"] != current["id"] || old["ref"] == current["ref"] || len(obj(r["bodies"])) != 2 {
-		t.Fatal("immutable identity")
+	old := obj(array(r["seen"])[1])["summary"]
+	if partsText(old) != "generated:new" || partsText(r["summary"]) != "generated:new:redacted" {
+		t.Fatal("inline snapshots were mutated")
 	}
 }
 func TestCompactionAtomicCandidate(t *testing.T) {
-	before := []CompactionHook{{"cache", "fail-closed", func(Object) ([]Object, error) { return []Object{{"type": "return", "value": "cached"}}, nil }}, {"bad", "fail-open", func(Object) ([]Object, error) {
+	before := []CompactionHook{{"cache", "fail-closed", func(Object) ([]Object, error) { return []Object{{"type": "return", "value": textParts("cached")}}, nil }}, {"bad", "fail-open", func(Object) ([]Object, error) {
 		return []Object{compactModify("instructions", "leak"), {"type": "message", "text": "leak"}, compactModify("summary", "wrong")}, nil
 	}}}
 	after := []CompactionHook{{"redact", "fail-closed", func(Object) ([]Object, error) { return []Object{compactModify("summary", "safe")}, nil }}}
@@ -49,7 +48,7 @@ func TestCompactionAtomicCandidate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r["instructions"] != "old" || len(array(r["messages"])) != 0 || obj(r["bodies"])[str(obj(r["summary"])["ref"])] != "safe" || r["applied"] != true || obj(r["provenance"])["supplier"] != "cache" {
+	if partsText(r["instructions"]) != "old" || len(array(r["messages"])) != 0 || partsText(r["summary"]) != "safe" || r["applied"] != true || obj(r["provenance"])["supplier"] != "cache" {
 		t.Fatalf("bad settlement: %v", r)
 	}
 }
@@ -60,7 +59,7 @@ func TestCompactionAfterFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r["applied"] != false || len(obj(r["bodies"])) != 1 {
+	if r["applied"] != false || partsText(r["summary"]) != "summary:old" {
 		t.Fatal("partial commit")
 	}
 	caps, _ := CompactionCapabilities("after", true)
@@ -80,7 +79,7 @@ func TestCompactionBlockedObserversDetached(t *testing.T) {
 			entered <- obj(clone(snapshot))
 			<-release
 			snapshot["instructions"] = "mutation"
-			snapshot["bodies"] = Object{}
+			snapshot["summary"] = textParts("mutation")
 			close(finished)
 			return []Object{compactModify("summary", "forbidden")}, nil
 		}},
@@ -95,7 +94,7 @@ func TestCompactionBlockedObserversDetached(t *testing.T) {
 		}
 		downstream := []any{}
 		if r["applied"] == true {
-			downstream = append(downstream, obj(r["bodies"])[str(obj(r["summary"])["ref"])])
+			downstream = append(downstream, partsText(r["summary"]))
 		}
 		settled <- Object{"result": r, "downstream": downstream}
 	}()
@@ -131,7 +130,30 @@ func TestCompactionBlockedObserversDetached(t *testing.T) {
 	// Release with a rendezvous while keeping the deferred cleanup single-close.
 	release <- struct{}{}
 	<-finished
-	if obj(result["bodies"])[str(obj(result["summary"])["ref"])] != "summary:base" || result["instructions"] != "base" {
+	if partsText(result["summary"]) != "summary:base" || partsText(result["instructions"]) != "base" {
 		t.Fatal("observer mutated settlement")
+	}
+}
+
+func TestCompactionOrderedInlineParts(t *testing.T) {
+	parts := append(textParts("first"), textParts("second")...)
+	before := []CompactionHook{{"parts", "fail-closed", func(Object) ([]Object, error) {
+		return []Object{{"type": "modify", "target": "instructions", "operation": "replace", "value": parts}}, nil
+	}}}
+	result, err := RunCompaction("base", "summary", before, nil, func(input string) (string, error) {
+		if input != "firstsecond" {
+			return "", fmt.Errorf("part order lost: %q", input)
+		}
+		return input, nil
+	}, false)
+	if err != nil || result["applied"] != true || partsText(result["summary"]) != "firstsecond" {
+		t.Fatalf("result=%v err=%v", result, err)
+	}
+	if _, exists := result["bodies"]; exists {
+		t.Fatal("inline runtime retained a byte cache")
+	}
+	obj(parts[0])["text"] = "mutation"
+	if partsText(result["instructions"]) != "firstsecond" {
+		t.Fatal("caller mutation changed accepted parts")
 	}
 }

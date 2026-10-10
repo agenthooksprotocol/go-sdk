@@ -388,16 +388,22 @@ func TestInitialAndTypedEffectOperations(t *testing.T) {
 
 func TestNamedContentSourceBindingsAreOutOfBand(t *testing.T) {
 	source := content.NewSource(io.NopCloser(strings.NewReader("owned content")))
-	input := event.ContextCompactBeforeInput{
-		InstructionsSource: source,
-		ItemsSources:       []*content.Source{nil, source},
+	messages := []*event.ModelVisibleItemInput{
+		{ModelVisibleItem: ahp.ModelVisibleItem{Role: "user"}, Parts: []*event.ContentPartInput{{Text: &ahp.TextBodyPart{Text: "inline"}}}},
+		{ModelVisibleItem: ahp.ModelVisibleItem{Role: "user"}, Parts: []*event.ContentPartInput{{Text: &ahp.TextBodyPart{Text: "inline"}}, {Attachment: &event.AttachmentBodyInput{AttachmentBodyPart: ahp.AttachmentBodyPart{MediaType: "image/png"}, Body: source}}}},
+		{ModelVisibleItem: ahp.ModelVisibleItem{Role: "assistant"}, Parts: []*event.ContentPartInput{
+			{Attachment: &event.AttachmentBodyInput{AttachmentBodyPart: ahp.AttachmentBodyPart{MediaType: "image/png"}, Body: source}},
+			{Text: &ahp.TextBodyPart{Text: "1"}}, {Text: &ahp.TextBodyPart{Text: "2"}}, {Text: &ahp.TextBodyPart{Text: "3"}}, {Text: &ahp.TextBodyPart{Text: "4"}},
+			{Attachment: &event.AttachmentBodyInput{AttachmentBodyPart: ahp.AttachmentBodyPart{MediaType: "image/png"}, Body: source}},
+		}},
 	}
+	input := event.ContextCompactBeforeInput{ItemsHost: &messages}
 	sources := input.AHPContentSources()
-	if len(sources) != 2 || sources["/instructions"] != source || sources["/items/1"] != source {
+	if len(sources) != 3 || sources["/items/1/parts/1"] != source || sources["/items/2/parts/0"] != source || sources["/items/2/parts/5"] != source {
 		t.Fatal(sources)
 	}
-	delete(sources, "/instructions")
-	if input.AHPContentSources()["/instructions"] != source {
+	delete(sources, "/items/2/parts/5")
+	if input.AHPContentSources()["/items/2/parts/5"] != source {
 		t.Fatal("binding map aliases caller state")
 	}
 	raw, err := json.Marshal(input)
@@ -443,5 +449,380 @@ func TestContinuationCountsRejectInvalidComposition(t *testing.T) {
 		if _, err := capability.Intercept(capability.FlowContinue(pair[0], pair[1])); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+// The host adapter must not consume or close an owned stream during projection.
+type forbiddenContentReader struct{ reads, closes int }
+
+func (r *forbiddenContentReader) Read([]byte) (int, error) { r.reads++; return 0, io.ErrUnexpectedEOF }
+func (r *forbiddenContentReader) Close() error             { r.closes++; return io.ErrClosedPipe }
+
+func TestDirectOwnedAttachmentHostInput(t *testing.T) {
+	reader := &forbiddenContentReader{}
+	source := content.NewSource(reader)
+	defer func() {
+		if reader.reads != 0 || reader.closes != 0 {
+			t.Fatal("host adapter consumed source")
+		}
+	}()
+	messages := []*event.ModelVisibleItemInput{{
+		ModelVisibleItem: ahp.ModelVisibleItem{ID: "message-id", Role: "user", AdditionalProperties: map[string]json.RawMessage{"vendor": json.RawMessage(`{"retained":true}`)}},
+		Parts: []*event.ContentPartInput{
+			{Text: &ahp.TextBodyPart{Text: "inline text"}},
+			{Attachment: &event.AttachmentBodyInput{
+				AttachmentBodyPart: ahp.AttachmentBodyPart{ID: "part-id", Category: ahp.Some("image"), MediaType: "image/png", AdditionalProperties: map[string]json.RawMessage{"vendorPart": json.RawMessage(`7`)}},
+				Body:               source,
+			}},
+		},
+	}}
+	input := event.ContextCompactBeforeInput{ItemsHost: &messages}
+	sources := input.AHPContentSources()
+	if len(sources) != 1 || sources["/items/0/parts/1"] != source {
+		t.Fatal(sources)
+	}
+	delete(sources, "/items/0/parts/1")
+	if input.AHPContentSources()["/items/0/parts/1"] != source {
+		t.Fatal("source map aliases host state")
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var encoded map[string]any
+	if err := json.Unmarshal(raw, &encoded); err != nil {
+		t.Fatal(err)
+	}
+	message := encoded["items"].([]any)[0].(map[string]any)
+	if message["id"] != "message-id" || message["role"] != "user" || message["vendor"].(map[string]any)["retained"] != true {
+		t.Fatal(message)
+	}
+	parts := message["parts"].([]any)
+	text := parts[0].(map[string]any)
+	if text["kind"] != "text" || text["selection"] != "body" || text["text"] != "inline text" || text["id"] == "" || text["synthesized"] != true {
+		t.Fatal(text)
+	}
+	attachment := parts[1].(map[string]any)
+	if attachment["id"] != "part-id" || attachment["category"] != "image" || attachment["mediaType"] != "image/png" || attachment["selection"] != "body" || attachment["vendorPart"] != float64(7) {
+		t.Fatal(attachment)
+	}
+	if attachment["body"].(map[string]any)["ref"] != "ahp:owned:pending" {
+		t.Fatal(attachment)
+	}
+	for _, encodedPart := range parts {
+		partRaw, err := json.Marshal(encodedPart)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var canonical ahp.ContentItem
+		if err := json.Unmarshal(partRaw, &canonical); err != nil {
+			t.Fatalf("host part is not canonical: %s: %v", partRaw, err)
+		}
+	}
+	for _, local := range []string{"Reader", "Descriptor", "AttachmentBodyPart", "Host", "Source"} {
+		if strings.Contains(string(raw), local) {
+			t.Fatalf("local member %s serialized: %s", local, raw)
+		}
+	}
+	// Only missing identities are retained on their host objects; other metadata is unchanged.
+	if messages[0].Parts[0].Text.ID != text["id"] || messages[0].Parts[1].Attachment.Selection != "" {
+		t.Fatal("host projection did not retain identity or mutated metadata")
+	}
+	input.AHPContentSources()
+	rawAgain, err := json.Marshal(input)
+	if err != nil || string(rawAgain) != string(raw) {
+		t.Fatalf("encoding changed identities: %s / %s: %v", raw, rawAgain, err)
+	}
+}
+
+func TestOwnedHostNestedMessageAndScope(t *testing.T) {
+	reader := &forbiddenContentReader{}
+	source := content.NewSource(reader)
+	defer func() {
+		if reader.reads != 0 || reader.closes != 0 {
+			t.Fatal("host adapter consumed source")
+		}
+	}()
+	part := &event.ContentPartInput{Attachment: &event.AttachmentBodyInput{
+		AttachmentBodyPart: ahp.AttachmentBodyPart{MediaType: "application/octet-stream", Selection: "body"},
+		Body:               source, Descriptor: &ahp.ContentReference{Ref: "content://supplied"},
+	}}
+	input := event.UserMessageInboundInput{MessageHost: &event.UserMessageInboundEventMessageInput{
+		UserMessageInboundEventMessage: ahp.UserMessageInboundEventMessage{Channel: "chat", Sender: "human"},
+		Messages: []event.UserMessageInboundEventMessageMessagesItemInput{
+			{UserMessageInboundEventMessageMessagesItem: ahp.UserMessageInboundEventMessageMessagesItem{Role: "user"}, Parts: []*event.ContentPartInput{{Text: &ahp.TextBodyPart{ID: "text-id", Text: "hello"}}, part}},
+		},
+	}}
+	if input.AHPContentSources()["/message/messages/0/parts/1"] != source {
+		t.Fatal(input.AHPContentSources())
+	}
+	plannedMessageID := input.MessageHost.Messages[0].ID
+	plannedPartID := part.Attachment.ID
+	if plannedMessageID == "" || plannedPartID == "" {
+		t.Fatal("planning did not retain generated identities")
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var encoded map[string]any
+	if err := json.Unmarshal(raw, &encoded); err != nil {
+		t.Fatal(err)
+	}
+	wrapper := encoded["message"].(map[string]any)
+	if wrapper["channel"] != "chat" || wrapper["sender"] != "human" {
+		t.Fatal(wrapper)
+	}
+	message := wrapper["messages"].([]any)[0].(map[string]any)
+	if message["id"] != plannedMessageID || message["synthesized"] != true {
+		t.Fatal(message)
+	}
+	attachment := message["parts"].([]any)[1].(map[string]any)
+	if attachment["id"] == "" || attachment["synthesized"] != true || attachment["body"].(map[string]any)["ref"] != "content://supplied" {
+		t.Fatal(attachment)
+	}
+	input.AHPContentSources()
+	again, err := json.Marshal(input)
+	if err != nil || string(again) != string(raw) || part.Attachment.ID != plannedPartID {
+		t.Fatalf("unstable nested identity: %s / %s: %v", raw, again, err)
+	}
+	// The generic tool payload is not a declared content slot.
+	outside := event.ToolBeforeInput[*event.ContentPartInput]{Input: part}
+	if len(outside.AHPContentSources()) != 0 {
+		t.Fatal("scanned arbitrary tool payload")
+	}
+	parts := []*event.ContentPartInput{nil, part}
+	outside.ItemsHost = &parts
+	if outside.AHPContentSources()["/items/1"] != source || len(outside.AHPContentSources()) != 1 {
+		t.Fatal(outside.AHPContentSources())
+	}
+	// Explicit empty host collections override wire collections and advanced bindings.
+	empty := []*event.ContentPartInput{}
+	outside.ItemsHost = &empty
+	outside.ItemsSources = []*content.Source{source}
+	if len(outside.AHPContentSources()) != 0 {
+		t.Fatal("stale advanced binding survived host override")
+	}
+	raw, err = json.Marshal(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &encoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded["items"].([]any)) != 0 {
+		t.Fatal("empty host override lost")
+	}
+}
+
+func TestOwnedHostPartAlternatives(t *testing.T) {
+	for _, part := range []event.ContentPartInput{{}, {Wire: &ahp.ContentItem{}, Text: &ahp.TextBodyPart{Text: "conflict"}}} {
+		if _, err := json.Marshal(part); err == nil {
+			t.Fatal("ambiguous or missing host part accepted")
+		}
+	}
+	wire := &ahp.ContentItem{Unknown: json.RawMessage(`{"kind":"vendor","opaque":true}`)}
+	raw, err := json.Marshal(event.ContentPartInput{Wire: wire})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != `{"kind":"vendor","opaque":true}` {
+		t.Fatal(string(raw))
+	}
+}
+
+func TestOwnedAttachmentValidationAndIdentity(t *testing.T) {
+	source := content.NewSource(&forbiddenContentReader{})
+	for _, media := range []string{"", "text/plain", "TEXT/HTML; charset=utf-8", "application/json", "application/json; charset=utf-8", "application/problem+json", "IMAGE/custom+JSON", "not a media type"} {
+		t.Run(media, func(t *testing.T) {
+			part := event.ContentPartInput{Attachment: &event.AttachmentBodyInput{AttachmentBodyPart: ahp.AttachmentBodyPart{MediaType: media}, Body: source}}
+			if _, err := json.Marshal(part); err == nil {
+				t.Fatalf("accepted owned media type %q", media)
+			}
+		})
+	}
+	for _, selection := range []ahp.AttachmentBodyPartSelection{"gap", "metadata", "omit"} {
+		part := event.ContentPartInput{Attachment: &event.AttachmentBodyInput{AttachmentBodyPart: ahp.AttachmentBodyPart{MediaType: "image/png", Selection: selection}, Body: source}}
+		if _, err := json.Marshal(part); err == nil {
+			t.Fatalf("accepted selection %q", selection)
+		}
+	}
+	for _, selection := range []ahp.TextBodyPartSelection{"gap", "metadata", "omit"} {
+		if _, err := json.Marshal(event.ContentPartInput{Text: &ahp.TextBodyPart{Text: "inline", Selection: selection}}); err == nil {
+			t.Fatalf("accepted text body selection %q", selection)
+		}
+	}
+	invalidText := &ahp.TextBodyPart{Text: "inline", Synthesized: ahp.Some(false)}
+	invalidAttachment := &event.AttachmentBodyInput{AttachmentBodyPart: ahp.AttachmentBodyPart{MediaType: "image/png", Synthesized: ahp.Some(false)}, Body: source}
+	for _, part := range []event.ContentPartInput{{Text: invalidText}, {Attachment: invalidAttachment}} {
+		if _, err := json.Marshal(part); err == nil {
+			t.Fatal("missing id silently replaced synthesized=false")
+		}
+	}
+	if invalidText.ID != "" || invalidText.Synthesized.Value || invalidAttachment.ID != "" || invalidAttachment.Synthesized.Value {
+		t.Fatal("inconsistent identity was mutated")
+	}
+	messages := []*event.ModelVisibleItemInput{{ModelVisibleItem: ahp.ModelVisibleItem{Role: "user", Synthesized: ahp.Some(false)}, Parts: []*event.ContentPartInput{{Text: &ahp.TextBodyPart{ID: "text", Text: "inline"}}}}}
+	input := event.ContextCompactBeforeInput{ItemsHost: &messages}
+	input.AHPContentSources()
+	if _, err := json.Marshal(input); err == nil {
+		t.Fatal("missing message id silently replaced synthesized=false")
+	}
+	if messages[0].ID != "" || messages[0].Synthesized.Value {
+		t.Fatal("message false provenance was mutated")
+	}
+	// Explicit identities and provenance remain authoritative, including false.
+	preserved := &event.AttachmentBodyInput{AttachmentBodyPart: ahp.AttachmentBodyPart{ID: "supplied", Synthesized: ahp.Some(false), MediaType: "image/png"}, Body: source}
+	part := event.ContentPartInput{Attachment: preserved}
+	raw, err := json.Marshal(part)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := json.Marshal(part)
+	if err != nil || string(raw) != string(again) {
+		t.Fatal("explicit identity changed")
+	}
+	if preserved.ID != "supplied" || !preserved.Synthesized.Present || preserved.Synthesized.Value {
+		t.Fatal("explicit provenance changed")
+	}
+	fresh := event.ContentPartInput{Text: &ahp.TextBodyPart{Text: "same"}}
+	other := event.ContentPartInput{Text: &ahp.TextBodyPart{Text: "same"}}
+	raw, err = json.Marshal(fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err = json.Marshal(fresh)
+	if err != nil || string(raw) != string(again) {
+		t.Fatal("new text identity not stable")
+	}
+	if _, err := json.Marshal(other); err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Text.ID == other.Text.ID {
+		t.Fatal("distinct objects share synthesized identity")
+	}
+}
+
+func TestHostContentStructuralValidation(t *testing.T) {
+	source := content.NewSource(&forbiddenContentReader{})
+	type hostCase struct {
+		name string
+		part event.ContentPartInput
+	}
+	cases := []hostCase{
+		{"text-kind", event.ContentPartInput{Text: &ahp.TextBodyPart{Kind: "attachment", Text: "inline"}}},
+		{"text-media", event.ContentPartInput{Text: &ahp.TextBodyPart{MediaType: "text/html", Text: "inline"}}},
+		{"text-json", event.ContentPartInput{Text: &ahp.TextBodyPart{MediaType: "application/json", Text: "inline"}}},
+		{"text-category", event.ContentPartInput{Text: &ahp.TextBodyPart{Category: ahp.Some(""), Text: "inline"}}},
+		{"attachment-kind", event.ContentPartInput{Attachment: &event.AttachmentBodyInput{AttachmentBodyPart: ahp.AttachmentBodyPart{Kind: "text", MediaType: "image/png"}, Body: source}}},
+		{"attachment-category", event.ContentPartInput{Attachment: &event.AttachmentBodyInput{AttachmentBodyPart: ahp.AttachmentBodyPart{Category: ahp.Some(""), MediaType: "image/png"}, Body: source}}},
+	}
+	for _, prop := range []string{"size", "sha256"} {
+		value := json.RawMessage(`0`)
+		if prop == "sha256" {
+			value = json.RawMessage(`"` + strings.Repeat("a", 64) + `"`)
+		}
+		evidence := map[string]json.RawMessage{prop: value}
+		cases = append(cases,
+			hostCase{"text-" + prop, event.ContentPartInput{Text: &ahp.TextBodyPart{Text: "inline", AdditionalProperties: evidence}}},
+			hostCase{"attachment-" + prop, event.ContentPartInput{Attachment: &event.AttachmentBodyInput{AttachmentBodyPart: ahp.AttachmentBodyPart{MediaType: "image/png", AdditionalProperties: evidence}, Body: source}}},
+		)
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := json.Marshal(tc.part); err == nil {
+				t.Fatal("invalid host projection accepted")
+			}
+		})
+	}
+	// Ordinary unknown metadata is retained under the decoder's extension rules.
+	part := event.ContentPartInput{Text: &ahp.TextBodyPart{ID: "explicit", Category: ahp.Some("note"), Text: "inline", AdditionalProperties: map[string]json.RawMessage{"vendor": json.RawMessage(`{"retained":true}`)}}}
+	raw, err := json.Marshal(part)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var canonical ahp.ContentItem
+	if err := json.Unmarshal(raw, &canonical); err != nil || !canonical.TextBodyPart.Present {
+		t.Fatalf("valid host part rejected: %s: %v", raw, err)
+	}
+	if string(canonical.TextBodyPart.Value.AdditionalProperties["vendor"]) != `{"retained":true}` {
+		t.Fatal("ordinary metadata lost")
+	}
+	// The advanced wire alternative deliberately retains its existing semantics.
+	wire := &ahp.ContentItem{Unknown: json.RawMessage(`{"kind":"vendor","size":7,"category":""}`)}
+	want, err := json.Marshal(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := json.Marshal(event.ContentPartInput{Wire: wire})
+	if err != nil || string(got) != string(want) {
+		t.Fatal("wire pass-through changed")
+	}
+}
+
+func TestHostContainerValidation(t *testing.T) {
+	reader := &forbiddenContentReader{}
+	source := content.NewSource(reader)
+	defer func() {
+		if reader.reads != 0 || reader.closes != 0 {
+			t.Fatal("container validation consumed source")
+		}
+	}()
+	owned := &event.ContentPartInput{Attachment: &event.AttachmentBodyInput{AttachmentBodyPart: ahp.AttachmentBodyPart{MediaType: "image/png"}, Body: source}}
+	nilMessages := []*event.ModelVisibleItemInput(nil)
+	nullMessage := []*event.ModelVisibleItemInput{nil}
+	nilParts := []*event.ContentPartInput(nil)
+	nullParts := []*event.ContentPartInput{owned, nil}
+	invalid := []struct {
+		name  string
+		input any
+	}{
+		{"nil-root-messages", event.ContextCompactBeforeInput{ItemsHost: &nilMessages}},
+		{"null-message-entry", event.ContextCompactBeforeInput{ItemsHost: &nullMessage}},
+		{"nil-root-parts", event.ToolBeforeInput[int]{ItemsHost: &nilParts}},
+		{"null-root-part-entry", event.ToolBeforeInput[int]{ItemsHost: &nullParts}},
+		{"nil-message-parts", &event.ModelVisibleItemInput{ModelVisibleItem: ahp.ModelVisibleItem{Role: "user"}}},
+		{"null-message-part-entry", &event.ModelVisibleItemInput{ModelVisibleItem: ahp.ModelVisibleItem{Role: "user"}, Parts: nullParts}},
+		{"nil-nested-messages", event.UserMessageInboundInput{MessageHost: &event.UserMessageInboundEventMessageInput{UserMessageInboundEventMessage: ahp.UserMessageInboundEventMessage{Channel: "chat", Sender: "human"}}}},
+		{"nil-nested-parts", event.UserMessageInboundInput{MessageHost: &event.UserMessageInboundEventMessageInput{UserMessageInboundEventMessage: ahp.UserMessageInboundEventMessage{Channel: "chat", Sender: "human"}, Messages: []event.UserMessageInboundEventMessageMessagesItemInput{{UserMessageInboundEventMessageMessagesItem: ahp.UserMessageInboundEventMessageMessagesItem{Role: "user"}}}}}},
+	}
+	for _, tc := range invalid {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := json.Marshal(tc.input); err == nil {
+				t.Fatal("invalid host container accepted")
+			}
+		})
+	}
+	for _, role := range []ahp.ModelVisibleItemRole{"", "future", "human"} {
+		message := &event.ModelVisibleItemInput{ModelVisibleItem: ahp.ModelVisibleItem{Role: role}, Parts: []*event.ContentPartInput{owned}}
+		if _, err := json.Marshal(message); err == nil {
+			t.Fatalf("accepted noncanonical role %q", role)
+		}
+	}
+	nested := &event.UserMessageInboundEventMessageInput{UserMessageInboundEventMessage: ahp.UserMessageInboundEventMessage{Channel: "chat", Sender: "human"}, Messages: []event.UserMessageInboundEventMessageMessagesItemInput{{UserMessageInboundEventMessageMessagesItem: ahp.UserMessageInboundEventMessageMessagesItem{Role: "future"}, Parts: []*event.ContentPartInput{owned}}}}
+	if _, err := json.Marshal(nested); err == nil {
+		t.Fatal("accepted noncanonical nested role")
+	}
+	// Empty, non-nil arrays and every canonical role remain valid.
+	for _, role := range []ahp.ModelVisibleItemRole{"system", "developer", "user", "assistant", "tool"} {
+		message := &event.ModelVisibleItemInput{ModelVisibleItem: ahp.ModelVisibleItem{Role: role}, Parts: []*event.ContentPartInput{}}
+		if _, err := json.Marshal(message); err != nil {
+			t.Fatalf("rejected canonical role %q: %v", role, err)
+		}
+	}
+	valid := []*event.ModelVisibleItemInput{{ModelVisibleItem: ahp.ModelVisibleItem{Role: "user"}, Parts: []*event.ContentPartInput{owned}}}
+	input := event.ContextCompactBeforeInput{ItemsHost: &valid}
+	input.AHPContentSources()
+	if _, err := json.Marshal(input); err != nil {
+		t.Fatal(err)
+	}
+	// Parallel advanced source bindings intentionally remain sparse. Wire-only
+	// encoding keeps its prior behavior and does not acquire host validation.
+	advanced := event.ToolBeforeInput[any]{ItemsSources: []*content.Source{nil, source}}
+	if advanced.AHPContentSources()["/items/1"] != source {
+		t.Fatal("sparse advanced binding lost")
+	}
+	if _, err := json.Marshal(advanced); err != nil {
+		t.Fatal("wire-only behavior changed", err)
 	}
 }

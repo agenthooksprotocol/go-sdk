@@ -257,7 +257,7 @@ func TestLifecycleHTTPRejectsDeprecatedContentMetadataBeforeAdmission(t *testing
 			for _, mode := range []string{"valid", "reference-size", "reference-hash", "reference-null-size", "reference-null-hash", "outer-size", "outer-hash", "outer-null-size", "outer-null-hash"} {
 				t.Run(mode, func(t *testing.T) {
 					body := Object{"ref": "stored"}
-					item := Object{"id": "item", "kind": "text", "mediaType": "text/plain", "role": "user", "selection": "body", "body": body}
+					item := Object{"id": "item", "kind": "attachment", "mediaType": "application/octet-stream", "selection": "body", "body": body}
 					target := body
 					if strings.HasPrefix(mode, "outer-") {
 						target = item
@@ -272,7 +272,9 @@ func TestLifecycleHTTPRejectsDeprecatedContentMetadataBeforeAdmission(t *testing
 					case "reference-null-hash", "outer-null-hash":
 						target["sha256"] = nil
 					}
-					message := Object{"jsonrpc": "2.0", "method": "hooks/observe", "params": Object{"protocolVersion": "draft", "event": Object{"id": mode, "source": "urn:test:host", "time": "2026-09-15T12:00:00Z", "type": "user.message.inbound", "session": Object{"id": "session"}, "message": Object{"channel": "chat", "sender": "user", "text": []any{item}}}}}
+					ev := obj(obj(request(mode)["params"])["event"])
+					ev["items"] = []any{item}
+					message := Object{"jsonrpc": "2.0", "method": "hooks/observe", "params": Object{"protocolVersion": "draft", "event": ev}}
 					response, err := peer.Client().Post(peer.URL+"/observe", "application/json", bytes.NewReader(jsonBytes(message)))
 					if err != nil {
 						t.Fatal(err)

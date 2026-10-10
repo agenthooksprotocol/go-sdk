@@ -4,9 +4,180 @@ package event
 import ahp "github.com/agenthooksprotocol/go-sdk"
 import "encoding/json"
 import "strconv"
+import "fmt"
+import "strings"
+import "mime"
+import "sync/atomic"
 import "github.com/agenthooksprotocol/go-sdk/content"
 
 type Type = string
+
+// ContentPartInput accepts exactly one wire, inline text, or owned attachment part.
+// Wire preserves all advanced gap/metadata/omitted and future alternatives.
+type ContentPartInput struct {
+	Wire       *ahp.ContentItem
+	Text       *ahp.TextBodyPart
+	Attachment *AttachmentBodyInput
+}
+
+// AttachmentBodyInput embeds wire metadata, but Body is an owned host handle.
+// Descriptor is optional; without one, encoding emits a pending descriptor.
+// The runtime must replace pending descriptors via AHPContentSources before validation/send.
+// Encoding and extraction never read, close, or upload Body.
+type AttachmentBodyInput struct {
+	ahp.AttachmentBodyPart
+	Body       *content.Source
+	Descriptor *ahp.ContentReference
+}
+
+var synthesizedContentSequence atomic.Uint64
+
+// Missing IDs are assigned once to the host object during encoding or planning.
+// Inputs must not be mutated or encoded concurrently; supplied identities are unchanged.
+func synthesizeContentID() string {
+	return "host-content-" + strconv.FormatUint(synthesizedContentSequence.Add(1), 10)
+}
+func ensureContentIdentity(id *string, synthesized *ahp.Optional[bool]) error {
+	if *id != "" {
+		return nil
+	}
+	if synthesized.Present && !synthesized.Value {
+		return fmt.Errorf("missing host content id conflicts with synthesized=false")
+	}
+	*id = synthesizeContentID()
+	*synthesized = ahp.Some(true)
+	return nil
+}
+func validateContentCategory(category ahp.Optional[string]) error {
+	if category.Present && category.Value == "" {
+		return fmt.Errorf("host content category must be nonempty when supplied")
+	}
+	return nil
+}
+
+// Validate only pure projected JSON, never the local source handle. The arm
+// check prevents malformed known alternatives from falling back to Unknown.
+func marshalHostContentPart(part any, text bool) ([]byte, error) {
+	raw, err := json.Marshal(part)
+	if err != nil {
+		return nil, err
+	}
+	var canonical ahp.ContentItem
+	if err := json.Unmarshal(raw, &canonical); err != nil {
+		return nil, fmt.Errorf("invalid host content part: %w", err)
+	}
+	if (text && !canonical.TextBodyPart.Present) || (!text && !canonical.AttachmentBodyPart.Present) {
+		return nil, fmt.Errorf("host content projection must remain its canonical body alternative")
+	}
+	return raw, nil
+}
+func validateAttachmentBody(part ahp.AttachmentBodyPart) error {
+	if part.Kind != "" && part.Kind != "attachment" {
+		return fmt.Errorf("attachment host input requires attachment kind")
+	}
+	if err := validateContentCategory(part.Category); err != nil {
+		return err
+	}
+	if part.Selection != "" && part.Selection != "body" {
+		return fmt.Errorf("attachment host input requires body selection")
+	}
+	mediaType, _, err := mime.ParseMediaType(part.MediaType)
+	if err != nil || mediaType == "" {
+		return fmt.Errorf("attachment host input requires a valid nonempty mediaType")
+	}
+	subtype := strings.SplitN(mediaType, "/", 2)
+	if len(subtype) != 2 || strings.HasPrefix(mediaType, "text/") || subtype[1] == "json" || strings.HasSuffix(subtype[1], "+json") {
+		return fmt.Errorf("text and JSON content require inline text parts")
+	}
+	return nil
+}
+func (v ContentPartInput) MarshalJSON() ([]byte, error) {
+	count := 0
+	if v.Wire != nil {
+		count++
+	}
+	if v.Text != nil {
+		count++
+	}
+	if v.Attachment != nil {
+		count++
+	}
+	if count != 1 {
+		return nil, fmt.Errorf("ContentPartInput requires exactly one alternative")
+	}
+	if v.Wire != nil {
+		return json.Marshal(v.Wire)
+	}
+	if v.Text != nil {
+		if v.Text.Kind != "" && v.Text.Kind != "text" {
+			return nil, fmt.Errorf("text host input requires text kind")
+		}
+		if v.Text.MediaType != "" && v.Text.MediaType != "text/plain" {
+			return nil, fmt.Errorf("text host input requires text/plain mediaType")
+		}
+		if err := validateContentCategory(v.Text.Category); err != nil {
+			return nil, err
+		}
+		if v.Text.Selection != "" && v.Text.Selection != "body" {
+			return nil, fmt.Errorf("text host input requires body selection")
+		}
+		if err := ensureContentIdentity(&v.Text.ID, &v.Text.Synthesized); err != nil {
+			return nil, err
+		}
+		part := *v.Text
+		if part.Kind == "" {
+			part.Kind = "text"
+		}
+		if part.MediaType == "" {
+			part.MediaType = "text/plain"
+		}
+		if part.Selection == "" {
+			part.Selection = "body"
+		}
+		return marshalHostContentPart(part, true)
+	}
+	if err := validateAttachmentBody(v.Attachment.AttachmentBodyPart); err != nil {
+		return nil, err
+	}
+	if err := ensureContentIdentity(&v.Attachment.ID, &v.Attachment.Synthesized); err != nil {
+		return nil, err
+	}
+	part := v.Attachment.AttachmentBodyPart
+	if part.Kind == "" {
+		part.Kind = "attachment"
+	}
+	if part.Selection == "" {
+		part.Selection = "body"
+	}
+	if v.Attachment.Body != nil {
+		part.Body = v.Attachment.Descriptor
+		if part.Body == nil {
+			part.Body = v.Attachment.AttachmentBodyPart.Body
+		}
+		if part.Body == nil {
+			part.Body = &ahp.ContentReference{Ref: "ahp:owned:pending"}
+		}
+	} else if v.Attachment.Descriptor != nil {
+		part.Body = v.Attachment.Descriptor
+	}
+	return marshalHostContentPart(part, false)
+}
+func (v ContentPartInput) ahpContentSources(path string, sources map[string]*content.Source) {
+	if v.Wire != nil {
+		return
+	}
+	if v.Text != nil && v.Attachment == nil {
+		_ = ensureContentIdentity(&v.Text.ID, &v.Text.Synthesized)
+		return
+	}
+	if v.Text == nil && v.Attachment != nil {
+		_ = ensureContentIdentity(&v.Attachment.ID, &v.Attachment.Synthesized)
+		if v.Attachment.Body != nil {
+			sources[path] = v.Attachment.Body
+		}
+	}
+}
+
 type ConfigChangeAfterInput struct {
 	Change        ahp.ConfigChangeAfterEventChange
 	Extensions    ahp.Optional[*ahp.Extensions]
@@ -19,15 +190,29 @@ type ConfigChangeAfterInput struct {
 	Synthesized   ahp.Optional[bool]
 	Time          ahp.Optional[string]
 	Turn          ahp.Optional[ahp.ConfigChangeAfterEventTurn]
-	ItemsSources  []*content.Source `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost    *[]*ContentPartInput `json:"-"`
+	ItemsSources []*content.Source    `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v ConfigChangeAfterInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
+		}
+	}
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -55,6 +240,17 @@ func (v ConfigChangeAfterInput) MarshalJSON() ([]byte, error) {
 	{
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
+		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
 		}
 	}
 	{
@@ -104,15 +300,29 @@ type ConfigChangeBeforeInput struct {
 	Synthesized   ahp.Optional[bool]
 	Time          ahp.Optional[string]
 	Turn          ahp.Optional[ahp.ConfigChangeBeforeEventTurn]
-	ItemsSources  []*content.Source `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost    *[]*ContentPartInput `json:"-"`
+	ItemsSources []*content.Source    `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v ConfigChangeBeforeInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
+		}
+	}
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -140,6 +350,17 @@ func (v ConfigChangeBeforeInput) MarshalJSON() ([]byte, error) {
 	{
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
+		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
 		}
 	}
 	{
@@ -177,6 +398,64 @@ func (v ConfigChangeBeforeInput) MarshalJSON() ([]byte, error) {
 
 const ConfigChangeBefore Type = "config.change.before"
 
+// ModelVisibleItemInput preserves wire metadata and projects only schema-owned content children.
+type ModelVisibleItemInput struct {
+	ahp.ModelVisibleItem
+	Parts []*ContentPartInput
+}
+
+func (v *ModelVisibleItemInput) MarshalJSON() ([]byte, error) {
+	switch string(v.Role) {
+	case "system", "developer", "user", "assistant", "tool":
+	default:
+		return nil, fmt.Errorf("host canonical message requires a canonical role")
+	}
+	if err := ensureContentIdentity(&v.ID, &v.Synthesized); err != nil {
+		return nil, err
+	}
+	base := v.ModelVisibleItem
+	raw, err := json.Marshal(base)
+	if err != nil {
+		return nil, err
+	}
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, err
+	}
+	if v.Parts == nil {
+		return nil, fmt.Errorf("host content placement must not be null")
+	}
+	for placementIndex0 := range v.Parts {
+		if v.Parts[placementIndex0] == nil {
+			return nil, fmt.Errorf("host content placement must not be null")
+		}
+	}
+	{
+		raw, err := json.Marshal(v.Parts)
+		if err != nil {
+			return nil, err
+		}
+		fields["parts"] = raw
+	}
+	projected, err := json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	var canonical ahp.ModelVisibleItem
+	if err := json.Unmarshal(projected, &canonical); err != nil {
+		return nil, fmt.Errorf("invalid host ModelVisibleItemInput: %w", err)
+	}
+	return projected, nil
+}
+func (v *ModelVisibleItemInput) ahpContentSources(path string, sources map[string]*content.Source) {
+	_ = ensureContentIdentity(&v.ID, &v.Synthesized)
+	for hostIndex0 := range v.Parts {
+		if v.Parts[hostIndex0] != nil {
+			v.Parts[hostIndex0].ahpContentSources(path+"/parts"+"/"+strconv.Itoa(hostIndex0), sources)
+		}
+	}
+}
+
 type ContextCompactAfterInput struct {
 	Execution     *ahp.ExecutionEventExecution
 	Extensions    ahp.Optional[*ahp.Extensions]
@@ -187,25 +466,29 @@ type ContextCompactAfterInput struct {
 	ParentEventID ahp.Optional[string]
 	Removed       []ahp.ContextCompactAfterEventRemovedItem
 	Session       ahp.Optional[*ahp.Session]
-	Summary       *ahp.ModelVisibleItem
+	Summary       *ahp.TextParts
 	Synthesized   ahp.Optional[bool]
 	Time          ahp.Optional[string]
 	TokenCounts   ahp.Optional[*ahp.ExecutionEventTokencounts]
 	Turn          ahp.Optional[ahp.ContextCompactAfterEventTurn]
-	ItemsSources  []*content.Source `json:"-"`
-	SummarySource *content.Source   `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost *[]*ModelVisibleItemInput `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v ContextCompactAfterInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
 		}
-	}
-	if v.SummarySource != nil {
-		sources["/summary"] = v.SummarySource
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
+		}
 	}
 	return sources
 }
@@ -232,6 +515,17 @@ func (v ContextCompactAfterInput) MarshalJSON() ([]byte, error) {
 	{
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
+		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
 		}
 	}
 	{
@@ -281,32 +575,36 @@ func (v ContextCompactAfterInput) MarshalJSON() ([]byte, error) {
 const ContextCompactAfter Type = "context.compact.after"
 
 type ContextCompactBeforeInput struct {
-	Extensions         ahp.Optional[*ahp.Extensions]
-	Gaps               ahp.Optional[[]ahp.ContextCompactBeforeEventGapsItem]
-	ID                 ahp.Optional[string]
-	Instructions       ahp.Optional[*ahp.ContentItem]
-	Items              []*ahp.ModelVisibleItem
-	Native             ahp.Optional[*ahp.NativeEvent]
-	ParentEventID      ahp.Optional[string]
-	Session            ahp.Optional[*ahp.Session]
-	Synthesized        ahp.Optional[bool]
-	Time               ahp.Optional[string]
-	TokenCounts        ahp.Optional[*ahp.ExecutionEventTokencounts]
-	Trigger            ahp.ContextCompactBeforeEventTrigger
-	Turn               ahp.Optional[ahp.ContextCompactBeforeEventTurn]
-	InstructionsSource *content.Source   `json:"-"`
-	ItemsSources       []*content.Source `json:"-"`
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Gaps          ahp.Optional[[]ahp.ContextCompactBeforeEventGapsItem]
+	ID            ahp.Optional[string]
+	Instructions  ahp.Optional[*ahp.TextParts]
+	Items         []*ahp.ModelVisibleItem
+	Native        ahp.Optional[*ahp.NativeEvent]
+	ParentEventID ahp.Optional[string]
+	Session       ahp.Optional[*ahp.Session]
+	Synthesized   ahp.Optional[bool]
+	Time          ahp.Optional[string]
+	TokenCounts   ahp.Optional[*ahp.ExecutionEventTokencounts]
+	Trigger       ahp.ContextCompactBeforeEventTrigger
+	Turn          ahp.Optional[ahp.ContextCompactBeforeEventTurn]
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost *[]*ModelVisibleItemInput `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v ContextCompactBeforeInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	if v.InstructionsSource != nil {
-		sources["/instructions"] = v.InstructionsSource
-	}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -335,6 +633,17 @@ func (v ContextCompactBeforeInput) MarshalJSON() ([]byte, error) {
 	}
 	{
 		fields["items"] = v.Items
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
+		}
 	}
 	{
 		if v.Native.Present {
@@ -379,6 +688,70 @@ func (v ContextCompactBeforeInput) MarshalJSON() ([]byte, error) {
 
 const ContextCompactBefore Type = "context.compact.before"
 
+// FileChangedEventChangesItemInput preserves wire metadata and projects only schema-owned content children.
+type FileChangedEventChangesItemInput struct {
+	ahp.FileChangedEventChangesItem
+	After  ahp.Optional[*ContentPartInput]
+	Before ahp.Optional[*ContentPartInput]
+}
+
+func (v *FileChangedEventChangesItemInput) MarshalJSON() ([]byte, error) {
+	base := v.FileChangedEventChangesItem
+	raw, err := json.Marshal(base)
+	if err != nil {
+		return nil, err
+	}
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, err
+	}
+	if v.After.Present {
+		if v.After.Value == nil {
+			return nil, fmt.Errorf("host content placement must not be null")
+		}
+		{
+			raw, err := json.Marshal(v.After.Value)
+			if err != nil {
+				return nil, err
+			}
+			fields["after"] = raw
+		}
+	}
+	if v.Before.Present {
+		if v.Before.Value == nil {
+			return nil, fmt.Errorf("host content placement must not be null")
+		}
+		{
+			raw, err := json.Marshal(v.Before.Value)
+			if err != nil {
+				return nil, err
+			}
+			fields["before"] = raw
+		}
+	}
+	projected, err := json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	var canonical ahp.FileChangedEventChangesItem
+	if err := json.Unmarshal(projected, &canonical); err != nil {
+		return nil, fmt.Errorf("invalid host FileChangedEventChangesItemInput: %w", err)
+	}
+	return projected, nil
+}
+func (v *FileChangedEventChangesItemInput) ahpContentSources(path string, sources map[string]*content.Source) {
+	if v.After.Present {
+		if v.After.Value != nil {
+			v.After.Value.ahpContentSources(path+"/after", sources)
+		}
+	}
+	if v.Before.Present {
+		if v.Before.Value != nil {
+			v.Before.Value.ahpContentSources(path+"/before", sources)
+		}
+	}
+}
+
 type FileChangedInput struct {
 	Changes       []ahp.FileChangedEventChangesItem
 	Extensions    ahp.Optional[*ahp.Extensions]
@@ -391,15 +764,53 @@ type FileChangedInput struct {
 	Synthesized   ahp.Optional[bool]
 	Time          ahp.Optional[string]
 	Turn          ahp.Optional[ahp.FileChangedEventTurn]
-	ItemsSources  []*content.Source `json:"-"`
+	// ChangesHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ChangesHost *[]FileChangedEventChangesItemInput `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost            *[]*ContentPartInput `json:"-"`
+	ChangesAfterSources  []*content.Source    `json:"-"`
+	ChangesBeforeSources []*content.Source    `json:"-"`
+	ItemsSources         []*content.Source    `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v FileChangedInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	for index0, source0 := range v.ChangesAfterSources {
+		if source0 != nil {
+			sources[""+"/changes"+"/"+strconv.Itoa(index0)+"/after"] = source0
+		}
+	}
+	for index0, source0 := range v.ChangesBeforeSources {
+		if source0 != nil {
+			sources[""+"/changes"+"/"+strconv.Itoa(index0)+"/before"] = source0
+		}
+	}
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
+		}
+	}
+	if v.ChangesHost != nil {
+		for path := range sources {
+			if path == "/changes" || strings.HasPrefix(path, "/changes/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ChangesHost {
+			(*v.ChangesHost)[hostIndex0].ahpContentSources("/changes"+"/"+strconv.Itoa(hostIndex0), sources)
+		}
+	}
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -408,6 +819,12 @@ func (v FileChangedInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
 	{
 		fields["changes"] = v.Changes
+		if v.ChangesHost != nil {
+			if (*v.ChangesHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			fields["changes"] = v.ChangesHost
+		}
 	}
 	{
 		if v.Extensions.Present {
@@ -427,6 +844,17 @@ func (v FileChangedInput) MarshalJSON() ([]byte, error) {
 	{
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
+		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
 		}
 	}
 	{
@@ -476,15 +904,29 @@ type HookFailureInput struct {
 	Synthesized   ahp.Optional[bool]
 	Time          ahp.Optional[string]
 	Turn          ahp.Optional[ahp.HookFailureEventTurn]
-	ItemsSources  []*content.Source `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost    *[]*ContentPartInput `json:"-"`
+	ItemsSources []*content.Source    `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v HookFailureInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
+		}
+	}
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -512,6 +954,17 @@ func (v HookFailureInput) MarshalJSON() ([]byte, error) {
 	{
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
+		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
 		}
 	}
 	{
@@ -565,15 +1018,29 @@ type ModelErrorInput struct {
 	Time          ahp.Optional[string]
 	Turn          ahp.Optional[ahp.ModelErrorEventTurn]
 	Usage         ahp.Optional[*ahp.ExecutionEventAttemptusage]
-	ItemsSources  []*content.Source `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost    *[]*ContentPartInput `json:"-"`
+	ItemsSources []*content.Source    `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v ModelErrorInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
+		}
+	}
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -607,6 +1074,17 @@ func (v ModelErrorInput) MarshalJSON() ([]byte, error) {
 	{
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
+		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
 		}
 	}
 	{
@@ -676,15 +1154,23 @@ type ModelRequestBeforeInput struct {
 	Synthesized   ahp.Optional[bool]
 	Time          ahp.Optional[string]
 	Turn          ahp.Optional[ahp.ModelRequestBeforeEventTurn]
-	ItemsSources  []*content.Source `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost *[]*ModelVisibleItemInput `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v ModelRequestBeforeInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -711,6 +1197,17 @@ func (v ModelRequestBeforeInput) MarshalJSON() ([]byte, error) {
 	}
 	{
 		fields["items"] = v.Items
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
+		}
 	}
 	{
 		fields["model"] = v.Model
@@ -770,15 +1267,23 @@ type ModelResponseAfterInput struct {
 	Time          ahp.Optional[string]
 	Turn          ahp.Optional[ahp.ModelResponseAfterEventTurn]
 	Usage         ahp.Optional[*ahp.ExecutionEventAttemptusage]
-	ItemsSources  []*content.Source `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost *[]*ModelVisibleItemInput `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v ModelResponseAfterInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -811,6 +1316,17 @@ func (v ModelResponseAfterInput) MarshalJSON() ([]byte, error) {
 	}
 	{
 		fields["items"] = v.Items
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
+		}
 	}
 	{
 		if v.LatencyMs.Present {
@@ -874,15 +1390,29 @@ type ModelSwitchAfterInput struct {
 	Synthesized   ahp.Optional[bool]
 	Time          ahp.Optional[string]
 	Turn          ahp.Optional[ahp.ModelSwitchAfterEventTurn]
-	ItemsSources  []*content.Source `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost    *[]*ContentPartInput `json:"-"`
+	ItemsSources []*content.Source    `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v ModelSwitchAfterInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
+		}
+	}
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -910,6 +1440,17 @@ func (v ModelSwitchAfterInput) MarshalJSON() ([]byte, error) {
 	{
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
+		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
 		}
 	}
 	{
@@ -968,15 +1509,29 @@ type ModelSwitchBeforeInput struct {
 	Synthesized   ahp.Optional[bool]
 	Time          ahp.Optional[string]
 	Turn          ahp.Optional[ahp.ModelSwitchBeforeEventTurn]
-	ItemsSources  []*content.Source `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost    *[]*ContentPartInput `json:"-"`
+	ItemsSources []*content.Source    `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v ModelSwitchBeforeInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
+		}
+	}
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -1004,6 +1559,17 @@ func (v ModelSwitchBeforeInput) MarshalJSON() ([]byte, error) {
 	{
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
+		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
 		}
 	}
 	{
@@ -1066,15 +1632,29 @@ type SessionEndInput struct {
 	Synthesized   ahp.Optional[bool]
 	Time          ahp.Optional[string]
 	Turn          ahp.Optional[ahp.SessionEndEventTurn]
-	ItemsSources  []*content.Source `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost    *[]*ContentPartInput `json:"-"`
+	ItemsSources []*content.Source    `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v SessionEndInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
+		}
+	}
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -1104,6 +1684,17 @@ func (v SessionEndInput) MarshalJSON() ([]byte, error) {
 	{
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
+		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
 		}
 	}
 	{
@@ -1160,15 +1751,23 @@ type SessionStartInput struct {
 	Time           ahp.Optional[string]
 	Trigger        ahp.SessionStartEventTrigger
 	Turn           ahp.Optional[ahp.SessionStartEventTurn]
-	ItemsSources   []*content.Source `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost *[]*ModelVisibleItemInput `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v SessionStartInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -1195,6 +1794,17 @@ func (v SessionStartInput) MarshalJSON() ([]byte, error) {
 	}
 	{
 		fields["items"] = v.Items
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
+		}
 	}
 	{
 		if v.Native.Present {
@@ -1252,15 +1862,29 @@ type TaskChangeAfterInput struct {
 	Task          ahp.TaskChangeAfterEventTask
 	Time          ahp.Optional[string]
 	Turn          ahp.Optional[ahp.TaskChangeAfterEventTurn]
-	ItemsSources  []*content.Source `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost    *[]*ContentPartInput `json:"-"`
+	ItemsSources []*content.Source    `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v TaskChangeAfterInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
+		}
+	}
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -1285,6 +1909,17 @@ func (v TaskChangeAfterInput) MarshalJSON() ([]byte, error) {
 	{
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
+		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
 		}
 	}
 	{
@@ -1337,15 +1972,29 @@ type TaskChangeBeforeInput struct {
 	Task          ahp.TaskChangeBeforeEventTask
 	Time          ahp.Optional[string]
 	Turn          ahp.Optional[ahp.TaskChangeBeforeEventTurn]
-	ItemsSources  []*content.Source `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost    *[]*ContentPartInput `json:"-"`
+	ItemsSources []*content.Source    `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v TaskChangeBeforeInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
+		}
+	}
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -1370,6 +2019,17 @@ func (v TaskChangeBeforeInput) MarshalJSON() ([]byte, error) {
 	{
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
+		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
 		}
 	}
 	{
@@ -1410,52 +2070,138 @@ func (v TaskChangeBeforeInput) MarshalJSON() ([]byte, error) {
 
 const TaskChangeBefore Type = "task.change.before"
 
+// ExecutionEventFilechangeInput preserves wire metadata and projects only schema-owned content children.
+type ExecutionEventFilechangeInput struct {
+	ahp.ExecutionEventFilechange
+	After  ahp.Optional[*ContentPartInput]
+	Before ahp.Optional[*ContentPartInput]
+}
+
+func (v *ExecutionEventFilechangeInput) MarshalJSON() ([]byte, error) {
+	base := v.ExecutionEventFilechange
+	raw, err := json.Marshal(base)
+	if err != nil {
+		return nil, err
+	}
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, err
+	}
+	if v.After.Present {
+		if v.After.Value == nil {
+			return nil, fmt.Errorf("host content placement must not be null")
+		}
+		{
+			raw, err := json.Marshal(v.After.Value)
+			if err != nil {
+				return nil, err
+			}
+			fields["after"] = raw
+		}
+	}
+	if v.Before.Present {
+		if v.Before.Value == nil {
+			return nil, fmt.Errorf("host content placement must not be null")
+		}
+		{
+			raw, err := json.Marshal(v.Before.Value)
+			if err != nil {
+				return nil, err
+			}
+			fields["before"] = raw
+		}
+	}
+	projected, err := json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	var canonical ahp.ExecutionEventFilechange
+	if err := json.Unmarshal(projected, &canonical); err != nil {
+		return nil, fmt.Errorf("invalid host ExecutionEventFilechangeInput: %w", err)
+	}
+	return projected, nil
+}
+func (v *ExecutionEventFilechangeInput) ahpContentSources(path string, sources map[string]*content.Source) {
+	if v.After.Present {
+		if v.After.Value != nil {
+			v.After.Value.ahpContentSources(path+"/after", sources)
+		}
+	}
+	if v.Before.Present {
+		if v.Before.Value != nil {
+			v.Before.Value.ahpContentSources(path+"/before", sources)
+		}
+	}
+}
+
 type ToolAfterInput struct {
-	Batch                    ahp.Optional[*ahp.ExecutionEventBatch]
-	CallID                   string
-	CallSynthesized          ahp.Optional[bool]
-	DurationMs               ahp.Optional[json.Number]
-	Error                    ahp.Optional[*ahp.ExecutionEventError]
-	Execution                *ahp.ExecutionEventExecution
-	Extensions               ahp.Optional[*ahp.Extensions]
-	FileChanges              ahp.Optional[[]*ahp.ExecutionEventFilechange]
-	Gaps                     ahp.Optional[[]ahp.ToolAfterEventGapsItem]
-	ID                       ahp.Optional[string]
-	Items                    []*ahp.ModelVisibleItem
-	Native                   ahp.Optional[*ahp.NativeEvent]
-	Outcome                  ahp.ToolAfterEventOutcome
-	ParentEventID            ahp.Optional[string]
-	Path                     string
-	Session                  ahp.Optional[*ahp.Session]
-	Synthesized              ahp.Optional[bool]
-	Time                     ahp.Optional[string]
-	Input                    ahp.ExecutionEventToolInput
-	ToolKind                 ahp.Optional[string]
-	ToolMcp                  ahp.Optional[*ahp.ExecutionEventMcp]
-	Name                     string
-	Origin                   ahp.ExecutionEventToolOrigin
-	Turn                     ahp.Optional[ahp.ToolAfterEventTurn]
-	FileChangesAfterSources  []*content.Source `json:"-"`
-	FileChangesBeforeSources []*content.Source `json:"-"`
-	ItemsSources             []*content.Source `json:"-"`
+	Batch           ahp.Optional[*ahp.ExecutionEventBatch]
+	CallID          string
+	CallSynthesized ahp.Optional[bool]
+	DurationMs      ahp.Optional[json.Number]
+	Error           ahp.Optional[*ahp.ExecutionEventError]
+	Execution       *ahp.ExecutionEventExecution
+	Extensions      ahp.Optional[*ahp.Extensions]
+	FileChanges     ahp.Optional[[]*ahp.ExecutionEventFilechange]
+	Gaps            ahp.Optional[[]ahp.ToolAfterEventGapsItem]
+	ID              ahp.Optional[string]
+	Items           []*ahp.ModelVisibleItem
+	Native          ahp.Optional[*ahp.NativeEvent]
+	Outcome         ahp.ToolAfterEventOutcome
+	ParentEventID   ahp.Optional[string]
+	Path            string
+	Session         ahp.Optional[*ahp.Session]
+	Synthesized     ahp.Optional[bool]
+	Time            ahp.Optional[string]
+	Input           ahp.ExecutionEventToolInput
+	ToolKind        ahp.Optional[string]
+	ToolMcp         ahp.Optional[*ahp.ExecutionEventMcp]
+	Name            string
+	Origin          ahp.ExecutionEventToolOrigin
+	Turn            ahp.Optional[ahp.ToolAfterEventTurn]
+	// FileChangesHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	FileChangesHost *[]*ExecutionEventFilechangeInput `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost                *[]*ModelVisibleItemInput `json:"-"`
+	FileChangesAfterSources  []*content.Source         `json:"-"`
+	FileChangesBeforeSources []*content.Source         `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v ToolAfterInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.FileChangesAfterSources {
-		if source != nil {
-			sources["/fileChanges/"+strconv.Itoa(index)+"/after"] = source
+	for index0, source0 := range v.FileChangesAfterSources {
+		if source0 != nil {
+			sources[""+"/fileChanges"+"/"+strconv.Itoa(index0)+"/after"] = source0
 		}
 	}
-	for index, source := range v.FileChangesBeforeSources {
-		if source != nil {
-			sources["/fileChanges/"+strconv.Itoa(index)+"/before"] = source
+	for index0, source0 := range v.FileChangesBeforeSources {
+		if source0 != nil {
+			sources[""+"/fileChanges"+"/"+strconv.Itoa(index0)+"/before"] = source0
 		}
 	}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	if v.FileChangesHost != nil {
+		for path := range sources {
+			if path == "/fileChanges" || strings.HasPrefix(path, "/fileChanges/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.FileChangesHost {
+			if (*v.FileChangesHost)[hostIndex0] != nil {
+				(*v.FileChangesHost)[hostIndex0].ahpContentSources("/fileChanges"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
+		}
+	}
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -1507,6 +2253,17 @@ func (v ToolAfterInput) MarshalJSON() ([]byte, error) {
 		if v.FileChanges.Present {
 			fields["fileChanges"] = v.FileChanges.Value
 		}
+		if v.FileChangesHost != nil {
+			if (*v.FileChangesHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.FileChangesHost {
+				if (*v.FileChangesHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["fileChanges"] = v.FileChangesHost
+		}
 	}
 	{
 		if v.Gaps.Present {
@@ -1520,6 +2277,17 @@ func (v ToolAfterInput) MarshalJSON() ([]byte, error) {
 	}
 	{
 		fields["items"] = v.Items
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
+		}
 	}
 	{
 		if v.Native.Present {
@@ -1619,15 +2387,29 @@ type ToolBatchAfterInput struct {
 	Synthesized   ahp.Optional[bool]
 	Time          ahp.Optional[string]
 	Turn          ahp.Optional[ahp.ToolBatchAfterEventTurn]
-	ItemsSources  []*content.Source `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost    *[]*ContentPartInput `json:"-"`
+	ItemsSources []*content.Source    `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v ToolBatchAfterInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
+		}
+	}
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -1658,6 +2440,17 @@ func (v ToolBatchAfterInput) MarshalJSON() ([]byte, error) {
 	{
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
+		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
 		}
 	}
 	{
@@ -1715,15 +2508,29 @@ type ToolBeforeInput[T any] struct {
 	Name            string
 	Origin          ahp.ExecutionEventToolOrigin
 	Turn            ahp.Optional[ahp.ToolBeforeEventTurn]
-	ItemsSources    []*content.Source `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost    *[]*ContentPartInput `json:"-"`
+	ItemsSources []*content.Source    `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v ToolBeforeInput[T]) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
+		}
+	}
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -1771,6 +2578,17 @@ func (v ToolBeforeInput[T]) MarshalJSON() ([]byte, error) {
 	{
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
+		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
 		}
 	}
 	{
@@ -1877,15 +2695,29 @@ type ToolPermissionRequestInput struct {
 	Name            string
 	Origin          ahp.ExecutionEventToolOrigin
 	Turn            ahp.Optional[ahp.ToolPermissionRequestEventTurn]
-	ItemsSources    []*content.Source `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost    *[]*ContentPartInput `json:"-"`
+	ItemsSources []*content.Source    `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v ToolPermissionRequestInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
+		}
+	}
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -1933,6 +2765,17 @@ func (v ToolPermissionRequestInput) MarshalJSON() ([]byte, error) {
 	{
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
+		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
 		}
 	}
 	{
@@ -2045,15 +2888,29 @@ type ToolPermissionResolvedInput struct {
 	Name            string
 	Origin          ahp.ExecutionEventToolOrigin
 	Turn            ahp.Optional[ahp.ToolPermissionResolvedEventTurn]
-	ItemsSources    []*content.Source `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost    *[]*ContentPartInput `json:"-"`
+	ItemsSources []*content.Source    `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v ToolPermissionResolvedInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
+		}
+	}
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -2107,6 +2964,17 @@ func (v ToolPermissionResolvedInput) MarshalJSON() ([]byte, error) {
 	{
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
+		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
 		}
 	}
 	{
@@ -2192,41 +3060,63 @@ func (v ToolPermissionResolvedInput) MarshalJSON() ([]byte, error) {
 const ToolPermissionResolved Type = "tool.permission.resolved"
 
 type ToolProgressInput struct {
-	Backgrounded        bool
-	Batch               ahp.Optional[*ahp.ExecutionEventBatch]
-	CallID              string
-	CallSynthesized     ahp.Optional[bool]
-	Extensions          ahp.Optional[*ahp.Extensions]
-	Gaps                ahp.Optional[[]ahp.ToolProgressEventGapsItem]
-	ID                  ahp.Optional[string]
-	Items               ahp.Optional[[]*ahp.ContentItem]
-	Native              ahp.Optional[*ahp.NativeEvent]
-	ParentEventID       ahp.Optional[string]
-	PartialOutput       *ahp.ModelVisibleItem
-	Path                string
-	Session             ahp.Optional[*ahp.Session]
-	Synthesized         ahp.Optional[bool]
-	Time                ahp.Optional[string]
-	Input               ahp.ExecutionEventToolInput
-	ToolKind            ahp.Optional[string]
-	ToolMcp             ahp.Optional[*ahp.ExecutionEventMcp]
-	Name                string
-	Origin              ahp.ExecutionEventToolOrigin
-	Turn                ahp.Optional[ahp.ToolProgressEventTurn]
-	ItemsSources        []*content.Source `json:"-"`
-	PartialOutputSource *content.Source   `json:"-"`
+	Backgrounded    bool
+	Batch           ahp.Optional[*ahp.ExecutionEventBatch]
+	CallID          string
+	CallSynthesized ahp.Optional[bool]
+	Extensions      ahp.Optional[*ahp.Extensions]
+	Gaps            ahp.Optional[[]ahp.ToolProgressEventGapsItem]
+	ID              ahp.Optional[string]
+	Items           ahp.Optional[[]*ahp.ContentItem]
+	Native          ahp.Optional[*ahp.NativeEvent]
+	ParentEventID   ahp.Optional[string]
+	PartialOutput   *ahp.ModelVisibleItem
+	Path            string
+	Session         ahp.Optional[*ahp.Session]
+	Synthesized     ahp.Optional[bool]
+	Time            ahp.Optional[string]
+	Input           ahp.ExecutionEventToolInput
+	ToolKind        ahp.Optional[string]
+	ToolMcp         ahp.Optional[*ahp.ExecutionEventMcp]
+	Name            string
+	Origin          ahp.ExecutionEventToolOrigin
+	Turn            ahp.Optional[ahp.ToolProgressEventTurn]
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost *[]*ContentPartInput `json:"-"`
+	// PartialOutputHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	PartialOutputHost **ModelVisibleItemInput `json:"-"`
+	ItemsSources      []*content.Source       `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v ToolProgressInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
 		}
 	}
-	if v.PartialOutputSource != nil {
-		sources["/partialOutput"] = v.PartialOutputSource
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
+		}
+	}
+	if v.PartialOutputHost != nil {
+		for path := range sources {
+			if path == "/partialOutput" || strings.HasPrefix(path, "/partialOutput/") {
+				delete(sources, path)
+			}
+		}
+		if (*v.PartialOutputHost) != nil {
+			(*v.PartialOutputHost).ahpContentSources("/partialOutput", sources)
+		}
 	}
 	return sources
 }
@@ -2277,6 +3167,17 @@ func (v ToolProgressInput) MarshalJSON() ([]byte, error) {
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
 		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
+		}
 	}
 	{
 		if v.Native.Present {
@@ -2290,6 +3191,12 @@ func (v ToolProgressInput) MarshalJSON() ([]byte, error) {
 	}
 	{
 		fields["partialOutput"] = v.PartialOutput
+		if v.PartialOutputHost != nil {
+			if (*v.PartialOutputHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			fields["partialOutput"] = v.PartialOutputHost
+		}
 	}
 	{
 		fields["path"] = v.Path
@@ -2379,15 +3286,23 @@ type TurnEndInput struct {
 	Time              ahp.Optional[string]
 	Turn              ahp.TurnEndEventTurn
 	Usage             ahp.Optional[*ahp.ExecutionEventTurnusage]
-	ItemsSources      []*content.Source `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost *[]*ModelVisibleItemInput `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v TurnEndInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -2419,6 +3334,17 @@ func (v TurnEndInput) MarshalJSON() ([]byte, error) {
 	}
 	{
 		fields["items"] = v.Items
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
+		}
 	}
 	{
 		if v.LastAssistantItem.Present {
@@ -2481,15 +3407,23 @@ type TurnFinishBeforeInput struct {
 	Time              ahp.Optional[string]
 	Turn              ahp.TurnFinishBeforeEventTurn
 	Usage             ahp.Optional[*ahp.ExecutionEventTurnusage]
-	ItemsSources      []*content.Source `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost *[]*ModelVisibleItemInput `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v TurnFinishBeforeInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -2516,6 +3450,17 @@ func (v TurnFinishBeforeInput) MarshalJSON() ([]byte, error) {
 	}
 	{
 		fields["items"] = v.Items
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
+		}
 	}
 	{
 		if v.LastAssistantItem.Present {
@@ -2577,19 +3522,41 @@ type TurnProgressInput struct {
 	Synthesized   ahp.Optional[bool]
 	Time          ahp.Optional[string]
 	Turn          ahp.TurnProgressEventTurn
-	DeltaSource   *content.Source   `json:"-"`
-	ItemsSources  []*content.Source `json:"-"`
+	// DeltaHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	DeltaHost **ModelVisibleItemInput `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost    *[]*ContentPartInput `json:"-"`
+	ItemsSources []*content.Source    `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v TurnProgressInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	if v.DeltaSource != nil {
-		sources["/delta"] = v.DeltaSource
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
+		}
 	}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	if v.DeltaHost != nil {
+		for path := range sources {
+			if path == "/delta" || strings.HasPrefix(path, "/delta/") {
+				delete(sources, path)
+			}
+		}
+		if (*v.DeltaHost) != nil {
+			(*v.DeltaHost).ahpContentSources("/delta", sources)
+		}
+	}
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -2598,6 +3565,12 @@ func (v TurnProgressInput) MarshalJSON() ([]byte, error) {
 	fields := map[string]any{}
 	{
 		fields["delta"] = v.Delta
+		if v.DeltaHost != nil {
+			if (*v.DeltaHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			fields["delta"] = v.DeltaHost
+		}
 	}
 	{
 		if v.Extensions.Present {
@@ -2623,6 +3596,17 @@ func (v TurnProgressInput) MarshalJSON() ([]byte, error) {
 	{
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
+		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
 		}
 	}
 	{
@@ -2671,15 +3655,23 @@ type TurnStartInput struct {
 	Time          ahp.Optional[string]
 	Trigger       ahp.TurnStartEventTrigger
 	Turn          ahp.TurnStartEventTurn
-	ItemsSources  []*content.Source `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost *[]*ModelVisibleItemInput `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v TurnStartInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -2708,6 +3700,17 @@ func (v TurnStartInput) MarshalJSON() ([]byte, error) {
 	}
 	{
 		fields["items"] = v.Items
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
+		}
 	}
 	{
 		if v.Native.Present {
@@ -2746,38 +3749,40 @@ func (v TurnStartInput) MarshalJSON() ([]byte, error) {
 const TurnStart Type = "turn.start"
 
 type UserAttentionInput struct {
-	Attention               ahp.UserAttentionEventAttention
-	Extensions              ahp.Optional[*ahp.Extensions]
-	Gaps                    ahp.Optional[[]ahp.UserAttentionEventGapsItem]
-	ID                      ahp.Optional[string]
-	Items                   ahp.Optional[[]*ahp.ContentItem]
-	Native                  ahp.Optional[*ahp.NativeEvent]
-	ParentEventID           ahp.Optional[string]
-	Session                 ahp.Optional[*ahp.Session]
-	Synthesized             ahp.Optional[bool]
-	Time                    ahp.Optional[string]
-	Turn                    ahp.Optional[ahp.UserAttentionEventTurn]
-	AttentionMessageSources []*content.Source `json:"-"`
-	AttentionTitleSources   []*content.Source `json:"-"`
-	ItemsSources            []*content.Source `json:"-"`
+	Attention     ahp.UserAttentionEventAttention
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Gaps          ahp.Optional[[]ahp.UserAttentionEventGapsItem]
+	ID            ahp.Optional[string]
+	Items         ahp.Optional[[]*ahp.ContentItem]
+	Native        ahp.Optional[*ahp.NativeEvent]
+	ParentEventID ahp.Optional[string]
+	Session       ahp.Optional[*ahp.Session]
+	Synthesized   ahp.Optional[bool]
+	Time          ahp.Optional[string]
+	Turn          ahp.Optional[ahp.UserAttentionEventTurn]
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost    *[]*ContentPartInput `json:"-"`
+	ItemsSources []*content.Source    `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v UserAttentionInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.AttentionMessageSources {
-		if source != nil {
-			sources["/attention/message/"+strconv.Itoa(index)+""] = source
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
 		}
 	}
-	for index, source := range v.AttentionTitleSources {
-		if source != nil {
-			sources["/attention/title/"+strconv.Itoa(index)+""] = source
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
 		}
-	}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -2805,6 +3810,17 @@ func (v UserAttentionInput) MarshalJSON() ([]byte, error) {
 	{
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
+		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
 		}
 	}
 	{
@@ -2843,30 +3859,40 @@ func (v UserAttentionInput) MarshalJSON() ([]byte, error) {
 const UserAttention Type = "user.attention"
 
 type UserElicitationRequestInput struct {
-	Elicitation              ahp.UserElicitationRequestEventElicitation
-	Extensions               ahp.Optional[*ahp.Extensions]
-	Gaps                     ahp.Optional[[]ahp.UserElicitationRequestEventGapsItem]
-	ID                       ahp.Optional[string]
-	Items                    ahp.Optional[[]*ahp.ContentItem]
-	Native                   ahp.Optional[*ahp.NativeEvent]
-	ParentEventID            ahp.Optional[string]
-	Session                  ahp.Optional[*ahp.Session]
-	Synthesized              ahp.Optional[bool]
-	Time                     ahp.Optional[string]
-	Turn                     ahp.Optional[ahp.UserElicitationRequestEventTurn]
-	ElicitationRequestSource *content.Source   `json:"-"`
-	ItemsSources             []*content.Source `json:"-"`
+	Elicitation   ahp.UserElicitationRequestEventElicitation
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Gaps          ahp.Optional[[]ahp.UserElicitationRequestEventGapsItem]
+	ID            ahp.Optional[string]
+	Items         ahp.Optional[[]*ahp.ContentItem]
+	Native        ahp.Optional[*ahp.NativeEvent]
+	ParentEventID ahp.Optional[string]
+	Session       ahp.Optional[*ahp.Session]
+	Synthesized   ahp.Optional[bool]
+	Time          ahp.Optional[string]
+	Turn          ahp.Optional[ahp.UserElicitationRequestEventTurn]
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost    *[]*ContentPartInput `json:"-"`
+	ItemsSources []*content.Source    `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v UserElicitationRequestInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	if v.ElicitationRequestSource != nil {
-		sources["/elicitation/request"] = v.ElicitationRequestSource
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
+		}
 	}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -2894,6 +3920,17 @@ func (v UserElicitationRequestInput) MarshalJSON() ([]byte, error) {
 	{
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
+		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
 		}
 	}
 	{
@@ -2932,30 +3969,40 @@ func (v UserElicitationRequestInput) MarshalJSON() ([]byte, error) {
 const UserElicitationRequest Type = "user.elicitation.request"
 
 type UserElicitationResultInput struct {
-	Elicitation             ahp.UserElicitationResultEventElicitation
-	Extensions              ahp.Optional[*ahp.Extensions]
-	Gaps                    ahp.Optional[[]ahp.UserElicitationResultEventGapsItem]
-	ID                      ahp.Optional[string]
-	Items                   ahp.Optional[[]*ahp.ContentItem]
-	Native                  ahp.Optional[*ahp.NativeEvent]
-	ParentEventID           ahp.Optional[string]
-	Session                 ahp.Optional[*ahp.Session]
-	Synthesized             ahp.Optional[bool]
-	Time                    ahp.Optional[string]
-	Turn                    ahp.Optional[ahp.UserElicitationResultEventTurn]
-	ElicitationResultSource *content.Source   `json:"-"`
-	ItemsSources            []*content.Source `json:"-"`
+	Elicitation   ahp.UserElicitationResultEventElicitation
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Gaps          ahp.Optional[[]ahp.UserElicitationResultEventGapsItem]
+	ID            ahp.Optional[string]
+	Items         ahp.Optional[[]*ahp.ContentItem]
+	Native        ahp.Optional[*ahp.NativeEvent]
+	ParentEventID ahp.Optional[string]
+	Session       ahp.Optional[*ahp.Session]
+	Synthesized   ahp.Optional[bool]
+	Time          ahp.Optional[string]
+	Turn          ahp.Optional[ahp.UserElicitationResultEventTurn]
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost    *[]*ContentPartInput `json:"-"`
+	ItemsSources []*content.Source    `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v UserElicitationResultInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	if v.ElicitationResultSource != nil {
-		sources["/elicitation/result"] = v.ElicitationResultSource
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
+		}
 	}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -2983,6 +4030,17 @@ func (v UserElicitationResultInput) MarshalJSON() ([]byte, error) {
 	{
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
+		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
 		}
 	}
 	{
@@ -3020,34 +4078,152 @@ func (v UserElicitationResultInput) MarshalJSON() ([]byte, error) {
 
 const UserElicitationResult Type = "user.elicitation.result"
 
+// UserMessageInboundEventMessageMessagesItemInput preserves wire metadata and projects only schema-owned content children.
+type UserMessageInboundEventMessageMessagesItemInput struct {
+	ahp.UserMessageInboundEventMessageMessagesItem
+	Parts []*ContentPartInput
+}
+
+func (v *UserMessageInboundEventMessageMessagesItemInput) MarshalJSON() ([]byte, error) {
+	switch string(v.Role) {
+	case "system", "developer", "user", "assistant", "tool":
+	default:
+		return nil, fmt.Errorf("host canonical message requires a canonical role")
+	}
+	if err := ensureContentIdentity(&v.ID, &v.Synthesized); err != nil {
+		return nil, err
+	}
+	base := v.UserMessageInboundEventMessageMessagesItem
+	raw, err := json.Marshal(base)
+	if err != nil {
+		return nil, err
+	}
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, err
+	}
+	if v.Parts == nil {
+		return nil, fmt.Errorf("host content placement must not be null")
+	}
+	for placementIndex0 := range v.Parts {
+		if v.Parts[placementIndex0] == nil {
+			return nil, fmt.Errorf("host content placement must not be null")
+		}
+	}
+	{
+		raw, err := json.Marshal(v.Parts)
+		if err != nil {
+			return nil, err
+		}
+		fields["parts"] = raw
+	}
+	projected, err := json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	var canonical ahp.UserMessageInboundEventMessageMessagesItem
+	if err := json.Unmarshal(projected, &canonical); err != nil {
+		return nil, fmt.Errorf("invalid host UserMessageInboundEventMessageMessagesItemInput: %w", err)
+	}
+	return projected, nil
+}
+func (v *UserMessageInboundEventMessageMessagesItemInput) ahpContentSources(path string, sources map[string]*content.Source) {
+	_ = ensureContentIdentity(&v.ID, &v.Synthesized)
+	for hostIndex0 := range v.Parts {
+		if v.Parts[hostIndex0] != nil {
+			v.Parts[hostIndex0].ahpContentSources(path+"/parts"+"/"+strconv.Itoa(hostIndex0), sources)
+		}
+	}
+}
+
+// UserMessageInboundEventMessageInput preserves wire metadata and projects only schema-owned content children.
+type UserMessageInboundEventMessageInput struct {
+	ahp.UserMessageInboundEventMessage
+	Messages []UserMessageInboundEventMessageMessagesItemInput
+}
+
+func (v *UserMessageInboundEventMessageInput) MarshalJSON() ([]byte, error) {
+	base := v.UserMessageInboundEventMessage
+	raw, err := json.Marshal(base)
+	if err != nil {
+		return nil, err
+	}
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, err
+	}
+	if v.Messages == nil {
+		return nil, fmt.Errorf("host content placement must not be null")
+	}
+	{
+		raw, err := json.Marshal(v.Messages)
+		if err != nil {
+			return nil, err
+		}
+		fields["messages"] = raw
+	}
+	projected, err := json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	var canonical ahp.UserMessageInboundEventMessage
+	if err := json.Unmarshal(projected, &canonical); err != nil {
+		return nil, fmt.Errorf("invalid host UserMessageInboundEventMessageInput: %w", err)
+	}
+	return projected, nil
+}
+func (v *UserMessageInboundEventMessageInput) ahpContentSources(path string, sources map[string]*content.Source) {
+	for hostIndex0 := range v.Messages {
+		v.Messages[hostIndex0].ahpContentSources(path+"/messages"+"/"+strconv.Itoa(hostIndex0), sources)
+	}
+}
+
 type UserMessageInboundInput struct {
-	Extensions         ahp.Optional[*ahp.Extensions]
-	Gaps               ahp.Optional[[]ahp.UserMessageInboundEventGapsItem]
-	ID                 ahp.Optional[string]
-	Items              ahp.Optional[[]*ahp.ContentItem]
-	Message            ahp.UserMessageInboundEventMessage
-	Native             ahp.Optional[*ahp.NativeEvent]
-	ParentEventID      ahp.Optional[string]
-	Session            ahp.Optional[*ahp.Session]
-	Synthesized        ahp.Optional[bool]
-	Time               ahp.Optional[string]
-	Turn               ahp.Optional[ahp.UserMessageInboundEventTurn]
-	ItemsSources       []*content.Source `json:"-"`
-	MessageTextSources []*content.Source `json:"-"`
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Gaps          ahp.Optional[[]ahp.UserMessageInboundEventGapsItem]
+	ID            ahp.Optional[string]
+	Items         ahp.Optional[[]*ahp.ContentItem]
+	Message       ahp.UserMessageInboundEventMessage
+	Native        ahp.Optional[*ahp.NativeEvent]
+	ParentEventID ahp.Optional[string]
+	Session       ahp.Optional[*ahp.Session]
+	Synthesized   ahp.Optional[bool]
+	Time          ahp.Optional[string]
+	Turn          ahp.Optional[ahp.UserMessageInboundEventTurn]
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost *[]*ContentPartInput `json:"-"`
+	// MessageHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	MessageHost  *UserMessageInboundEventMessageInput `json:"-"`
+	ItemsSources []*content.Source                    `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v UserMessageInboundInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
 		}
 	}
-	for index, source := range v.MessageTextSources {
-		if source != nil {
-			sources["/message/text/"+strconv.Itoa(index)+""] = source
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
 		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
+		}
+	}
+	if v.MessageHost != nil {
+		for path := range sources {
+			if path == "/message" || strings.HasPrefix(path, "/message/") {
+				delete(sources, path)
+			}
+		}
+		(*v.MessageHost).ahpContentSources("/message", sources)
 	}
 	return sources
 }
@@ -3072,9 +4248,23 @@ func (v UserMessageInboundInput) MarshalJSON() ([]byte, error) {
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
 		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
+		}
 	}
 	{
 		fields["message"] = v.Message
+		if v.MessageHost != nil {
+			fields["message"] = v.MessageHost
+		}
 	}
 	{
 		if v.Native.Present {
@@ -3111,34 +4301,152 @@ func (v UserMessageInboundInput) MarshalJSON() ([]byte, error) {
 
 const UserMessageInbound Type = "user.message.inbound"
 
+// UserMessageOutboundEventMessageMessagesItemInput preserves wire metadata and projects only schema-owned content children.
+type UserMessageOutboundEventMessageMessagesItemInput struct {
+	ahp.UserMessageOutboundEventMessageMessagesItem
+	Parts []*ContentPartInput
+}
+
+func (v *UserMessageOutboundEventMessageMessagesItemInput) MarshalJSON() ([]byte, error) {
+	switch string(v.Role) {
+	case "system", "developer", "user", "assistant", "tool":
+	default:
+		return nil, fmt.Errorf("host canonical message requires a canonical role")
+	}
+	if err := ensureContentIdentity(&v.ID, &v.Synthesized); err != nil {
+		return nil, err
+	}
+	base := v.UserMessageOutboundEventMessageMessagesItem
+	raw, err := json.Marshal(base)
+	if err != nil {
+		return nil, err
+	}
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, err
+	}
+	if v.Parts == nil {
+		return nil, fmt.Errorf("host content placement must not be null")
+	}
+	for placementIndex0 := range v.Parts {
+		if v.Parts[placementIndex0] == nil {
+			return nil, fmt.Errorf("host content placement must not be null")
+		}
+	}
+	{
+		raw, err := json.Marshal(v.Parts)
+		if err != nil {
+			return nil, err
+		}
+		fields["parts"] = raw
+	}
+	projected, err := json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	var canonical ahp.UserMessageOutboundEventMessageMessagesItem
+	if err := json.Unmarshal(projected, &canonical); err != nil {
+		return nil, fmt.Errorf("invalid host UserMessageOutboundEventMessageMessagesItemInput: %w", err)
+	}
+	return projected, nil
+}
+func (v *UserMessageOutboundEventMessageMessagesItemInput) ahpContentSources(path string, sources map[string]*content.Source) {
+	_ = ensureContentIdentity(&v.ID, &v.Synthesized)
+	for hostIndex0 := range v.Parts {
+		if v.Parts[hostIndex0] != nil {
+			v.Parts[hostIndex0].ahpContentSources(path+"/parts"+"/"+strconv.Itoa(hostIndex0), sources)
+		}
+	}
+}
+
+// UserMessageOutboundEventMessageInput preserves wire metadata and projects only schema-owned content children.
+type UserMessageOutboundEventMessageInput struct {
+	ahp.UserMessageOutboundEventMessage
+	Messages []UserMessageOutboundEventMessageMessagesItemInput
+}
+
+func (v *UserMessageOutboundEventMessageInput) MarshalJSON() ([]byte, error) {
+	base := v.UserMessageOutboundEventMessage
+	raw, err := json.Marshal(base)
+	if err != nil {
+		return nil, err
+	}
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, err
+	}
+	if v.Messages == nil {
+		return nil, fmt.Errorf("host content placement must not be null")
+	}
+	{
+		raw, err := json.Marshal(v.Messages)
+		if err != nil {
+			return nil, err
+		}
+		fields["messages"] = raw
+	}
+	projected, err := json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	var canonical ahp.UserMessageOutboundEventMessage
+	if err := json.Unmarshal(projected, &canonical); err != nil {
+		return nil, fmt.Errorf("invalid host UserMessageOutboundEventMessageInput: %w", err)
+	}
+	return projected, nil
+}
+func (v *UserMessageOutboundEventMessageInput) ahpContentSources(path string, sources map[string]*content.Source) {
+	for hostIndex0 := range v.Messages {
+		v.Messages[hostIndex0].ahpContentSources(path+"/messages"+"/"+strconv.Itoa(hostIndex0), sources)
+	}
+}
+
 type UserMessageOutboundInput struct {
-	Extensions            ahp.Optional[*ahp.Extensions]
-	Gaps                  ahp.Optional[[]ahp.UserMessageOutboundEventGapsItem]
-	ID                    ahp.Optional[string]
-	Items                 ahp.Optional[[]*ahp.ContentItem]
-	Message               ahp.UserMessageOutboundEventMessage
-	Native                ahp.Optional[*ahp.NativeEvent]
-	ParentEventID         ahp.Optional[string]
-	Session               ahp.Optional[*ahp.Session]
-	Synthesized           ahp.Optional[bool]
-	Time                  ahp.Optional[string]
-	Turn                  ahp.Optional[ahp.UserMessageOutboundEventTurn]
-	ItemsSources          []*content.Source `json:"-"`
-	MessagePayloadSources []*content.Source `json:"-"`
+	Extensions    ahp.Optional[*ahp.Extensions]
+	Gaps          ahp.Optional[[]ahp.UserMessageOutboundEventGapsItem]
+	ID            ahp.Optional[string]
+	Items         ahp.Optional[[]*ahp.ContentItem]
+	Message       ahp.UserMessageOutboundEventMessage
+	Native        ahp.Optional[*ahp.NativeEvent]
+	ParentEventID ahp.Optional[string]
+	Session       ahp.Optional[*ahp.Session]
+	Synthesized   ahp.Optional[bool]
+	Time          ahp.Optional[string]
+	Turn          ahp.Optional[ahp.UserMessageOutboundEventTurn]
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost *[]*ContentPartInput `json:"-"`
+	// MessageHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	MessageHost  *UserMessageOutboundEventMessageInput `json:"-"`
+	ItemsSources []*content.Source                     `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v UserMessageOutboundInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
 		}
 	}
-	for index, source := range v.MessagePayloadSources {
-		if source != nil {
-			sources["/message/payload/"+strconv.Itoa(index)+""] = source
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
 		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
+		}
+	}
+	if v.MessageHost != nil {
+		for path := range sources {
+			if path == "/message" || strings.HasPrefix(path, "/message/") {
+				delete(sources, path)
+			}
+		}
+		(*v.MessageHost).ahpContentSources("/message", sources)
 	}
 	return sources
 }
@@ -3163,9 +4471,23 @@ func (v UserMessageOutboundInput) MarshalJSON() ([]byte, error) {
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
 		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
+		}
 	}
 	{
 		fields["message"] = v.Message
+		if v.MessageHost != nil {
+			fields["message"] = v.MessageHost
+		}
 	}
 	{
 		if v.Native.Present {
@@ -3214,15 +4536,29 @@ type WorkspaceChangeAfterInput struct {
 	Time          ahp.Optional[string]
 	Turn          ahp.Optional[ahp.WorkspaceChangeAfterEventTurn]
 	Workspace     ahp.WorkspaceChangeAfterEventWorkspace
-	ItemsSources  []*content.Source `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost    *[]*ContentPartInput `json:"-"`
+	ItemsSources []*content.Source    `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v WorkspaceChangeAfterInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
+		}
+	}
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -3247,6 +4583,17 @@ func (v WorkspaceChangeAfterInput) MarshalJSON() ([]byte, error) {
 	{
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
+		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
 		}
 	}
 	{
@@ -3299,15 +4646,29 @@ type WorkspaceChangeBeforeInput struct {
 	Time          ahp.Optional[string]
 	Turn          ahp.Optional[ahp.WorkspaceChangeBeforeEventTurn]
 	Workspace     ahp.WorkspaceChangeBeforeEventWorkspace
-	ItemsSources  []*content.Source `json:"-"`
+	// ItemsHost overrides the wire field when non-nil; embeds owned sources without reading them.
+	ItemsHost    *[]*ContentPartInput `json:"-"`
+	ItemsSources []*content.Source    `json:"-"`
 }
 
 // AHPContentSources returns owned sources out of band; descriptors stay in canonical JSON.
 func (v WorkspaceChangeBeforeInput) AHPContentSources() map[string]*content.Source {
 	sources := map[string]*content.Source{}
-	for index, source := range v.ItemsSources {
-		if source != nil {
-			sources["/items/"+strconv.Itoa(index)+""] = source
+	for index0, source0 := range v.ItemsSources {
+		if source0 != nil {
+			sources[""+"/items"+"/"+strconv.Itoa(index0)] = source0
+		}
+	}
+	if v.ItemsHost != nil {
+		for path := range sources {
+			if path == "/items" || strings.HasPrefix(path, "/items/") {
+				delete(sources, path)
+			}
+		}
+		for hostIndex0 := range *v.ItemsHost {
+			if (*v.ItemsHost)[hostIndex0] != nil {
+				(*v.ItemsHost)[hostIndex0].ahpContentSources("/items"+"/"+strconv.Itoa(hostIndex0), sources)
+			}
 		}
 	}
 	return sources
@@ -3332,6 +4693,17 @@ func (v WorkspaceChangeBeforeInput) MarshalJSON() ([]byte, error) {
 	{
 		if v.Items.Present {
 			fields["items"] = v.Items.Value
+		}
+		if v.ItemsHost != nil {
+			if (*v.ItemsHost) == nil {
+				return nil, fmt.Errorf("host content placement must not be null")
+			}
+			for placementIndex0 := range *v.ItemsHost {
+				if (*v.ItemsHost)[placementIndex0] == nil {
+					return nil, fmt.Errorf("host content placement must not be null")
+				}
+			}
+			fields["items"] = v.ItemsHost
 		}
 	}
 	{

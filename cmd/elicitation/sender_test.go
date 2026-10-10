@@ -9,14 +9,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"reflect"
 	"testing"
 
+	hooks "github.com/agenthooksprotocol/go-sdk/client"
 	sdk "github.com/agenthooksprotocol/go-sdk/interop"
 )
 
 func senderFixture(stage string, raw []byte) O {
-	meta := O{"server": "requesting-server", "mode": "form", stage: O{"id": stage + "-body", "kind": "elicitation." + stage, "mediaType": "application/json", "selection": "body", "body": O{"ref": "urn:" + stage}}}
+	meta := O{"server": "requesting-server", "mode": "form", stage: O{"id": stage + "-body", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": string(raw)}}
 	event := O{"id": stage, "source": "urn:real:requester", "type": "user.elicitation." + stage, "time": "2026-09-01T00:00:00Z", "session": O{"id": "real-session"}, "elicitation": meta}
 	if stage == "result" {
 		event["parentEventId"] = "request"
@@ -38,6 +38,7 @@ func TestOrdinaryResultUsesPersistedActualRequest(t *testing.T) {
 	requests := []O{}
 	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/upload" {
+			t.Error("inline MCP JSON must not upload")
 			raw, _ := io.ReadAll(r.Body)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(201)
@@ -53,8 +54,10 @@ func TestOrdinaryResultUsesPersistedActualRequest(t *testing.T) {
 			requests = append(requests, admitted)
 			meta := obj(obj(obj(admitted["params"])["event"])["elicitation"])
 			for _, stage := range []string{"request", "result"} {
-				if item := obj(meta[stage]); item != nil && len(obj(item["body"])) != 1 {
-					t.Errorf("local receipt leaked into wire reference: %#v", item)
+				if item := obj(meta[stage]); item != nil {
+					if item["body"] != nil || item["kind"] != "text" || !json.Valid([]byte(str(item["text"]))) {
+						t.Errorf("MCP payload is not inline JSON text: %#v", item)
+					}
 				}
 			}
 			return O{"jsonrpc": "2.0", "id": admitted["id"], "result": O{"protocolVersion": "draft", "effects": []any{}}}, nil
@@ -69,20 +72,17 @@ func TestOrdinaryResultUsesPersistedActualRequest(t *testing.T) {
 	defer peer.Close()
 	base := senderPlan{Endpoint: peer.URL, Token: "principal", UploadToken: "upload-principal", StateFile: filepath.Join(t.TempDir(), "private", "state.json")}
 	before := base
-	before.ContentSources = []senderSource{senderFixtureSource("request", reqBody)}
 	before.Steps = []senderStep{senderFixtureStep(senderFixture("request", reqBody))}
 	first, err := runSender(context.Background(), before, peer.Client())
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantUploads := []any{O{"sourceRef": "urn:request", "descriptor": O{"ref": "urn:uploaded:" + hash(reqBody), "size": float64(len(reqBody)), "sha256": hash(reqBody)}}}
-	if len(first) != 1 || !reflect.DeepEqual(obj(first[0])["contentUploads"], wantUploads) {
-		t.Fatalf("lost receiver receipt evidence: %#v", first)
+	if len(first) != 1 || len(obj(first[0])["contentUploads"].([]any)) != 0 {
+		t.Fatalf("inline MCP JSON unexpectedly uploaded: %#v", first)
 	}
-	// The second invocation has only result bytes. It must recover the actual
+	// The second invocation has only inline result JSON. It must recover the actual
 	// previously accepted original request, not derive an identity from the result.
 	after := base
-	after.ContentSources = []senderSource{senderFixtureSource("result", resultBody)}
 	after.Steps = []senderStep{senderFixtureStep(senderFixture("result", resultBody))}
 	bad := senderFixture("result", resultBody)
 	obj(obj(bad["params"])["event"])["session"] = O{"id": "other"}
@@ -106,7 +106,6 @@ func TestOrdinaryResultUsesPersistedActualRequest(t *testing.T) {
 	// A host that retains state elsewhere can supply the real original explicitly.
 	explicit := after
 	explicit.OriginalRequest = senderFixture("request", reqBody)
-	explicit.ContentSources = append(explicit.ContentSources, senderFixtureSource("request", reqBody))
 	if _, err := runSender(context.Background(), explicit, peer.Client()); err != nil {
 		t.Fatal(err)
 	}
@@ -166,16 +165,21 @@ func TestSenderLocalSourceReceiptEvidence(t *testing.T) {
 }
 
 func TestSenderDoesNotPublishUnverifiedReceiptEvidence(t *testing.T) {
-	raw := []byte(`{"message":"Choose","requestedSchema":{"type":"object","properties":{}}}`)
+	raw := []byte{0, 255, 128, 13, 10}
 	for _, mode := range []string{"size", "hash"} {
 		t.Run(mode, func(t *testing.T) {
+			uploads := 0
 			peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path != "/upload" {
 					t.Error("invalid receipt reached event exchange")
 					w.WriteHeader(500)
 					return
 				}
-				body, _ := io.ReadAll(r.Body)
+				uploads++
+				body, err := io.ReadAll(r.Body)
+				if err != nil || string(body) != string(raw) {
+					t.Errorf("binary body changed: %v", err)
+				}
 				receipt := O{"ref": "receiver-only", "size": len(body), "sha256": hash(body)}
 				if mode == "size" {
 					receipt["size"] = len(body) + 1
@@ -187,9 +191,24 @@ func TestSenderDoesNotPublishUnverifiedReceiptEvidence(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(receipt)
 			}))
 			defer peer.Close()
-			plan := senderPlan{Endpoint: peer.URL, Token: "event", UploadToken: "upload", StateFile: filepath.Join(t.TempDir(), "state.json"), ContentSources: []senderSource{senderFixtureSource("request", raw)}, Steps: []senderStep{senderFixtureStep(senderFixture("request", raw))}}
-			if result, err := runSender(context.Background(), plan, peer.Client()); err == nil || result != nil {
-				t.Fatalf("unverified receipt escaped: %#v %v", result, err)
+			// Receipt verification applies to immutable binary attachments, not inline MCP text.
+			request := O{"jsonrpc": "2.0", "id": "binary", "method": "hooks/intercept", "params": O{"protocolVersion": "draft", "capabilities": O{"effects": []any{}}, "event": O{
+				"id": "binary", "source": "urn:test", "time": "2026-09-01T00:00:00Z", "type": "model.request.before",
+				"attempt": O{"id": "attempt", "number": 1}, "model": O{"id": "model", "provider": "test"}, "params": O{},
+				"items": []any{O{"id": "message", "role": "user", "parts": []any{O{"id": "binary-part", "kind": "attachment", "mediaType": "application/octet-stream", "selection": "body", "body": O{"ref": "urn:binary"}}}}},
+			}}}
+			receipts := &elicitationReceiptTransport{base: peer.Client().Transport, receipts: map[string]O{}}
+			delivered := false
+			_, _, err := sdk.PublicBoundary(context.Background(), request, func(context.Context, string, []byte) ([]byte, error) {
+				delivered = true
+				t.Error("unverified receipt reached event exchange")
+				return nil, nil
+			}, sdk.PublicBoundaryOptions{
+				Content: hooks.ContentOptions{AllowLoopbackHTTP: true, Resolver: resolver(map[string][]byte{"urn:binary": raw})},
+				Upload:  O{"endpoint": peer.URL + "/upload", "timeoutMs": 10000, "maxBytes": 4096}, UploadClient: &http.Client{Transport: receipts},
+			})
+			if err == nil || delivered || uploads != 1 {
+				t.Fatalf("unverified receipt escaped: %v uploads=%d", err, uploads)
 			}
 		})
 	}

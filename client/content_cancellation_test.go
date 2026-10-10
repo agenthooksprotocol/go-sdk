@@ -40,7 +40,7 @@ func cancellationContent(c *Client, reader *cancellationPipeReader) {
 	}
 }
 func cancellationInput() map[string]any {
-	item, _ := targetTestItem("nonmodifiable", "text/plain", "waiting")
+	item, _ := targetTestItem("nonmodifiable", "application/octet-stream", "waiting")
 	input := testInput()
 	input["items"] = []any{item}
 	return input

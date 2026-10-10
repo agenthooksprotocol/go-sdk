@@ -128,14 +128,14 @@ func lifecycleContentOptions(c LifecycleConfig, sub string, confirmed map[string
 			bodies[strings.TrimPrefix(key, prefix)] = body
 		}
 	}
-	cache := &confirmedUploadTransport{bodies: bodies}
+	cache := &confirmedUploadTransport{bodies: bodies, resolved: map[string]string{}}
 	options := PublicBoundaryOptions{Content: hooks.ContentOptions{AllowLoopbackHTTP: true, Resolver: func(_ context.Context, ref string) (io.ReadCloser, error) {
 		body, ok := bodies[ref]
 		if !ok {
 			return nil, fmt.Errorf("unconfirmed content reference")
 		}
 		cache.mu.Lock()
-		cache.reference = ref
+		cache.resolved[confirmedBodyKey([]byte(body))] = ref
 		cache.mu.Unlock()
 		return io.NopCloser(bytes.NewBufferString(body)), nil
 	}}}
@@ -166,11 +166,15 @@ func lifecycleContentOptions(c LifecycleConfig, sub string, confirmed map[string
 // new bytes: the SDK still resolves, bounds, hashes, and validates confirmation.
 // Reusing these confirmations preserves immutable fixture references and avoids
 // manufacturing additional upload operations in a controlled lifecycle schedule.
+func confirmedBodyKey(raw []byte) string {
+	return fmt.Sprintf("%d:%x", len(raw), sha256.Sum256(raw))
+}
+
 type confirmedUploadTransport struct {
-	endpoint  string
-	bodies    map[string]string
-	mu        sync.Mutex
-	reference string // exact immutable ref most recently resolved for this projection
+	endpoint string
+	bodies   map[string]string
+	mu       sync.Mutex
+	resolved map[string]string // confirmation metadata indexed by size and digest
 }
 
 func (t *confirmedUploadTransport) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -182,9 +186,9 @@ func (t *confirmedUploadTransport) RoundTrip(request *http.Request) (*http.Respo
 		return nil, fmt.Errorf("upload cache scope mismatch")
 	}
 	t.mu.Lock()
-	ref := t.reference
+	ref, resolved := t.resolved[confirmedBodyKey(raw)]
 	t.mu.Unlock()
-	if body, ok := t.bodies[ref]; !ok || body != string(raw) {
+	if body, ok := t.bodies[ref]; !resolved || !ok || body != string(raw) {
 		return nil, fmt.Errorf("upload has no prior scoped confirmation")
 	}
 	response := Object{"ref": ref, "size": len(raw), "sha256": fmt.Sprintf("%x", sha256.Sum256(raw))}

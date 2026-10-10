@@ -67,8 +67,16 @@ func (c *Hooks) scheduleObservations(parent context.Context, event map[string]an
 			if task.Err() != nil {
 				return
 			}
+			task = context.WithValue(task, uploadReceiverContextKey{}, uploadReceiver{d.backend.id, d.index})
+			var err error
+			if plan, _ := task.Value(uploadPlanContextKey{}).(*uploadPlan); plan != nil {
+				err = plan.failure(uploadReceiver{d.backend.id, d.index})
+			}
 			stage := "prepare"
-			projected, err := c.projectContent(task, snapshot, d.sub, d.backend.id)
+			var projected map[string]any
+			if err == nil {
+				projected, err = c.projectContent(task, snapshot, d.sub, d.backend.id)
+			}
 			if err == nil {
 				stage = "observation"
 				note := sdkJSON(map[string]any{"jsonrpc": "2.0", "method": "hooks/observe", "params": map[string]any{"protocolVersion": "draft", "event": projected}})

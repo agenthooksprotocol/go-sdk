@@ -1,13 +1,12 @@
 package interop
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	ahp "github.com/agenthooksprotocol/go-sdk"
 	hooks "github.com/agenthooksprotocol/go-sdk/client"
-	"io"
+	"github.com/agenthooksprotocol/go-sdk/event"
 	"net/http"
 )
 
@@ -272,20 +271,18 @@ func ReadSelectedElicitation(meta Object, stage string, resolve func(Object) ([]
 	if err := validate("content-item", item); err != nil {
 		return nil, err
 	}
-	if item["mediaType"] != "application/json" {
-		return nil, fmt.Errorf("MCP body must be application/json")
+	if item["kind"] != "text" {
+		return nil, fmt.Errorf("MCP payload must be inline text")
 	}
 	if item["selection"] != "body" {
 		return nil, nil
 	}
-	body := obj(item["body"])
-	if body == nil {
-		return nil, fmt.Errorf("selected body unavailable (fail closed)")
+	text, ok := item["text"].(string)
+	if !ok {
+		return nil, fmt.Errorf("selected text unavailable (fail closed)")
 	}
-	raw, err := resolve(body)
-	if err != nil {
-		return nil, err
-	}
+	raw := []byte(text)
+	var err error
 	var payload Object
 	if err = json.Unmarshal(raw, &payload); err != nil {
 		return nil, err
@@ -338,7 +335,6 @@ func acceptElicitationEffectsObserved(request, result Object, resolve func(Objec
 	}
 	events := []any{}
 	names := []any{}
-	refs := map[string]Object{}
 	for _, req := range boundaries {
 		p := obj(req["params"])
 		e := obj(p["event"])
@@ -346,12 +342,7 @@ func acceptElicitationEffectsObserved(request, result Object, resolve func(Objec
 		caps := obj(clone(p["capabilities"]))
 		events = append(events, Object{"event": name, "modes": []any{"intercept"}, "capabilities": caps})
 		names = append(names, name)
-		for _, field := range []string{"request", "result"} {
-			ref := obj(obj(obj(e["elicitation"])[field])["body"])
-			if ref != nil {
-				refs[str(ref["ref"])] = ref
-			}
-		}
+
 	}
 	reg := ahp.ParseRegistration(jsonBytes(Object{"protocolVersion": "draft", "hooks": []any{Object{"id": "org.agenthooks.elicitation-fixture", "transport": Object{"type": "http", "url": "https://fixture.invalid/hooks"}, "subscriptions": []any{Object{"events": names, "mode": "intercept", "timeoutMs": 1000, "failurePolicy": "fail-closed", "content": Object{"default": "body"}, "upload": Object{"endpoint": "https://fixture.invalid/upload", "timeoutMs": 1000, "maxBytes": 4 << 20}}}}}}))
 	if !reg.OK {
@@ -375,17 +366,17 @@ func acceptElicitationEffectsObserved(request, result Object, resolve func(Objec
 		}
 		return jsonBytes(Object{"jsonrpc": "2.0", "id": req["id"], "result": Object{"protocolVersion": "draft", "effects": selected}}), nil
 	}}
-	c, err := hooks.New(reg.Value, hooks.Options{Source: str(obj(obj(request["params"])["event"])["source"]), Manifest: manifest, EventClient: &http.Client{Transport: transport}, UploadClient: &http.Client{Transport: memoryUpload{}}, Content: hooks.ContentOptions{Resolver: func(_ context.Context, ref string) (io.ReadCloser, error) {
-		descriptor, ok := refs[ref]
-		if !ok {
-			return nil, fmt.Errorf("unknown original body")
-		}
-		raw, err := resolve(descriptor)
-		if err != nil {
-			return nil, err
-		}
-		return io.NopCloser(bytes.NewReader(raw)), nil
-	}, AuthorizeContent: func(context.Context, hooks.ContentAuthorization) (bool, error) { return true, nil }}})
+	c, err := hooks.New(reg.Value, hooks.Options{Source: str(obj(obj(request["params"])["event"])["source"]), Manifest: manifest, EventClient: &http.Client{Transport: transport}, Content: hooks.ContentOptions{
+		// This isolated host grants body disclosure and structured answer edits only
+		// to its registered elicitation receiver. Metadata/omit parts do not acquire
+		// body authority, and no resolver or upload is involved.
+		AuthorizeContent: func(_ context.Context, scope hooks.ContentAuthorization) (bool, error) {
+			return scope.BackendID == "org.agenthooks.elicitation-fixture" &&
+				(scope.Operation == "read" || scope.Operation == "write") &&
+				obj(scope.Subscription["content"])["default"] == "body" &&
+				scope.Item["kind"] == "text" && scope.Item["selection"] == "body", nil
+		},
+	}})
 	if err != nil {
 		return err
 	}
@@ -397,7 +388,7 @@ func acceptElicitationEffectsObserved(request, result Object, resolve func(Objec
 		if snapshot != nil {
 			opts = append(opts, hooks.WithElicitationRequest(snapshot))
 		}
-		accepted, err := dispatchPublicBoundary(context.Background(), c, str(e["type"]), e, opts)
+		accepted, err := dispatchElicitationBoundary(context.Background(), c, e, opts)
 		if err != nil {
 			return err
 		}
@@ -407,4 +398,33 @@ func acceptElicitationEffectsObserved(request, result Object, resolve func(Objec
 		snapshot = accepted.Snapshot
 	}
 	return nil
+}
+
+// dispatchElicitationBoundary uses normal host Hooks calls with inline MCP parts.
+// The generated canonical event decoder validates the fixture; no descriptor
+// projection, source binding or upload is performed by the adapter.
+func dispatchElicitationBoundary(ctx context.Context, c *hooks.Hooks, ev Object, opts []hooks.InterceptOption) (*hooks.Result, error) {
+	raw := jsonBytes(ev)
+	if ev["type"] == "user.elicitation.request" {
+		var value ahp.UserElicitationRequestEvent
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return nil, err
+		}
+		return c.UserElicitationRequest(ctx, event.UserElicitationRequestInput{
+			Elicitation: value.Elicitation, Extensions: value.Extensions, Gaps: value.Gaps,
+			ID: ahp.Some(value.ID), Items: value.Items, Native: value.Native,
+			ParentEventID: value.ParentEventId, Session: value.Session, Synthesized: value.Synthesized,
+			Time: ahp.Some(value.Time), Turn: value.Turn,
+		}, opts...)
+	}
+	var value ahp.UserElicitationResultEvent
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, err
+	}
+	return c.UserElicitationResult(ctx, event.UserElicitationResultInput{
+		Elicitation: value.Elicitation, Extensions: value.Extensions, Gaps: value.Gaps,
+		ID: ahp.Some(value.ID), Items: value.Items, Native: value.Native,
+		ParentEventID: value.ParentEventId, Session: value.Session, Synthesized: value.Synthesized,
+		Time: ahp.Some(value.Time), Turn: value.Turn,
+	}, opts...)
 }

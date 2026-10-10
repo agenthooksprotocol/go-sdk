@@ -46,7 +46,7 @@ func TestCredentialOnlyUploadReceiverPolicy(t *testing.T) {
 				t.Fatalf("credential-scoped upload: status=%d err=%v", status, err)
 			}
 			event := obj(obj(request("unrelated-event"))["params"])["event"]
-			obj(event)["items"] = []any{Object{"id": "item", "kind": "text", "mediaType": "application/octet-stream", "selection": "body", "body": Object{"ref": descriptor["ref"]}}}
+			obj(event)["items"] = []any{Object{"id": "item", "kind": "attachment", "mediaType": "application/octet-stream", "selection": "body", "body": Object{"ref": descriptor["ref"]}}}
 			note := Object{"jsonrpc": "2.0", "method": "hooks/observe", "params": Object{"protocolVersion": "draft", "event": event}}
 			body, _ := json.Marshal(note)
 			req, err := http.NewRequestWithContext(ctx, "POST", str(ready["endpoint"])+"/observe", bytes.NewReader(body))

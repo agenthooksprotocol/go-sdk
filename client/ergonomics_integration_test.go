@@ -181,7 +181,7 @@ func TestNamedSourcesReachAuthorizedReceiverReferences(t *testing.T) {
 				}
 				defer hooks.Close()
 				var descriptor ahp.ContentItem
-				if err := json.Unmarshal([]byte(`{"id":"original-item","kind":"message","mediaType":"text/plain","selection":"metadata"}`), &descriptor); err != nil {
+				if err := json.Unmarshal([]byte(`{"id":"original-item","kind":"attachment","mediaType":"application/octet-stream","selection":"metadata"}`), &descriptor); err != nil {
 					t.Fatal(err)
 				}
 				reader := &sourceTestReader{Reader: strings.NewReader("owned bytes")}

@@ -10,7 +10,6 @@ import (
 
 	ahp "github.com/agenthooksprotocol/go-sdk"
 	"github.com/agenthooksprotocol/go-sdk/internal/canonical"
-	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 )
 
 // CapabilityAdmissionError reports missing prepared inputs for protocol-only
@@ -132,9 +131,9 @@ func composePrepared(request ahp.InterceptRequest, response ahp.InterceptRespons
 				return nil, err
 			}
 		}
-		if kind == "context.compact.before" {
-			if _, ok := candidate["value"].(string); !ok {
-				return nil, fmt.Errorf("compaction candidate summary must be text")
+		if kind == "context.compact.before" || kind == "model.request.before" {
+			if err := validateSuppliedValue(kind, candidate["value"]); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -151,7 +150,17 @@ func composePrepared(request ahp.InterceptRequest, response ahp.InterceptRespons
 		}
 		target := compositionString(e["target"])
 		v := e["value"]
-		if e["operation"] == "merge" {
+		if e["operation"] == "merge" && inlineListTarget(kind, target) {
+			base, ok := values[target].([]any)
+			if !ok {
+				return nil, fmt.Errorf("list target unavailable")
+			}
+			extra, ok := v.([]any)
+			if !ok {
+				return nil, fmt.Errorf("list merge requires an array")
+			}
+			v = append(append([]any{}, base...), extra...)
+		} else if e["operation"] == "merge" {
 			base := compositionMap(values[target])
 			if base == nil {
 				return nil, fmt.Errorf("merge target %s is not an available object", target)
@@ -171,12 +180,7 @@ func composePrepared(request ahp.InterceptRequest, response ahp.InterceptRespons
 			}
 			bodyValue := v
 			if kind == "user.elicitation.result" {
-				item := preparedAt(event, "/elicitation/result")
-				raw, available := ownedcontent.Available(staged.sources["/elicitation/result"])
-				if !available {
-					return nil, fmt.Errorf("elicitation result body unavailable")
-				}
-				original, err := preparedDecode(item, raw)
+				original, err := selectedElicitation(sdkObj(event["elicitation"]), "result", nil)
 				if err != nil {
 					return nil, err
 				}
@@ -224,6 +228,9 @@ func composePrepared(request ahp.InterceptRequest, response ahp.InterceptRespons
 				state["permission"] = "allow"
 			}
 		case "return":
+			if err := validateSuppliedValue(kind, e["value"]); err != nil {
+				return nil, err
+			}
 			if kind == "user.elicitation.request" {
 				if staged == nil || staged.snapshot == nil {
 					return nil, fmt.Errorf("elicitation request snapshot unavailable")
@@ -233,8 +240,8 @@ func composePrepared(request ahp.InterceptRequest, response ahp.InterceptRespons
 				}
 			}
 			if kind == "context.compact.before" {
-				if _, ok := e["value"].(string); !ok {
-					return nil, fmt.Errorf("compaction summary must be text")
+				if err := validateSuppliedValue(kind, e["value"]); err != nil {
+					return nil, err
 				}
 			}
 			state["candidate"] = map[string]any{"value": e["value"]}
@@ -302,11 +309,22 @@ func compositionAdmit(e, caps, state map[string]any, event string) error {
 		fields += " value"
 	case "modify":
 		fields += " target operation value"
+		if inlineListTarget(event, target) {
+			schema := "content-item#messages"
+			if target == "instructions" || target == "summary" {
+				schema = "content-item#textParts"
+			}
+			if err := canonical.Validate(schema, sdkJSON(e["value"])); err != nil {
+				return fmt.Errorf("modification requires a canonical list")
+			}
+		} else if event == "user.elicitation.result" && target == "content" && compositionMap(e["value"]) == nil {
+			return fmt.Errorf("elicitation content modification requires an answer object")
+		}
 
 		if compositionTargets[event] != target || (op != "replace" && op != "merge") || compositionMap(compositionMap(caps["modify"])[target])[op] != true {
 			return fmt.Errorf("unadvertised modification")
 		}
-		if (target == "input" || op == "merge") && compositionMap(e["value"]) == nil {
+		if (target == "input" || (op == "merge" && !inlineListTarget(event, target))) && compositionMap(e["value"]) == nil {
 			return fmt.Errorf("modification requires an object")
 		}
 	case "flow":

@@ -11,7 +11,7 @@ func TestElicitationPublicEffects(t *testing.T) {
 	resultBody := []byte(`{"action":"accept","content":{"answer":"original"},"_meta":{"preserve":true}}`)
 	bodies := map[string][]byte{"urn:request": requestBody, "urn:result": resultBody}
 	makeRequest := func(stage string) Object {
-		meta := Object{"server": "requester", "mode": "form", stage: Object{"id": stage + "-item", "kind": "elicitation." + stage, "mediaType": "application/json", "selection": "body", "body": Object{"ref": "urn:" + stage}}}
+		meta := Object{"server": "requester", "mode": "form", stage: Object{"id": stage + "-item", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": string(bodies["urn:"+stage])}}
 		event := Object{"id": stage, "type": "user.elicitation." + stage, "source": "urn:test:host", "time": "2026-09-15T12:00:00Z", "session": Object{"id": "session"}, "elicitation": meta}
 		caps := Object{"effects": []any{"return", "deny"}}
 		if stage == "result" {
@@ -54,7 +54,7 @@ func TestElicitationPublicModeAdmission(t *testing.T) {
 					"urn:result":  []byte(`{"action":"accept","content":{"answer":"original"}}`),
 				}
 				makeBoundary := func(stage string, caps Object) Object {
-					meta := Object{"server": "requester", "mode": "form", stage: Object{"id": stage + "-item", "kind": "elicitation." + stage, "mediaType": "application/json", "selection": "body", "body": Object{"ref": "urn:" + stage}}}
+					meta := Object{"server": "requester", "mode": "form", stage: Object{"id": stage + "-item", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": string(bodies["urn:"+stage])}}
 					event := Object{"id": stage, "type": "user.elicitation." + stage, "source": "urn:test:host", "time": "2026-09-15T12:00:00Z", "session": Object{"id": "session"}, "elicitation": meta}
 					if stage == "result" {
 						event["parentEventId"] = "request"

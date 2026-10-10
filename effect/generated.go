@@ -165,7 +165,11 @@ func InjectContextAppend[T any](deliverAt DeliverAt, value T, opts ...InjectAppe
 	if err != nil {
 		return nil, err
 	}
-	return NewInjectAppend(deliverAt, raw, opts...), nil
+	var canonical *ahp.CanonicalMessages
+	if err := json.Unmarshal(raw, &canonical); err != nil {
+		return nil, err
+	}
+	return NewInjectAppend(deliverAt, canonical, opts...), nil
 }
 
 type AllowOption func(*ahp.EffectAllow)
@@ -257,7 +261,7 @@ func NewFlowContinue(opts ...FlowContinueOption) *ahp.Effect {
 
 type InjectAppendOption func(*ahp.EffectInjectAppendContext)
 
-func NewInjectAppend(argDeliverAt ahp.EffectInjectAppendContextDeliverAt, argValue json.RawMessage, opts ...InjectAppendOption) *ahp.Effect {
+func NewInjectAppend(argDeliverAt ahp.EffectInjectAppendContextDeliverAt, argValue *ahp.CanonicalMessages, opts ...InjectAppendOption) *ahp.Effect {
 	v := &ahp.EffectInjectAppendContext{DeliverAt: argDeliverAt, Operation: "append", Target: "context", Type: "inject", Value: argValue}
 	for _, opt := range opts {
 		if opt != nil {

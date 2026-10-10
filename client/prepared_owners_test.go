@@ -5,89 +5,55 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	ahp "github.com/agenthooksprotocol/go-sdk"
 	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 	"io"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
-
-	ahp "github.com/agenthooksprotocol/go-sdk"
 )
 
-type preparedTestReader struct {
-	io.Reader
-	closes     *atomic.Int32
-	closeError error
+func preparedOwnerText(id, text string) map[string]any {
+	return map[string]any{"id": id, "kind": "text", "mediaType": "text/plain", "selection": "body", "text": text}
 }
-
-func (r *preparedTestReader) Close() error { r.closes.Add(1); return r.closeError }
-
-func TestPreparedIntegrityLimitsAndOwnership(t *testing.T) {
-	for _, mode := range []string{"valid", "body-size", "body-hash", "item-size", "item-hash", "invalid-UTF8", "invalid-JSON", "total-limit", "close-error"} {
-		t.Run(mode, func(t *testing.T) {
-			raw := []byte(` {"x":1} `)
-			media := "application/json"
-			if mode == "invalid-UTF8" {
-				raw = []byte{255}
-				media = "text/plain"
-			}
-			if mode == "invalid-JSON" {
-				raw = []byte(`{"x":`)
-			}
-			item, bodies := targetTestItem("one", media, string(raw))
-			second, more := targetTestItem("two", media, string(raw))
-			for k, v := range more {
-				bodies[k] = v
-			}
-			switch mode {
-			case "body-size":
-				sdkObj(item["body"])["size"] = 1
-			case "body-hash":
-				sdkObj(item["body"])["sha256"] = strings.Repeat("0", 64)
-			case "item-size":
-				item["size"] = 1
-			case "item-hash":
-				item["sha256"] = strings.Repeat("0", 64)
-			}
-			event := targetTestEvent(t, []any{item, second})
-			closes := &atomic.Int32{}
-			c := targetTestClient(bodies)
-			c.opts.MaxContentBytes = 128
-			if mode == "total-limit" {
-				c.opts.MaxContentBytes = int64(len(raw))
-			}
-			c.opts.Content.Resolver = func(_ context.Context, ref string) (io.ReadCloser, error) {
-				var err error
-				if mode == "close-error" {
-					err = errors.New("close failed")
-				}
-				return &preparedTestReader{Reader: bytes.NewReader(bodies[ref]), closes: closes, closeError: err}, nil
-			}
-			cfg := interceptConfig{}
-			WithModificationTarget("output", ModificationTarget{Path: "/items"})(&cfg)
-			prepared, err := c.prepareBoundary(context.Background(), event, targetTestCaps("output"), cfg)
-			if mode == "valid" {
-				if err != nil {
-					t.Fatal(err)
-				}
-				original := bytes.Clone(preparedTestBytes(prepared, "/items/0"))
-				bodies["urn:test:one"][0] = 'x'
-				if !bytes.Equal(preparedTestBytes(prepared, "/items/0"), original) {
-					t.Fatal("resolver bytes retained by alias")
-				}
-				if closes.Load() != 2 {
-					t.Fatal("readers not closed", closes.Load())
-				}
-			} else if err == nil {
-				t.Fatal("invalid prepared body admitted")
-			}
-			if closes.Load() == 0 && mode != "body-size" && mode != "body-hash" && mode != "item-size" && mode != "item-hash" {
-				t.Fatal("reader ownership lost")
-			}
-		})
+func preparedOwnerAttachment(id string) map[string]any {
+	return map[string]any{"id": id, "kind": "attachment", "mediaType": "application/octet-stream", "selection": "metadata"}
+}
+func preparedOwnerMessage(id string, parts ...any) map[string]any {
+	return map[string]any{"id": id, "role": "assistant", "parts": parts}
+}
+func preparedOwnerEvent(items ...any) map[string]any {
+	return map[string]any{"id": "test", "source": "urn:test", "time": "2026-01-01T00:00:00Z", "type": "model.response.after", "model": map[string]any{"id": "model", "provider": "test"}, "attempt": map[string]any{"id": "attempt", "number": 1}, "execution": map[string]any{"status": "executed"}, "finishReason": "stop", "items": items}
+}
+func preparedOwnerCaps(target string) map[string]any {
+	return map[string]any{"effects": []any{"modify"}, "modify": map[string]any{target: map[string]any{"replace": true, "merge": true}}}
+}
+func preparedOwnerPrepare(t *testing.T, event map[string]any, target string, cfg interceptConfig) *preparedBoundary {
+	t.Helper()
+	p, err := (&Client{opts: Options{Content: ContentOptions{AuthorizeContent: contentTestAllow}}}).prepareBoundary(context.Background(), event, preparedOwnerCaps(target), cfg)
+	if err != nil {
+		t.Fatal(err)
 	}
+	return p
+}
+func preparedOwnerCompose(t *testing.T, event map[string]any, target string, p *preparedBoundary, values ...any) (*Composition, error) {
+	t.Helper()
+	req := ahp.ParseInterceptRequest(sdkJSON(map[string]any{"jsonrpc": "2.0", "id": "test", "method": "hooks/intercept", "params": map[string]any{"protocolVersion": "draft", "event": event, "capabilities": preparedOwnerCaps(target)}}))
+	if !req.OK {
+		t.Fatal(req.Diagnostics)
+	}
+	effects := []any{}
+	for _, v := range values {
+		effects = append(effects, map[string]any{"type": "modify", "target": target, "operation": "replace", "value": v})
+	}
+	return composePrepared(req.Value, compositionTestResponse(t, string(sdkJSON(effects))), p)
+}
+func preparedTestBytes(p *preparedBoundary, path string) []byte {
+	raw, _ := ownedcontent.Available(p.sources[path])
+	return raw
 }
 
 type preparedBlockingReader struct {
@@ -107,19 +73,119 @@ func (r *preparedBlockingReader) Close() error {
 	}
 	return nil
 }
+
+type preparedTestReader struct {
+	io.Reader
+	closes     *atomic.Int32
+	closeError error
+}
+
+func (r *preparedTestReader) Close() error { r.closes.Add(1); return r.closeError }
+
+func TestPreparedIntegrityLimitsAndOwnership(t *testing.T) {
+	for _, text := range []string{"plain", ` {"x":1} `, `{"x":`} {
+		t.Run(text, func(t *testing.T) {
+			event := preparedOwnerEvent(preparedOwnerMessage("one", preparedOwnerText("text", text)))
+			c := &Client{opts: Options{Content: ContentOptions{Resolver: func(context.Context, string) (io.ReadCloser, error) { t.Fatal("inline text resolved"); return nil, nil }}}}
+			p, err := c.prepareBoundary(context.Background(), event, preparedOwnerCaps("response"), interceptConfig{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			values, err := p.values(event)
+			if err != nil || !reflect.DeepEqual(values["response"], event["items"]) || len(p.sources) != 0 || len(p.owned) != 0 {
+				t.Fatal("inline text changed or acquired owners", values, err)
+			}
+			accepted, err := preparedOwnerCompose(t, event, "response", p, []any{preparedOwnerMessage("one", preparedOwnerText("text", "edited"))})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(accepted.prepared.sources) != 0 || len(accepted.prepared.owned) != 0 {
+				t.Fatal("text edit allocated owners")
+			}
+		})
+	}
+	for _, mode := range []string{"size", "hash"} {
+		t.Run(mode, func(t *testing.T) {
+			metadata := map[string]any{}
+			if mode == "size" {
+				metadata["size"] = 1
+			} else {
+				metadata["sha256"] = strings.Repeat("0", 64)
+			}
+			if err := contentMatches(metadata, []byte("binary")); err == nil {
+				t.Fatal("invalid immutable metadata accepted")
+			}
+		})
+	}
+	for _, mode := range []string{"valid", "binary-non-UTF8", "binary-non-JSON", "close-error", "total-limit"} {
+		t.Run(mode, func(t *testing.T) {
+			raw := []byte("immutable")
+			if mode == "binary-non-UTF8" {
+				raw = []byte{255}
+			}
+			if mode == "binary-non-JSON" {
+				raw = []byte(`{"x":`)
+			}
+			var closes atomic.Int32
+			var closeErr error
+			if mode == "close-error" {
+				closeErr = errors.New("close failed")
+			}
+			owner := ownedcontent.NewLazyAttachment(func(context.Context) (io.ReadCloser, error) {
+				return &preparedTestReader{Reader: bytes.NewReader(raw), closes: &closes, closeError: closeErr}, nil
+			}, nil)
+			defer owner.Retire()
+			cfg := interceptConfig{}
+			WithContentSource("/items/0/parts/0", owner)(&cfg)
+			p := preparedOwnerPrepare(t, preparedOwnerEvent(preparedOwnerMessage("one", preparedOwnerAttachment("binary"))), "response", cfg)
+			if closes.Load() != 0 {
+				t.Fatal("preparation eagerly opened binary")
+			}
+			limit := p.limit
+			if mode == "total-limit" {
+				limit = 1
+			}
+			snapshot, err := ownedcontent.Borrow(owner, context.Background(), limit)
+			bad := mode == "close-error" || mode == "total-limit"
+			if (err != nil) != bad {
+				t.Fatal("unexpected binary snapshot error", err)
+			}
+			if closes.Load() != 1 {
+				t.Fatal("reader not closed once", closes.Load())
+			}
+			if !bad {
+				original := bytes.Clone(snapshot)
+				raw[0] = 'x'
+				if !bytes.Equal(preparedTestBytes(p, "/items/0/parts/0"), original) {
+					t.Fatal("resolver bytes retained by alias")
+				}
+			}
+		})
+	}
+
+}
 func TestPreparedCancellationClosesReaderOnce(t *testing.T) {
-	item, bodies := targetTestItem("one", "text/plain", "abc")
-	event := targetTestEvent(t, []any{item})
 	reader := &preparedBlockingReader{started: make(chan struct{}), done: make(chan struct{})}
-	c := targetTestClient(bodies)
-	c.opts.Content.Resolver = func(context.Context, string) (io.ReadCloser, error) { return reader, nil }
+	source := ownedcontent.NewLazyAttachment(func(context.Context) (io.ReadCloser, error) { return reader, nil }, nil)
+	defer source.Retire()
 	cfg := interceptConfig{}
-	WithModificationTarget("output", ModificationTarget{Path: "/items/0"})(&cfg)
+	WithContentSource("/items/0/parts/0", source)(&cfg)
+	event := preparedOwnerEvent(preparedOwnerMessage("one", preparedOwnerAttachment("binary")))
+	p := preparedOwnerPrepare(t, event, "response", cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	ctx = context.WithValue(ctx, preparedContextKey{}, p)
+	c := &Client{opts: Options{Content: ContentOptions{AuthorizeContent: contentTestAllow}}}
 	done := make(chan error, 1)
-	go func() { _, err := c.prepareBoundary(ctx, event, targetTestCaps("output"), cfg); done <- err }()
-	<-reader.started
+	go func() {
+		_, err := c.projectContent(ctx, event, contentTestSubscription("http://unused.invalid"), "backend")
+		done <- err
+	}()
+	select {
+	case <-reader.started:
+	case <-time.After(time.Second):
+		t.Fatal("selected attachment was not opened")
+	}
 	cancel()
 	select {
 	case err := <-done:
@@ -127,191 +193,125 @@ func TestPreparedCancellationClosesReaderOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("cancellation did not unblock owned reader")
+		t.Fatal("cancellation did not unblock reader")
 	}
 	if reader.closes.Load() != 1 {
-		t.Fatal("reader closed more than once")
+		t.Fatal("reader close count", reader.closes.Load())
 	}
 }
-
 func TestPreparedAbsentInstructionsTemplate(t *testing.T) {
 	event := map[string]any{"id": "test", "source": "urn:test", "time": "2026-01-01T00:00:00Z", "type": "context.compact.before", "trigger": "manual", "items": []any{}}
-	parsed := ahp.ParseContentItem([]byte(`{"id":"host-owned-instructions","kind":"message","mediaType":"text/plain","selection":"metadata"}`))
-	if !parsed.OK {
-		t.Fatal(parsed.Diagnostics)
+	p := preparedOwnerPrepare(t, event, "instructions", interceptConfig{})
+	values, err := p.values(event)
+	if err != nil || len(sdkArray(values["instructions"])) != 0 {
+		t.Fatal(values, err)
 	}
-	cfg := interceptConfig{}
-	WithCompactionInstructions(parsed.Value)(&cfg)
-	c := &Client{opts: Options{Content: ContentOptions{Resolver: func(context.Context, string) (io.ReadCloser, error) {
-		t.Fatal("bodyless template resolved")
-		return nil, nil
-	}}}}
-	prepared, err := c.prepareBoundary(context.Background(), event, targetTestCaps("instructions"), cfg)
+	parts := []any{preparedOwnerText("instructions", "new instructions")}
+	accepted, err := preparedOwnerCompose(t, event, "instructions", p, parts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	values, err := prepared.values(event)
-	if err != nil || values["instructions"] != nil {
-		t.Fatal(values, err)
-	}
-	accepted := targetTestCompose(t, event, "instructions", prepared, `[{"type":"modify","target":"instructions","operation":"replace","value":"new instructions"}]`)
-	effective := compositionObject(accepted.Event)
-	item := sdkObj(effective["instructions"])
-	if item["id"] != "host-owned-instructions" || item["selection"] != "metadata" || item["body"] != nil {
-		t.Fatal(item)
-	}
-	raw := preparedTestBytes(accepted.prepared, "/instructions")
-	if string(raw) != "new instructions" {
-		t.Fatal(string(raw))
-	}
-	if len(prepared.sources) != 0 {
-		t.Fatal("staging mutated original bodyless template")
+	if !reflect.DeepEqual(compositionObject(accepted.Event)["instructions"], parts) || len(p.sources) != 0 || len(accepted.prepared.owned) != 0 {
+		t.Fatal("instructions not inline")
 	}
 }
-
-func preparedTestBytes(p *preparedBoundary, path string) []byte {
-	raw, _ := ownedcontent.Available(p.sources[path])
-	return raw
-}
-
 func TestPreparedCanonicalOwnerIndex(t *testing.T) {
-	item, bodies := targetTestItem("one", "application/json", ` {"n":1} `)
-	event := targetTestEvent(t, []any{item})
-	p := targetTestPrepare(t, event, "output", bodies, ModificationTarget{Path: "/items/0"})
-	original := p.sources["/items/0"]
+	source := ownedcontent.NewAttachment([]byte("immutable"))
+	defer source.Retire()
+	part := preparedOwnerAttachment("binary")
+	event := preparedOwnerEvent(preparedOwnerMessage("one", part, preparedOwnerText("text", ` {"n":1} `)))
+	cfg := interceptConfig{}
+	WithContentSource("/items/0/parts/0", source)(&cfg)
+	p := preparedOwnerPrepare(t, event, "response", cfg)
 	staged := p.clone()
-	if staged.sources["/items/0"] != original || !p.owned[original] {
-		t.Fatal("clone did not share attachment owner")
-	}
 	edited := contentClone(event).(map[string]any)
-	if err := staged.apply(edited, "output", map[string]any{"n": 2}); err != nil {
+	next := []any{preparedOwnerMessage("one", preparedOwnerText("text", "edited"), part)}
+	if err := staged.apply(edited, "response", next); err != nil {
 		t.Fatal(err)
 	}
-	replacement := staged.sources["/items/0"]
-	if replacement == original || p.sources["/items/0"] != original {
-		t.Fatal("staging mutated the original slot index")
+	if p.sources["/items/0/parts/0"] != source || staged.sources["/items/0/parts/1"] != source || len(staged.sources) != 1 || len(p.owned) != 0 {
+		t.Fatal("reorder lost owner or allocated text owner")
 	}
-	if !p.owned[replacement] || !staged.owned[original] || len(p.owned) != 2 {
-		t.Fatal("clones lost shared lifecycle tracking")
+	if string(preparedTestBytes(staged, "/items/0/parts/1")) != "immutable" {
+		t.Fatal("edit rewrote bytes")
 	}
-	descriptor := preparedAt(edited, "/items/0")
-	if descriptor["selection"] != "metadata" || descriptor["body"] != nil || descriptor["id"] != "one" {
-		t.Fatal("edit published a transport reference or lost host metadata", descriptor)
+	if err := staged.apply(edited, "response", []any{}); err != nil {
+		t.Fatal(err)
 	}
-	if string(preparedTestBytes(p, "/items/0")) != ` {"n":1} ` {
-		t.Fatal("edit rewrote original owner bytes")
-	}
-	delete(edited, "items")
-	staged.prune(edited)
-	if len(staged.sources) != 0 || len(p.owned) != 2 {
-		t.Fatal("pruning lost obsolete owners needed for final cleanup")
-	}
-	for owner := range p.owned {
-		_ = owner.Retire()
+	if len(staged.sources) != 0 || p.sources["/items/0/parts/0"] != source {
+		t.Fatal("removal mutated original index")
 	}
 }
-
 func TestPreparedReferenceOwnersRemainLazy(t *testing.T) {
-	item, bodies := targetTestItem("one", "text/plain", "original")
-	event := targetTestEvent(t, []any{item})
 	var opens atomic.Int32
-	c := targetTestClient(bodies)
-	resolver := c.opts.Content.Resolver
-	c.opts.Content.Resolver = func(ctx context.Context, ref string) (io.ReadCloser, error) {
+	part := preparedOwnerAttachment("binary")
+	part["selection"] = "body"
+	part["body"] = map[string]any{"ref": "urn:original"}
+	event := preparedOwnerEvent(preparedOwnerMessage("one", part))
+	c := &Client{opts: Options{Content: ContentOptions{Resolver: func(context.Context, string) (io.ReadCloser, error) {
 		opens.Add(1)
-		return resolver(ctx, ref)
-	}
+		return io.NopCloser(strings.NewReader("original")), nil
+	}}}}
 	p, err := c.prepareBoundary(context.Background(), event, nil, interceptConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		for owner := range p.owned {
-			_ = owner.Retire()
-		}
-	}()
-	owner := p.sources["/items/0"]
+	owner := p.sources["/items/0/parts/0"]
 	if owner == nil || !p.owned[owner] || opens.Load() != 0 {
-		t.Fatal("inbound reference did not become a lazy canonical owner")
+		t.Fatal("reference not lazy")
 	}
-	clone := p.clone()
-	for _, source := range []*ContentSource{owner, clone.sources["/items/0"]} {
+	defer owner.Retire()
+	for _, source := range []*ContentSource{owner, p.clone().sources["/items/0/parts/0"]} {
 		raw, err := ownedcontent.Borrow(source, context.Background(), p.limit)
 		if err != nil || string(raw) != "original" {
 			t.Fatal(string(raw), err)
 		}
 	}
 	if opens.Load() != 1 {
-		t.Fatal("shared owner reopened inbound resolver", opens.Load())
+		t.Fatal("clone reopened reference", opens.Load())
 	}
 }
-
 func TestPreparedEagerAttachmentsEnforceLimitsWithoutProjection(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		payloads  []string
-		wantError bool
-	}{
-		{"oversized-owner", []string{"123456789"}, true},
-		{"aggregate", []string{"12345", "67890"}, true},
-		{"exact-limit", []string{"1234", "5678"}, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg := interceptConfig{sources: map[string]*ContentSource{}}
-			items := make([]any, len(tc.payloads))
-			for i, payload := range tc.payloads {
-				item, _ := targetTestItem("item", "text/plain", "")
-				item["selection"] = "metadata"
-				delete(item, "body")
-				items[i] = item
-				source := ownedcontent.NewAttachment([]byte(payload))
-				defer source.Retire()
-				cfg.sources[fmt.Sprintf("/items/%d", i)] = source
-			}
-			WithModificationTarget("output", ModificationTarget{Path: "/items"})(&cfg)
-			event := targetTestEvent(t, items)
-			c := &Client{opts: Options{MaxContentBytes: 8}}
-			// No receiver selection or upload runs: preparation itself must enforce limits.
-			p, err := c.prepareBoundary(context.Background(), event, targetTestCaps("output"), cfg)
-			if tc.wantError {
-				if err == nil || p != nil {
-					t.Fatal("oversized eager owners passed preparation")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := p.values(event); err != nil {
-				t.Fatal(err)
-			}
-		})
-	}
-}
-
-func TestPreparedValuesCheckLimitsBeforeDecoding(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		payloads []string
-	}{
-		{"oversized-owner", []string{"123456789"}},
-		{"aggregate", []string{"12345", "67890"}},
-	} {
+		bad      bool
+	}{{"within", []string{"1234", "5678"}, false}, {"single", []string{"123456789"}, true}, {"aggregate", []string{"12345", "67890"}, true}} {
 		t.Run(tc.name, func(t *testing.T) {
-			p := &preparedBoundary{sources: map[string]*ContentSource{}, slots: map[string][]string{}, limit: 8}
-			items := make([]any, len(tc.payloads))
-			for i, payload := range tc.payloads {
-				path := fmt.Sprintf("/items/%d", i)
-				source := ownedcontent.NewAttachment([]byte(payload))
+			cfg := interceptConfig{}
+			items := []any{}
+			for i, raw := range tc.payloads {
+				source := ownedcontent.NewAttachment([]byte(raw))
 				defer source.Retire()
-				p.sources[path] = source
-				p.slots["output"] = append(p.slots["output"], path)
-				items[i] = map[string]any{"id": path, "kind": "data", "mediaType": "application/json", "selection": "metadata"}
+				WithContentSource(fmt.Sprintf("/items/%d/parts/0", i), source)(&cfg)
+				items = append(items, preparedOwnerMessage(fmt.Sprint(i), preparedOwnerAttachment(fmt.Sprint(i))))
 			}
-			values, err := p.values(targetTestEvent(t, items))
-			if err == nil || values != nil || !strings.Contains(err.Error(), "byte limit") {
-				t.Fatal("values bypassed owner bounds", values, err)
+			event := preparedOwnerEvent(items...)
+			p, err := (&Client{opts: Options{MaxContentBytes: 8}}).prepareBoundary(context.Background(), event, preparedOwnerCaps("response"), cfg)
+			if (err != nil) != tc.bad {
+				t.Fatal("unexpected bounds", err)
+			}
+			if !tc.bad {
+				if _, err := p.values(event); err != nil {
+					t.Fatal(err)
+				}
 			}
 		})
+	}
+}
+func TestPreparedValuesCheckLimitsBeforeDecoding(t *testing.T) {
+	for _, payloads := range [][]string{{"123456789"}, {"12345", "67890"}} {
+		p := &preparedBoundary{sources: map[string]*ContentSource{}, slots: map[string][]string{"response": {"/items"}}, limit: 8}
+		items := []any{}
+		for i, raw := range payloads {
+			source := ownedcontent.NewAttachment([]byte(raw))
+			defer source.Retire()
+			p.sources[fmt.Sprintf("/items/%d/parts/0", i)] = source
+			items = append(items, preparedOwnerMessage(fmt.Sprint(i), preparedOwnerAttachment(fmt.Sprint(i))))
+		}
+		values, err := p.values(preparedOwnerEvent(items...))
+		if err == nil || values != nil || !strings.Contains(err.Error(), "byte limit") {
+			t.Fatal("values bypassed bounds", values, err)
+		}
 	}
 }

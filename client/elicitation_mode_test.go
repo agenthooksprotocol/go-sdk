@@ -51,6 +51,10 @@ func TestPublicElicitationModeAdmission(t *testing.T) {
 					}
 					c, transports := testClient(t, "fail-open")
 					setDispatchBoundary(c, "user.elicitation."+stage, caps)
+					if operation == "modify" {
+						c.opts.Content.AuthorizeContent = contentTestAllow
+						c.backends[0].subscriptions[0]["content"] = map[string]any{"default": "body"}
+					}
 					reads, uploads := 0, 0
 					c.opts.Content.Resolver = func(_ context.Context, ref string) (io.ReadCloser, error) {
 						reads++
@@ -123,6 +127,7 @@ func TestPublicElicitationModeAdmission(t *testing.T) {
 						if len(result.Errors) != 0 || len(result.Response.Effects) != 1 || len(transports[0].calls) != 1 {
 							t.Fatalf("explicit grant did not accept decision: %+v", result)
 						}
+
 					}
 				})
 			}

@@ -30,7 +30,7 @@ type senderPlan struct {
 	// bounded endpoint/credential-scoped store shared by sender invocations.
 	StateFile string
 	// OriginalRequest explicitly supplies a real prior request when the caller
-	// owns state elsewhere. Its original body must appear in ContentSources.
+	// owns state elsewhere. MCP JSON is serialized in its inline text part.
 	OriginalRequest O
 	ContentSources  []senderSource
 	Steps           []senderStep
@@ -79,15 +79,7 @@ func senderSources(p senderPlan) (map[string][]byte, error) {
 
 func pinRequest(request O, sources map[string][]byte) (pinnedRequest, error) {
 	pin := pinnedRequest{Request: request, Bodies: map[string][]byte{}}
-	item := obj(obj(obj(obj(request["params"])["event"])["elicitation"])["request"])
-	ref := str(obj(item["body"])["ref"])
-	if ref != "" {
-		raw, ok := sources[ref]
-		if !ok {
-			return pin, fmt.Errorf("original request body unavailable")
-		}
-		pin.Bodies[ref] = bytes.Clone(raw)
-	}
+
 	return pin, nil
 }
 
@@ -102,7 +94,7 @@ func resolver(sources map[string][]byte) hooks.ContentResolver {
 }
 
 // Restore an opaque SDK snapshot from the actual original host occurrence and
-// exact bytes. This local observation-only dispatch is not a replay to a receiver
+// inline MCP JSON. This local observation-only dispatch is not a replay to a receiver
 // and cannot produce effects or pretend another request was accepted remotely.
 func restoreSnapshot(ctx context.Context, pin pinnedRequest) (*hooks.ElicitationRequest, error) {
 	note := O{"jsonrpc": "2.0", "method": "hooks/observe", "params": O{"protocolVersion": "draft", "event": obj(pin.Request["params"])["event"]}}
@@ -131,11 +123,8 @@ func sendOrdinary(ctx context.Context, p senderPlan, step senderStep, message O,
 	}
 	defer state.Close()
 	event := obj(obj(message["params"])["event"])
-	stage := "request"
-	receipts := &elicitationReceiptTransport{base: elicitationUploadTransport{token: p.UploadToken}, receipts: map[string]O{}}
-	options := sdk.PublicBoundaryOptions{Content: hooks.ContentOptions{Resolver: resolver(sources), AllowLoopbackHTTP: true}, Upload: O{"endpoint": p.Endpoint + "/upload", "timeoutMs": 10000, "maxBytes": 4 << 20}, UploadClient: &http.Client{Transport: receipts}}
+	options := sdk.PublicBoundaryOptions{Content: hooks.ContentOptions{AllowLoopbackHTTP: true}}
 	if event["type"] == "user.elicitation.result" {
-		stage = "result"
 		var pin pinnedRequest
 		if p.OriginalRequest != nil {
 			pin, err = pinRequest(p.OriginalRequest, sources)
@@ -155,22 +144,6 @@ func sendOrdinary(ctx context.Context, p senderPlan, step senderStep, message O,
 	var responseRaw []byte
 	confirmations := []any{}
 	_, _, err = sdk.PublicBoundary(ctx, message, func(ctx context.Context, _ string, raw []byte) ([]byte, error) {
-		var projected O
-		if err := json.Unmarshal(raw, &projected); err != nil {
-			return nil, err
-		}
-		originalItem := obj(obj(event["elicitation"])[stage])
-		projectedItem := obj(obj(obj(obj(projected["params"])["event"])["elicitation"])[stage])
-		if ref := obj(projectedItem["body"]); ref != nil {
-			// The SDK calls this exchange only after verifying the upload receipt
-			// against the actual sent bytes. Preserve that receiver evidence,
-			// not the intentionally ref-only projected event body.
-			receipt, ok := receipts.receipt(str(ref["ref"]))
-			if !ok {
-				return nil, fmt.Errorf("missing verified upload receipt")
-			}
-			confirmations = append(confirmations, O{"sourceRef": obj(originalItem["body"])["ref"], "descriptor": receipt})
-		}
 		request, err := http.NewRequestWithContext(ctx, "POST", p.Endpoint+step.Path, bytes.NewReader(raw))
 		if err != nil {
 			return nil, err
@@ -198,7 +171,7 @@ func sendOrdinary(ctx context.Context, p senderPlan, step senderStep, message O,
 	if err != nil {
 		return nil, err
 	}
-	if stage == "request" {
+	if event["type"] == "user.elicitation.request" {
 		pin, err := pinRequest(message, sources)
 		if err != nil {
 			return nil, err
