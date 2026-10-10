@@ -15,7 +15,8 @@ The SDK follows the current AHP `draft` schema snapshot and supports Go 1.27 or 
 go get github.com/agenthooksprotocol/go-sdk@latest
 ```
 
-While the protocol is a working draft, pin a commit SHA for reproducible builds.
+For reproducible builds, pin a published release version, for example
+`go get github.com/agenthooksprotocol/go-sdk@v0.1.1`.
 
 ## Quick start
 
