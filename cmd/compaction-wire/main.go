@@ -23,9 +23,19 @@ import (
 
 type O = map[string]any
 
-func obj(v any) O              { m, _ := v.(map[string]any); return m }
-func arr(v any) []any          { a, _ := v.([]any); return a }
-func str(v any) string         { s, _ := v.(string); return s }
+func obj(v any) O      { m, _ := v.(map[string]any); return m }
+func arr(v any) []any  { a, _ := v.([]any); return a }
+func str(v any) string { s, _ := v.(string); return s }
+
+// inlineText is used only at downstream application; wire snapshots retain parts.
+func inlineText(value any) string {
+	var text strings.Builder
+	for _, raw := range arr(value) {
+		text.WriteString(str(obj(raw)["text"]))
+	}
+	return text.String()
+}
+
 func digest(raw []byte) string { return fmt.Sprintf("%x", sha256.Sum256(raw)) }
 func location(store, sub, ref string) string {
 	return filepath.Join(store, digest([]byte(sub+"\x00"+ref)))
@@ -180,10 +190,9 @@ func exchange(plan O, sub, name string, snapshot O, v *ahp.Validator, trace *[]a
 		}
 		event["trigger"] = "manual"
 		event["items"] = []any{O{"id": name + ":context", "role": "user", "parts": parts}}
-		event["instructions"] = []any{textPart(name+":instructions", str(snapshot["instructions"]))}
+		event["instructions"] = snapshot["instructions"]
 	} else {
-		handle := obj(snapshot["summary"])
-		event["summary"] = []any{textPart(str(handle["id"]), str(obj(snapshot["bodies"])[str(handle["ref"])]))}
+		event["summary"] = snapshot["summary"]
 		event["parentEventId"] = name + ":before"
 		event["removed"] = []any{O{"id": name + ":context"}}
 		if obj(snapshot["candidate"]) == nil {
@@ -297,7 +306,7 @@ func run() error {
 			}
 			downstream := []any{}
 			if result["applied"] == true {
-				downstream = append(downstream, obj(result["bodies"])[str(obj(result["summary"])["ref"])])
+				downstream = append(downstream, inlineText(result["summary"]))
 			}
 			out = append(out, O{"name": name, "result": result, "trace": trace, "downstream": downstream})
 		}

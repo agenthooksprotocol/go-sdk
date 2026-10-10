@@ -1,6 +1,67 @@
 package interop
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
+
+func TestCatalogueCanonicalMessages(t *testing.T) {
+	v, err := newLifecycleValidator(schemaPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// This self-contained canonical message proves the adapter shape independently
+	// of the protocol checkout's separately versioned scenario catalogue.
+	message := Object{"jsonrpc": "2.0", "method": "hooks/observe", "params": Object{"protocolVersion": "draft", "event": Object{
+		"id": "inline-catalogue", "source": "urn:ahp:catalogue", "time": "2026-09-15T12:00:00Z", "type": "model.request.before",
+		"model": Object{"id": "example", "provider": "example"}, "attempt": Object{"id": "example", "number": 1}, "params": Object{},
+		"items": []any{
+			Object{"id": "input", "role": "user", "parts": []any{Object{"id": "first", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": "First line.\nUnicode: café 🌍"}, Object{"id": "image", "kind": "attachment", "mediaType": "image/png", "selection": "metadata"}, Object{"id": "last", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": "Last part."}}},
+			Object{"id": "reply", "role": "assistant", "parts": []any{Object{"id": "reasoning", "kind": "text", "mediaType": "text/plain", "selection": "body", "category": "reasoning", "text": "Consider the input."}, Object{"id": "empty", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": ""}}},
+		}}}}
+	if err := validateCatalogueObserve(v, message); err != nil {
+		t.Fatal(err)
+	}
+	before := clone(message)
+	receiver := &lifecycleReceiver{suite: "catalogue", validator: v, changed: make(chan struct{}), uploads: map[string]string{}}
+	if _, err := receiver.catalogueDispatch(message); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, clone(message)) {
+		t.Fatal("delivery mutated message parts")
+	}
+	if !reflect.DeepEqual(obj(receiver.entries[0])["message"], before) {
+		t.Fatal("receipt lost ordered inline parts")
+	}
+	for _, mutation := range []string{"missing-role", "legacy-body", "metadata-text", "metadata-attachment-body"} {
+		t.Run(mutation, func(t *testing.T) {
+			bad := obj(clone(message))
+			item := obj(array(obj(obj(bad["params"])["event"])["items"])[0])
+			part := obj(array(item["parts"])[0])
+			switch mutation {
+			case "missing-role":
+				delete(item, "role")
+			case "legacy-body":
+				delete(part, "text")
+				part["body"] = Object{"ref": "private"}
+			case "metadata-text":
+				part["selection"] = "metadata"
+			case "metadata-attachment-body":
+				obj(array(item["parts"])[1])["body"] = Object{"ref": "private"}
+			}
+			if err := validateCatalogueObserve(v, bad); err == nil {
+				t.Fatal("invalid canonical message accepted")
+			}
+			if _, err := receiver.catalogueDispatch(bad); err == nil {
+				t.Fatal("invalid canonical delivery accepted")
+			}
+			receipt := obj(receiver.entries[len(receiver.entries)-1])
+			if receipt["kind"] != "rejected" || receipt["errorKind"] != "schema" || !reflect.DeepEqual(receipt["message"], bad) {
+				t.Fatal("missing exact rejection evidence")
+			}
+		})
+	}
+}
 
 func TestCatalogueManifest(t *testing.T) {
 	v, e := NewValidator(schemaPath(t))
@@ -33,7 +94,7 @@ func TestCatalogueWireFixtures(t *testing.T) {
 			} else if e := Load(path, &message); e != nil {
 				t.Fatal(e)
 			}
-			if e := v.validate("observe", message); e != nil {
+			if e := validateCatalogueObserve(v, message); e != nil {
 				t.Fatal(e)
 			}
 		})

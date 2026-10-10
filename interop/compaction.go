@@ -43,6 +43,16 @@ func CompactionCapabilities(boundary string, observeOnly bool) (Object, error) {
 // Observe-only after callbacks run on detached goroutines after settlement; their
 // results, errors and panics cannot change settlement or delay downstream use.
 func RunCompaction(instructions, itemID string, before, after []CompactionHook, generate func(string) (string, error), observeOnly bool) (Object, error) {
+	return RunCompactionParts(textParts(instructions), itemID, before, after, generate, observeOnly)
+}
+
+// RunCompactionParts retains the ordered canonical instruction parts, including
+// their identities. Generation consumes their effective text in part order.
+func RunCompactionParts(instructions []any, itemID string, before, after []CompactionHook, generate func(string) (string, error), observeOnly bool) (Object, error) {
+	if !validTextParts(instructions) {
+		return nil, fmt.Errorf("invalid inline instructions")
+	}
+
 	if itemID == "" {
 		return nil, fmt.Errorf("empty item ID")
 	}
@@ -53,7 +63,7 @@ func RunCompaction(instructions, itemID string, before, after []CompactionHook, 
 			}
 		}
 	}
-	state := Object{"instructions": textParts(instructions), "candidate": nil, "summary": nil, "messages": []any{}, "denied": false}
+	state := Object{"instructions": clone(instructions), "candidate": nil, "summary": nil, "messages": []any{}, "denied": false}
 	seen := []any{}
 	failures := []any{}
 	pipeline := func(boundary string, hooks []CompactionHook) bool {
@@ -120,7 +130,7 @@ func RunCompaction(instructions, itemID string, before, after []CompactionHook, 
 				}
 				continue
 			}
-			if !bytes.Equal(jsonBytes(staged["instructions"]), jsonBytes(state["instructions"])) {
+			if partsText(staged["instructions"]) != partsText(state["instructions"]) {
 				staged["candidate"] = nil
 			}
 			for _, e := range effects {
@@ -301,6 +311,11 @@ func validTextParts(value any) bool {
 		p := obj(part)
 		if p["kind"] != "text" || p["selection"] != "body" || p["mediaType"] != "text/plain" || str(p["id"]) == "" {
 			return false
+		}
+		for _, key := range []string{"body", "ref", "size", "sha256"} {
+			if _, exists := p[key]; exists {
+				return false
+			}
 		}
 		if _, ok := p["text"].(string); !ok {
 			return false

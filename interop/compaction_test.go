@@ -7,6 +7,34 @@ import (
 	"time"
 )
 
+func TestCompactionCanonicalInstructionIdentityAndNoChangeProvenance(t *testing.T) {
+	initial := []any{Object{"id": "initial", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": "base"}}
+	reshaped := []any{Object{"id": "first", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": "ba"}, Object{"id": "second", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": "se"}}
+	generated := false
+	before := []CompactionHook{
+		{Supplier: "cache", FailurePolicy: "fail-closed", Run: func(snapshot Object) ([]Object, error) {
+			if obj(array(snapshot["instructions"])[0])["id"] != "initial" {
+				t.Error("initial identity lost")
+			}
+			return []Object{{"type": "return", "value": textParts("cached")}}, nil
+		}},
+		{Supplier: "same-text", FailurePolicy: "fail-closed", Run: func(Object) ([]Object, error) {
+			return []Object{{"type": "modify", "target": "instructions", "operation": "replace", "value": reshaped}}, nil
+		}},
+	}
+	result, err := RunCompactionParts(initial, "summary", before, nil, func(string) (string, error) { generated = true; return "generated", nil }, false)
+	if err != nil || result["applied"] != true || generated || obj(result["provenance"])["supplier"] != "cache" || partsText(result["summary"]) != "cached" {
+		t.Fatalf("result=%v generated=%v err=%v", result, generated, err)
+	}
+	if !reflect.DeepEqual(result["instructions"], clone(reshaped)) {
+		t.Fatal("canonical replacement identities or order lost")
+	}
+	obj(reshaped[0])["text"] = "mutated"
+	if partsText(result["instructions"]) != "base" {
+		t.Fatal("accepted instructions alias caller storage")
+	}
+}
+
 func compactModify(target, value string) Object {
 	return Object{"type": "modify", "target": target, "operation": "replace", "value": textParts(value)}
 }

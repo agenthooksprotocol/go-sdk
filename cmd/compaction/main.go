@@ -26,7 +26,7 @@ func receive(request O) O {
 	if !ok {
 		return failure
 	}
-	input, ok := p["instructions"].(string)
+	input, ok := p["instructions"].([]any)
 	if !ok {
 		return failure
 	}
@@ -92,7 +92,7 @@ func receive(request O) O {
 			return failure
 		}
 	}
-	result, err := ahp.RunCompaction(input, id, before, after, nil, p["observeOnly"] == true)
+	result, err := ahp.RunCompactionParts(input, id, before, after, nil, p["observeOnly"] == true)
 	if err != nil {
 		return failure
 	}
