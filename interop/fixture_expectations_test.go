@@ -90,3 +90,10 @@ func interopFixturePath(name string) string {
 	}
 	return filepath.Join("../../agent-hooks-protocol/interop", name)
 }
+
+func schemaFixtureDir() string {
+	if dir := os.Getenv("AHP_SCHEMA_DIR"); dir != "" {
+		return dir
+	}
+	return "../../agent-hooks-protocol/schema/draft"
+}

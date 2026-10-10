@@ -76,7 +76,7 @@ func TestLifecycleUploadPolicyAndScopedReadiness(t *testing.T) {
 				wantHeader = ""
 			}
 			req := request("scoped-upload")
-			obj(obj(req["params"])["event"])["items"] = []any{Object{"id": "item", "kind": "text", "mediaType": "application/octet-stream", "selection": "body", "body": Object{"ref": "local"}}}
+			obj(obj(req["params"])["event"])["items"] = []any{Object{"id": "item", "kind": "attachment", "mediaType": "application/octet-stream", "selection": "body", "body": Object{"ref": "local"}}}
 			steps := []Object{upload, send, {"op": "receive", "slot": "a"}}
 			if name == "unauthorized" {
 				steps = []Object{upload}

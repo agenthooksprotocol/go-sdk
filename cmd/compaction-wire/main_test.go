@@ -3,10 +3,15 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	ahp "github.com/agenthooksprotocol/go-sdk/interop"
+	"io"
 	"mime"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -29,6 +34,9 @@ func TestUploadFailureSuppressesEvent(t *testing.T) {
 			calls := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
+				if body, err := io.ReadAll(r.Body); err != nil || !bytes.Equal(body, []byte("conversation")) {
+					t.Errorf("immutable attachment upload: %q %v", body, err)
+				}
 				if r.URL.Path != "/upload" {
 					t.Error("dependent event sent")
 				}
@@ -48,7 +56,7 @@ func TestUploadFailureSuppressesEvent(t *testing.T) {
 			}))
 			defer server.Close()
 			trace := []any{}
-			_, err := exchange(O{"endpoint": server.URL, "transport": "http", "credentials": O{"scope": O{"token": "event-secret", "uploadToken": "upload-secret"}}}, "scope", "case", O{"boundary": "before", "instructions": "base", "capabilities": compactionTestCaps()}, nil, &trace)
+			_, err := exchange(O{"endpoint": server.URL, "transport": "http", "credentials": O{"scope": O{"token": "event-secret", "uploadToken": "upload-secret"}}}, "scope", "case", O{"boundary": "before", "instructions": wireTestParts("base"), "attachment": "conversation", "capabilities": compactionTestCaps()}, nil, &trace)
 			if err == nil || calls != 1 || len(trace) != 0 {
 				t.Fatalf("err=%v calls=%d trace=%v", err, calls, trace)
 			}
@@ -63,7 +71,7 @@ func TestStorageScopeIsIndependentOfReference(t *testing.T) {
 }
 
 func TestCompactionHTTPRepliesUseJSON(t *testing.T) {
-	validator, err := ahp.NewValidator("../../../agent-hooks-protocol/schema/draft")
+	validator, err := compactionTestValidator(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,3 +124,175 @@ func TestCompactionHTTPRepliesUseJSON(t *testing.T) {
 }
 
 func compactionTestCaps() O { caps, _ := ahp.CompactionCapabilities("before", false); return caps }
+
+func TestCompactionInlineTextDoesNotUpload(t *testing.T) {
+	validator, err := compactionTestValidator(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AHP_COMPACTION_TOKENS", `{"event-token":"scope"}`)
+	for _, boundary := range []string{"before", "after"} {
+		t.Run(boundary, func(t *testing.T) {
+			target := "instructions"
+			if boundary == "after" {
+				target = "summary"
+			}
+			handler := compactionHTTPHandler(O{"scope": O{"kind": "append", "target": target, "suffix": " accepted"}}, t.TempDir(), validator)
+			events := 0
+			peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/upload" {
+					t.Error("inline text uploaded")
+					w.WriteHeader(500)
+					return
+				}
+				events++
+				handler.ServeHTTP(w, r)
+			}))
+			defer peer.Close()
+			caps, err := ahp.CompactionCapabilities(boundary, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot := O{"boundary": boundary, "instructions": wireTestParts("base"), "capabilities": caps}
+			if boundary == "after" {
+				snapshot["summary"] = wireTestParts("base")
+			}
+			trace := []any{}
+			effects, err := exchange(O{"endpoint": peer.URL, "transport": "http", "credentials": O{"scope": O{"token": "event-token", "uploadToken": "upload-token"}}}, "scope", "inline", snapshot, nil, &trace)
+			if err != nil || events != 1 || len(effects) != 1 {
+				t.Fatalf("exchange: %v events=%d effects=%v", err, events, effects)
+			}
+			value := arr(effects[0]["value"])
+			if len(value) != 1 || obj(value[0])["text"] != "base accepted" || obj(value[0])["body"] != nil {
+				t.Fatalf("not a canonical inline text list: %v", value)
+			}
+		})
+	}
+}
+
+func compactionTestValidator(t *testing.T) (*ahp.Validator, error) {
+	t.Helper()
+	// Use this SDK's generated snapshot, not an unrelated sibling checkout.
+	raw, err := os.ReadFile("../../internal/canonical/schemas.json")
+	if err != nil {
+		return nil, err
+	}
+	var documents []json.RawMessage
+	if err = json.Unmarshal(raw, &documents); err != nil {
+		return nil, err
+	}
+	dir := t.TempDir()
+	for _, doc := range documents {
+		var metadata struct {
+			ID string `json:"$id"`
+		}
+		if err = json.Unmarshal(doc, &metadata); err != nil {
+			return nil, err
+		}
+		if err = os.WriteFile(filepath.Join(dir, filepath.Base(metadata.ID)), doc, 0600); err != nil {
+			return nil, err
+		}
+	}
+	return ahp.NewValidator(dir)
+}
+
+func wireTestParts(texts ...string) []any {
+	parts := []any{}
+	for i, text := range texts {
+		parts = append(parts, O{"id": fmt.Sprintf("part-%d", i), "kind": "text", "mediaType": "text/plain", "selection": "body", "text": text})
+	}
+	return parts
+}
+
+func TestExchangePreservesOrderedInlineParts(t *testing.T) {
+	validator, err := compactionTestValidator(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AHP_COMPACTION_TOKENS", `{"event-token":"scope"}`)
+	for _, boundary := range []string{"before", "after"} {
+		t.Run(boundary, func(t *testing.T) {
+			target := "instructions"
+			if boundary == "after" {
+				target = "summary"
+			}
+			peer := httptest.NewServer(compactionHTTPHandler(O{"scope": O{"kind": "append", "target": target, "suffix": ":safe"}}, t.TempDir(), validator))
+			defer peer.Close()
+			parts := wireTestParts("first", "", "last")
+			caps, _ := ahp.CompactionCapabilities(boundary, false)
+			snapshot := O{"boundary": boundary, target: parts, "capabilities": caps}
+			trace := []any{}
+			effects, err := exchange(O{"endpoint": peer.URL, "transport": "http", "credentials": O{"scope": O{"token": "event-token"}}}, "scope", "ordered", snapshot, validator, &trace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sent := obj(obj(obj(trace[0])["request"])["params"])["event"]
+			if !reflect.DeepEqual(obj(sent)[target], parts) {
+				t.Fatalf("parts lost: %v", sent)
+			}
+			want := wireTestParts("first", "", "last:safe")
+			if len(effects) != 1 || !reflect.DeepEqual(effects[0]["value"], want) {
+				t.Fatalf("effects=%v", effects)
+			}
+			if inlineText(parts) != "firstlast" {
+				t.Fatalf("snapshot mutated: %v", parts)
+			}
+		})
+	}
+}
+
+func TestWirePipelineAtomicFailureAndSuppliedProvenance(t *testing.T) {
+	validator, err := compactionTestValidator(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modify := func(target string, value any) O {
+		return O{"type": "modify", "target": target, "operation": "replace", "value": value}
+	}
+	config := O{
+		"supplier":  O{"kind": "effects", "effects": []any{O{"type": "return", "value": wireTestParts("cached")}}},
+		"unchanged": O{"kind": "effects", "effects": []any{modify("instructions", []any{O{"id": "fixture:text", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": "base"}})}},
+		"invalid":   O{"kind": "effects", "effects": []any{modify("instructions", wireTestParts("leaked")), O{"type": "message", "text": "leaked"}, modify("summary", wireTestParts("wrong"))}},
+		"watch":     O{"kind": "effects", "effects": []any{}},
+		"after":     O{"kind": "append", "target": "summary", "suffix": ":safe"},
+	}
+	tokens := O{}
+	credentials := O{}
+	for scope := range config {
+		tokens[scope] = scope
+		credentials[scope] = O{"token": scope}
+	}
+	raw, _ := json.Marshal(tokens)
+	t.Setenv("AHP_COMPACTION_TOKENS", string(raw))
+	peer := httptest.NewServer(compactionHTTPHandler(config, t.TempDir(), validator))
+	defer peer.Close()
+	plan := O{"endpoint": peer.URL, "transport": "http", "credentials": credentials}
+	trace := []any{}
+	hook := func(scope, policy string) ahp.CompactionHook {
+		return ahp.CompactionHook{Supplier: scope, FailurePolicy: policy, Run: func(snapshot ahp.Object) ([]ahp.Object, error) {
+			return exchange(plan, scope, "atomic", snapshot, validator, &trace)
+		}}
+	}
+	for _, policy := range []string{"fail-open", "fail-closed"} {
+		t.Run(policy, func(t *testing.T) {
+			trace = []any{}
+			result, err := ahp.RunCompaction("base", "summary", []ahp.CompactionHook{hook("supplier", "fail-closed"), hook("unchanged", "fail-closed"), hook("invalid", policy), hook("watch", "fail-closed")}, []ahp.CompactionHook{hook("after", "fail-closed")}, nil, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if inlineText(result["instructions"]) != "base" || len(arr(result["messages"])) != 0 || len(arr(result["failures"])) != 1 || obj(result["candidate"])["supplier"] != "supplier" {
+				t.Fatalf("non-atomic result: %v", result)
+			}
+			if result["generated"] != false {
+				t.Fatalf("no-change replacement invalidated supplied summary: %v", result)
+			}
+			if policy == "fail-open" {
+				if result["applied"] != true || inlineText(result["summary"]) != "cached:safe" || obj(result["provenance"])["supplier"] != "supplier" || len(trace) != 5 {
+					t.Fatalf("settlement: %v trace=%d", result, len(trace))
+				}
+			} else if result["applied"] != false || result["summary"] != nil || len(trace) != 3 {
+				t.Fatalf("closed failure did not halt: %v trace=%d", result, len(trace))
+			}
+		})
+	}
+}

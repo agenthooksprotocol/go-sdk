@@ -2,64 +2,85 @@ package client
 
 import (
 	"context"
+	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 	"io"
 	"strings"
 	"sync/atomic"
 	"testing"
-
-	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 )
 
+func preparedLifecycleFixture(t *testing.T) (map[string]any, *preparedBoundary, *ContentSource) {
+	t.Helper()
+	part := preparedOwnerAttachment("binary")
+	part["selection"] = "body"
+	part["body"] = map[string]any{"ref": "urn:original"}
+	event := preparedOwnerEvent(preparedOwnerMessage("one", part, preparedOwnerText("text", "original")))
+	c := &Client{opts: Options{Content: ContentOptions{Resolver: func(context.Context, string) (io.ReadCloser, error) {
+		return io.NopCloser(strings.NewReader("original")), nil
+	}}}}
+	p, err := c.prepareBoundary(context.Background(), event, preparedOwnerCaps("response"), interceptConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := p.sources["/items/0/parts/0"]
+	if owner == nil || !p.owned[owner] {
+		t.Fatal("missing managed attachment")
+	}
+	raw, err := ownedcontent.Borrow(owner, context.Background(), p.limit)
+	if err != nil || string(raw) != "original" {
+		t.Fatal(string(raw), err)
+	}
+	t.Cleanup(func() { _ = owner.Retire() })
+	return event, p, owner
+}
 func TestReleaseUnusedRejectsSpeculativeOwners(t *testing.T) {
-	item, bodies := targetTestItem("one", "text/plain", "original")
-	event := targetTestEvent(t, []any{item})
-	p := targetTestPrepare(t, event, "output", bodies, ModificationTarget{Path: "/items/0"})
-	original := p.sources["/items/0"]
-	result, err := composePrepared(targetTestRequest(t, event, "output"), compositionTestResponse(t, `[{"type":"modify","target":"output","operation":"replace","value":"speculative"},{"type":"modify","target":"output","operation":"replace","value":{}}]`), p)
+	event, p, original := preparedLifecycleFixture(t)
+	part := preparedAt(event, "/items/0/parts/0")
+	staged := []any{preparedOwnerMessage("one", preparedOwnerText("text", "speculative"), part)}
+	invalid := []any{preparedOwnerMessage("one", preparedOwnerAttachment("new-binary"))}
+	result, err := preparedOwnerCompose(t, event, "response", p, staged, invalid)
 	if err == nil || result != nil {
 		t.Fatal("invalid staged edit accepted")
 	}
-	var speculative *ContentSource
-	for source := range p.owned {
-		if source != original {
-			speculative = source
-		}
-	}
-	if speculative == nil {
-		t.Fatal("test did not stage an attachment owner")
-	}
 	p.releaseUnused(nil)
-	if _, ok := ownedcontent.Available(speculative); ok {
-		t.Fatal("rejected owner remains readable")
+	if len(p.owned) != 1 || !p.owned[original] || p.sources["/items/0/parts/0"] != original || string(preparedTestBytes(p, "/items/0/parts/0")) != "original" {
+		t.Fatal("failed transaction lost effective owner")
 	}
-	if len(p.owned) != 1 || !p.owned[original] || string(preparedTestBytes(p, "/items/0")) != "original" {
-		t.Fatal("cleanup retired the effective owner")
+	if len(p.sources) != 1 || preparedAt(event, "/items/0/parts/1")["text"] != "original" {
+		t.Fatal("failed transaction published inline edit or speculative owner")
 	}
-	_ = original.Retire()
 }
-
 func TestReleaseUnusedPreservesEffectiveClone(t *testing.T) {
-	item, bodies := targetTestItem("one", "text/plain", "original")
-	event := targetTestEvent(t, []any{item})
-	p := targetTestPrepare(t, event, "output", bodies, ModificationTarget{Path: "/items/0"})
-	original := p.sources["/items/0"]
-	accepted := targetTestCompose(t, event, "output", p, `[{"type":"modify","target":"output","operation":"replace","value":"effective"}]`)
+	event, p, original := preparedLifecycleFixture(t)
+	part := preparedAt(event, "/items/0/parts/0")
+	accepted, err := preparedOwnerCompose(t, event, "response", p, []any{preparedOwnerMessage("one", preparedOwnerText("text", "effective"), part)})
+	if err != nil {
+		t.Fatal(err)
+	}
 	effective := accepted.prepared
 	effective.releaseUnused(nil)
-	if _, ok := ownedcontent.Available(original); ok {
-		t.Fatal("superseded owner remains readable")
+	if len(p.owned) != 1 || !p.owned[original] || effective.sources["/items/0/parts/1"] != original || string(preparedTestBytes(effective, "/items/0/parts/1")) != "original" {
+		t.Fatal("cleanup retired retained owner")
 	}
-	owner := effective.sources["/items/0"]
-	if len(p.owned) != 1 || !p.owned[owner] || string(preparedTestBytes(effective, "/items/0")) != "effective" {
-		t.Fatal("cleanup retired the accepted clone owner")
+	if preparedAt(compositionObject(accepted.Event), "/items/0/parts/0")["text"] != "effective" {
+		t.Fatal("inline edit lost")
 	}
 	effective.releaseUnused(nil)
 	if len(effective.owned) != 1 {
 		t.Fatal("repeated cleanup changed live ledger")
 	}
-	_ = owner.Retire()
+	removed, err := preparedOwnerCompose(t, compositionObject(accepted.Event), "response", effective, []any{preparedOwnerMessage("one", preparedOwnerText("text", "effective"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	removed.prepared.releaseUnused(nil)
+	if _, ok := ownedcontent.Available(original); ok {
+		t.Fatal("removed binary owner remains readable")
+	}
+	if len(removed.prepared.owned) != 0 || len(removed.prepared.sources) != 0 {
+		t.Fatal("removed owner remains indexed")
+	}
 }
-
 func TestReleaseUnusedCleansLazyOwnersWithoutOpening(t *testing.T) {
 	var opens, cleanups atomic.Int32
 	stale := ownedcontent.NewLazyAttachment(func(context.Context) (io.ReadCloser, error) {
@@ -68,10 +89,10 @@ func TestReleaseUnusedCleansLazyOwnersWithoutOpening(t *testing.T) {
 	}, func() error { cleanups.Add(1); return nil })
 	external := ownedcontent.NewAttachment([]byte("external"))
 	live := ownedcontent.NewAttachment([]byte("live"))
-	p := &preparedBoundary{sources: map[string]*ContentSource{"/items/0": live}, owned: map[*ContentSource]bool{stale: true, live: true}}
+	p := &preparedBoundary{sources: map[string]*ContentSource{"/items/0/parts/0": live}, owned: map[*ContentSource]bool{stale: true, live: true}}
 	// An original user source in a discarded index is not in the owned ledger.
 	discarded := p.clone()
-	discarded.sources["/items/1"] = external
+	discarded.sources["/items/1/parts/0"] = external
 	p.releaseUnused(nil)
 	p.releaseUnused(nil)
 	if opens.Load() != 0 || cleanups.Load() != 1 {
@@ -91,33 +112,33 @@ func TestReleaseUnusedCleansLazyOwnersWithoutOpening(t *testing.T) {
 }
 
 func TestReleaseUnusedReclaimsSerialEditBudget(t *testing.T) {
-	item, bodies := targetTestItem("one", "text/plain", "version0")
-	event := targetTestEvent(t, []any{item})
-	p := targetTestPrepare(t, event, "output", bodies, ModificationTarget{Path: "/items/0"})
+	event, p, owner := preparedLifecycleFixture(t)
 	budget := &contentSourceBudget{seen: map[*ContentSource]bool{}}
 	for i := 0; i < 8; i++ {
-		owner := p.sources["/items/0"]
 		if _, err := budget.snapshot(context.Background(), owner, 8, 8); err != nil {
-			t.Fatal("retired versions exhausted live budget", i, err)
+			t.Fatal("inline versions exhausted immutable budget", i, err)
 		}
-		if budget.used != 8 {
-			t.Fatal("unexpected live accounting", budget.used)
+		part := preparedAt(event, "/items/0/parts/0")
+		accepted, err := preparedOwnerCompose(t, event, "response", p, []any{preparedOwnerMessage("one", part, preparedOwnerText("text", "version"+string(rune('1'+i))))})
+		if err != nil {
+			t.Fatal(err)
 		}
-		accepted := targetTestCompose(t, event, "output", p, `[{"type":"modify","target":"output","operation":"replace","value":"version`+string(rune('1'+i))+`"}]`)
 		p = accepted.prepared
 		event = compositionObject(accepted.Event)
 		p.releaseUnused(budget)
-		if budget.used != 0 || len(budget.seen) != 0 {
-			t.Fatal("obsolete version remained accounted", budget.used)
-		}
-		if len(p.owned) != 1 {
-			t.Fatal("obsolete versions accumulated", len(p.owned))
-		}
-		if _, ok := ownedcontent.Available(owner); ok {
-			t.Fatal("obsolete version remained materialized")
+		if budget.used != 8 || len(budget.seen) != 1 || len(p.owned) != 1 || len(p.sources) != 1 || p.sources["/items/0/parts/0"] != owner {
+			t.Fatal("inline versions accumulated owners or changed attachment accounting", budget.used)
 		}
 	}
-	for owner := range p.owned {
-		_ = owner.Retire()
+	removed, err := preparedOwnerCompose(t, event, "response", p, []any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	removed.prepared.releaseUnused(budget)
+	if budget.used != 0 || len(budget.seen) != 0 || len(removed.prepared.owned) != 0 {
+		t.Fatal("removed attachment remained accounted", budget.used)
+	}
+	if _, ok := ownedcontent.Available(owner); ok {
+		t.Fatal("removed owner remained materialized")
 	}
 }

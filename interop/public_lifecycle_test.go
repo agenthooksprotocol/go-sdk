@@ -74,7 +74,7 @@ func TestConfirmedUploadCacheCannotMintOrCrossScopes(t *testing.T) {
 		{"changed-body", map[string]string{"ready": "bytes"}, "changed", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			transport := &confirmedUploadTransport{endpoint: "http://127.0.0.1/upload", bodies: tc.bodies, reference: "ready"}
+			transport := &confirmedUploadTransport{endpoint: "http://127.0.0.1/upload", bodies: tc.bodies, resolved: map[string]string{confirmedBodyKey([]byte(tc.body)): "ready"}}
 			request, _ := http.NewRequest("POST", transport.endpoint, bytes.NewBufferString(tc.body))
 			response, err := transport.RoundTrip(request)
 			if tc.valid {
@@ -93,5 +93,27 @@ func TestConfirmedUploadCacheCannotMintOrCrossScopes(t *testing.T) {
 				t.Fatal("unconfirmed body received a reference")
 			}
 		})
+	}
+}
+
+// Reads may all settle before their uploads, and transfers may arrive in either order.
+func TestConfirmedUploadCacheIndependentResolvedBodies(t *testing.T) {
+	transport := &confirmedUploadTransport{
+		endpoint: "http://127.0.0.1/upload",
+		bodies:   map[string]string{"first-ref": "first", "second-ref": "second"},
+		resolved: map[string]string{confirmedBodyKey([]byte("first")): "first-ref", confirmedBodyKey([]byte("second")): "second-ref"},
+	}
+	for _, body := range []string{"second", "first", "second"} {
+		request, _ := http.NewRequest("POST", transport.endpoint, bytes.NewBufferString(body))
+		response, err := transport.RoundTrip(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var descriptor Object
+		err = json.NewDecoder(response.Body).Decode(&descriptor)
+		response.Body.Close()
+		if err != nil || descriptor["ref"] != body+"-ref" {
+			t.Fatalf("body %q: descriptor=%v error=%v", body, descriptor, err)
+		}
 	}
 }

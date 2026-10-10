@@ -15,7 +15,7 @@ import (
 )
 
 func contentTestItem(body any) map[string]any {
-	return map[string]any{"id": "item-1", "kind": "message", "mediaType": "text/plain", "role": "assistant", "body": body}
+	return map[string]any{"id": "item-1", "kind": "attachment", "mediaType": "application/octet-stream", "selection": "body", "body": body}
 }
 func contentTestSubscription(endpoint string) map[string]any {
 	return map[string]any{"id": "subscription-1", "content": map[string]any{"default": "body"}, "upload": map[string]any{"endpoint": endpoint, "timeoutMs": 1000, "maxBytes": 128}}
@@ -57,8 +57,8 @@ func TestContentSelectionIsNotPermission(t *testing.T) {
 		if mode == "body" && got["gap"].(map[string]any)["reason"] != "withheld" {
 			t.Fatalf("missing withholding gap: %#v", got)
 		}
-		if got["role"] != "assistant" || result["native"] != nil || result["tool"].(map[string]any)["input"] != nil {
-			t.Fatal("role lost or opaque content disclosed")
+		if result["native"] != nil || result["tool"].(map[string]any)["input"] != nil {
+			t.Fatal("opaque content disclosed")
 		}
 	}
 	if !reflect.DeepEqual(event, before) {

@@ -141,8 +141,8 @@ func TestContentSourceDeferredModificationBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	values, err = p.values(event)
-	if err != nil || values["content"] != "original" {
-		t.Fatalf("missing lazy baseline: %#v %v", values, err)
+	if err == nil || values != nil {
+		t.Fatalf("binary attachment exposed as editable text: %#v %v", values, err)
 	}
 }
 
@@ -219,32 +219,20 @@ func TestContentSourceFailureAndUnusedBoundaryClose(t *testing.T) {
 }
 
 func TestContentSourceElicitationLazyPinnedContract(t *testing.T) {
+	// JSON is inline text. Its pinned contract is independent of lazy attachment lifetimes.
 	event, _ := elicitationFixture("request", "form", elicitationForm)
-	item := preparedAt(event, "/elicitation/request")
-	delete(item, "body")
-	item["selection"] = "metadata"
-	reader := &sourceTestReader{Reader: strings.NewReader(elicitationForm)}
-	source := NewContentSource(reader)
-	cfg := contentSourceConfig([]InterceptOption{WithContentSource("/elicitation/request", source)})
-	defer cfg.closeSources()
-	ctx, err := cfg.bindSources(context.Background(), event)
+	c := &Hooks{opts: Options{Content: ContentOptions{Resolver: func(context.Context, string) (io.ReadCloser, error) {
+		t.Error("inline JSON reached resolver")
+		return nil, io.ErrUnexpectedEOF
+	}}}}
+	p, err := c.prepareBoundary(context.Background(), event, map[string]any{"effects": []any{"return"}}, interceptConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := &Hooks{}
-	p, err := c.prepareBoundary(ctx, event, map[string]any{"effects": []any{"return"}}, cfg)
-	if err != nil || reader.reads.Load() != 0 {
-		t.Fatalf("eager preparation: %v", err)
+	if _, err = p.values(event); err != nil || !p.snapshot.requestValid {
+		t.Fatalf("inline preparation: %v", err)
 	}
-	if _, err = p.values(event); err != nil || p.snapshot.requestValid {
-		t.Fatalf("metadata preparation: %v", err)
-	}
-	if _, err = source.Snapshot(ctx, 4096); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = p.values(event); err != nil {
-		t.Fatal(err)
-	}
+	preparedAt(event, "/elicitation/request")["text"] = "mutated"
 	if err = validateElicitationAnswer(event, p.snapshot, map[string]any{"action": "accept", "content": map[string]any{"x": "a"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -257,25 +245,10 @@ func TestContentSourceElicitationInvalidBodyNeverUploads(t *testing.T) {
 	var uploads atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { uploads.Add(1) }))
 	defer server.Close()
-	event, _ := elicitationFixture("request", "form", elicitationForm)
-	item := preparedAt(event, "/elicitation/request")
-	delete(item, "body")
-	item["selection"] = "metadata"
-	source := NewContentSource(io.NopCloser(strings.NewReader(`{"message":"no schema"}`)))
-	cfg := contentSourceConfig([]InterceptOption{WithContentSource("/elicitation/request", source)})
-	defer cfg.closeSources()
-	ctx, err := cfg.bindSources(context.Background(), event)
-	if err != nil {
-		t.Fatal(err)
-	}
+	event, _ := elicitationFixture("request", "form", `{"message":"no schema"}`)
 	c := &Hooks{opts: Options{Content: ContentOptions{AuthorizeContent: contentTestAllow, AllowLoopbackHTTP: true}}}
-	p, err := c.prepareBoundary(ctx, event, map[string]any{}, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx = context.WithValue(ctx, preparedContextKey{}, p)
-	if _, err = c.projectContent(ctx, event, contentTestSubscription(server.URL), "backend"); err == nil {
-		t.Fatal("invalid elicitation accepted")
+	if _, err := c.prepareBoundary(context.Background(), event, map[string]any{}, interceptConfig{}); err == nil {
+		t.Fatal("invalid inline elicitation accepted")
 	}
 	if uploads.Load() != 0 {
 		t.Fatal("invalid pinned schema uploaded")

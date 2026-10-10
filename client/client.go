@@ -35,6 +35,8 @@ type Options struct {
 	EventTransportResolver EventTransportResolver
 	UploadClient           *http.Client
 	MaxContentBytes        int64
+	// MaxConcurrentUploads limits active transfers across invocations; zero uses 8.
+	MaxConcurrentUploads   int
 	MaxPendingObservations int
 	ObservationTimeout     time.Duration
 	Content                ContentOptions
@@ -54,6 +56,7 @@ type Hooks struct {
 	cancel       context.CancelFunc
 	life         context.Context
 	observations chan struct{}
+	uploads      chan struct{}
 }
 
 // Client is retained for source compatibility.
@@ -119,8 +122,11 @@ func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
 	if strings.TrimSpace(opts.Source) == "" {
 		return nil, errors.New("source is required")
 	}
-	if opts.MaxContentBytes < 0 || opts.MaxPendingObservations < 0 || opts.ObservationTimeout < 0 {
+	if opts.MaxConcurrentUploads < 0 || opts.MaxContentBytes < 0 || opts.MaxPendingObservations < 0 || opts.ObservationTimeout < 0 {
 		return nil, errors.New("negative client limit")
+	}
+	if opts.MaxConcurrentUploads == 0 {
+		opts.MaxConcurrentUploads = 8
 	}
 	if opts.MaxContentBytes == 0 {
 		opts.MaxContentBytes = 4 << 20
@@ -155,7 +161,7 @@ func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
 	}
 	// Retain only the detached normalized advertisement, not the caller's map.
 	opts.Events = nil
-	c := &Hooks{opts: opts, manifest: manifest, observations: make(chan struct{}, opts.MaxPendingObservations), closeDone: make(chan struct{})}
+	c := &Hooks{opts: opts, manifest: manifest, observations: make(chan struct{}, opts.MaxPendingObservations), closeDone: make(chan struct{}), uploads: make(chan struct{}, opts.MaxConcurrentUploads)}
 	c.life, c.cancel = context.WithCancel(context.Background())
 	ids := map[string]bool{}
 	for _, backend := range parsed.Value.Hooks {

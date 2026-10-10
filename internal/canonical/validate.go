@@ -62,6 +62,13 @@ var schemas = sync.OnceValues(func() (map[string]*jsonschema.Schema, error) {
 		}
 		out["mcp-elicitation#"+name] = s
 	}
+	for _, name := range []string{"messages", "textParts"} {
+		schema, err := compiler.Compile("https://agenthooksprotocol.org/schemas/draft/content-item.schema.json#/$defs/" + name)
+		if err != nil {
+			return nil, err
+		}
+		out["content-item#"+name] = schema
+	}
 	return out, nil
 })
 

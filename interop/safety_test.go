@@ -14,7 +14,7 @@ import (
 
 func TestAcceptedPrefixSurvivesLaterResponses(t *testing.T) {
 	req := obj(clone(request("serial")))
-	oldInjection := Object{"type": "inject", "target": "context", "operation": "append", "deliverAt": "next_turn", "value": "old"}
+	oldInjection := Object{"type": "inject", "target": "context", "operation": "append", "deliverAt": "next_turn", "value": contextMessages("old")}
 	prior := Object{"permission": "none", "candidate": nil, "flow": "stop", "instructions": []any{"old instruction"}, "injections": []any{oldInjection}}
 	obj(req["params"])["state"] = prior
 	original := clone(req)
@@ -22,13 +22,13 @@ func TestAcceptedPrefixSurvivesLaterResponses(t *testing.T) {
 	if e != nil || got["flow"] != "stop" || got["executed"] != false || !reflect.DeepEqual(got["continuationInstructions"], prior["instructions"]) || !reflect.DeepEqual(got["injections"], prior["injections"]) {
 		t.Fatal("empty response lost accepted state", got, e)
 	}
-	res := response("serial", Object{"type": "inject", "target": "context", "operation": "append", "deliverAt": "now", "value": "new"}, Object{"type": "message", "text": "new diagnostic"})
+	res := response("serial", Object{"type": "inject", "target": "context", "operation": "append", "deliverAt": "now", "value": contextMessages("new")}, Object{"type": "message", "text": "new diagnostic"})
 	got, e = Apply(req, res)
 	if e != nil || got["flow"] != "stop" || got["executed"] != false || len(array(got["injections"])) != 2 {
 		t.Fatal("later effects revived stopped operation", got, e)
 	}
 	// The staged append and replacement are discarded together on failure.
-	bad := response("serial", Object{"type": "inject", "target": "context", "operation": "append", "deliverAt": "now", "value": "discard"}, Object{"type": "modify", "target": "input", "operation": "merge", "value": []any{}})
+	bad := response("serial", Object{"type": "inject", "target": "context", "operation": "append", "deliverAt": "now", "value": contextMessages("discard")}, Object{"type": "modify", "target": "input", "operation": "merge", "value": []any{}})
 	if state, e := Apply(req, bad); e == nil || state != nil {
 		t.Fatal("partial publication", state, e)
 	}
@@ -36,7 +36,7 @@ func TestAcceptedPrefixSurvivesLaterResponses(t *testing.T) {
 		t.Fatal("accepted prefix mutated")
 	}
 	obj(array(got["injections"])[0])["value"] = "mutated result"
-	if obj(array(prior["injections"])[0])["value"] != "old" {
+	if !reflect.DeepEqual(obj(array(prior["injections"])[0])["value"], contextMessages("old")) {
 		t.Fatal("accepted injection aliased staged output")
 	}
 }

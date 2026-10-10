@@ -100,15 +100,20 @@ func (c *Hooks) prepareBoundary(ctx context.Context, event, caps map[string]any,
 	// Resolve references through lazy owners, never through a reference-byte cache.
 	// Capture only the inbound adapter and reference: results may outlive Hooks.
 	resolver := c.opts.Content.Resolver
+	var indexErr error
 	var index func(any, string)
 	index = func(value any, path string) {
 		switch v := value.(type) {
 		case map[string]any:
 			bare := event["type"] == "file.changed" && fileChangeReferencePath(path)
-			if contentItemPath(path) || bare {
+			if canonicalPartPath(event, path) || bare {
 				ref := compositionString(sdkObj(v["body"])["ref"])
 				if bare {
 					ref = compositionString(v["ref"])
+				}
+				if strings.HasPrefix(ref, "ahp:owned:") {
+					indexErr = errors.New("local attachment reference cannot reach wire")
+					return
 				}
 				if ref != "" && p.sources[path] == nil && resolver != nil {
 					owner := ownedcontent.NewLazyAttachment(func(ctx context.Context) (io.ReadCloser, error) {
@@ -120,6 +125,9 @@ func (c *Hooks) prepareBoundary(ctx context.Context, event, caps map[string]any,
 				return
 			}
 			for key, child := range v {
+				if key == "native" || key == "input" || key == "output" || key == "params" || key == "extensions" {
+					continue
+				}
 				index(child, path+"/"+strings.ReplaceAll(strings.ReplaceAll(key, "~", "~0"), "/", "~1"))
 			}
 		case []any:
@@ -129,10 +137,17 @@ func (c *Hooks) prepareBoundary(ctx context.Context, event, caps map[string]any,
 		}
 	}
 	index(event, "")
+	if indexErr != nil {
+		return nil, indexErr
+	}
 	if err := p.bound(); err != nil {
 		return nil, err
 	}
 	for target, binding := range cfg.targets {
+		if _, fixed := inlineTargetPath(event, target); fixed {
+			return nil, errors.New("canonical targets do not accept indexed host bindings")
+		}
+
 		grant := sdkObj(sdkObj(caps["modify"])[target])
 		if grant["replace"] != true && grant["merge"] != true {
 			return nil, errors.New("target binding has no modification grant")
@@ -147,6 +162,10 @@ func (c *Hooks) prepareBoundary(ctx context.Context, event, caps map[string]any,
 			continue
 		}
 		if target != compositionTargets[compositionString(event["type"])] {
+			continue
+		}
+		if path, ok := inlineTargetPath(event, target); ok {
+			p.slots[target] = []string{path}
 			continue
 		}
 		binding, explicit := cfg.targets[target]
@@ -207,7 +226,7 @@ func (c *Hooks) prepareBoundary(ctx context.Context, event, caps map[string]any,
 			field = "result"
 		}
 		item := sdkObj(sdkObj(event["elicitation"])[field])
-		if item["selection"] == "body" {
+		if item["selection"] == "body" && item["kind"] != "text" {
 			if err := p.resolve(ctx, c, "/elicitation/"+field, item); err != nil {
 				return nil, err
 			}
@@ -303,6 +322,22 @@ targets:
 		if target == "input" {
 			continue
 		}
+		if path, ok := inlineTargetPath(event, target); ok {
+			value := inlineAt(event, path)
+			if value == nil && (target == "instructions" || target == "summary") {
+				value = []any{}
+			}
+			if target == "content" && event["type"] == "user.elicitation.result" {
+				answer, err := selectedElicitation(sdkObj(event["elicitation"]), "result", nil)
+				if err != nil {
+					return nil, err
+				}
+				value = sdkObj(answer)["content"]
+			}
+			values[target] = contentClone(value)
+			continue
+		}
+
 		if target == "workspace" {
 			values[target] = contentClone(sdkObj(event["workspace"])["change"])
 			continue
@@ -346,6 +381,25 @@ targets:
 	return values, nil
 }
 func (p *preparedBoundary) apply(event map[string]any, target string, value any) error {
+	if path, ok := inlineTargetPath(event, target); ok {
+		if target == "content" && event["type"] == "user.elicitation.result" {
+			raw, err := json.Marshal(value)
+			if err != nil {
+				return err
+			}
+			item := preparedAt(event, path)
+			item["text"] = string(raw)
+			return nil
+		}
+		// Binary descriptors are immutable. A receiver may preserve existing owners,
+		// but cannot introduce or retarget attachment bytes through an edit.
+		if err := p.validateInlineAttachments(event, path, value); err != nil {
+			return err
+		}
+		inlineSet(event, path, contentClone(value))
+		return nil
+	}
+
 	if target == "workspace" {
 		sdkObj(event["workspace"])["change"] = value
 		return nil

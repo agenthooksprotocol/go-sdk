@@ -38,7 +38,7 @@ func (c *Hooks) projectContent(ctx context.Context, event map[string]any, subscr
 			return nil, errors.New("invalid content selection")
 		}
 	}
-	scope := ContentAuthorization{BackendID: backendID, Subscription: contentClone(subscription).(map[string]any)}
+	scope := ContentAuthorization{Operation: "read", BackendID: backendID, Subscription: contentClone(subscription).(map[string]any)}
 	scope.SubscriptionID, _ = subscription["id"].(string)
 	var project func(any, string) (any, error)
 	project = func(value any, path string) (any, error) {
@@ -50,7 +50,7 @@ func (c *Hooks) projectContent(ctx context.Context, event map[string]any, subscr
 			_, id := v["id"].(string)
 			_, kind := v["kind"].(string)
 			_, media := v["mediaType"].(string)
-			if contentItemPath(path) {
+			if canonicalPartPath(event, path) {
 				if !id || !kind || !media {
 					return nil, errors.New("malformed normalized content item")
 				}
@@ -92,7 +92,7 @@ func (c *Hooks) projectContent(ctx context.Context, event map[string]any, subscr
 					}
 					continue
 				}
-				if key == "native" || key == "input" || key == "output" {
+				if key == "native" || key == "input" || key == "output" || key == "params" || key == "extensions" {
 					if key == "native" && subscription["includeNative"] != true {
 						continue
 					}
@@ -149,14 +149,30 @@ func (c *Hooks) projectContent(ctx context.Context, event map[string]any, subscr
 func contentItemPath(path string) bool {
 	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
 	switch len(parts) {
-	case 1:
-		return parts[0] == "instructions" || parts[0] == "summary" || parts[0] == "partialOutput" || parts[0] == "delta"
 	case 2:
-		return parts[0] == "items" || (parts[0] == "elicitation" && (parts[1] == "request" || parts[1] == "result"))
+		return parts[0] == "items" || parts[0] == "instructions" || parts[0] == "summary" || (parts[0] == "elicitation" && (parts[1] == "request" || parts[1] == "result"))
 	case 3:
-		return (parts[0] == "attention" && (parts[1] == "title" || parts[1] == "message")) || (parts[0] == "message" && (parts[1] == "text" || parts[1] == "payload")) || (parts[0] == "fileChanges" && (parts[2] == "before" || parts[2] == "after"))
+		return (parts[0] == "attention" && (parts[1] == "title" || parts[1] == "message")) || (parts[0] == "fileChanges" && (parts[2] == "before" || parts[2] == "after")) || ((parts[0] == "delta" || parts[0] == "partialOutput") && parts[1] == "parts")
+	case 4:
+		return parts[0] == "items" && parts[2] == "parts"
+	case 5:
+		return parts[0] == "message" && parts[1] == "messages" && parts[3] == "parts"
 	}
 	return false
+}
+
+// Message containers are not parts; schema-owned ordered parts are projected separately.
+func canonicalPartPath(event map[string]any, path string) bool {
+	if !contentItemPath(path) {
+		return false
+	}
+	if strings.HasPrefix(path, "/items/") && strings.Count(path, "/") == 2 {
+		switch event["type"] {
+		case "session.start", "context.compact.before", "context.compact.after", "model.request.before", "model.response.after", "tool.after", "turn.start", "turn.finish.before":
+			return false
+		}
+	}
+	return true
 }
 
 func contentMode(s string) bool { return s == "body" || s == "metadata" || s == "omit" }
@@ -187,7 +203,7 @@ func (c *Hooks) projectContentItem(ctx context.Context, item, selection, subscri
 	out := map[string]any{}
 	// Only canonical descriptor fields survive. Payload permission flags, inline
 	// aliases and arbitrary duplicate bytes are never forwarded as metadata.
-	for _, key := range []string{"id", "kind", "mediaType", "role", "parentItemId", "category", "size", "sha256", "synthesized"} {
+	for _, key := range []string{"id", "kind", "mediaType", "category", "size", "sha256", "synthesized"} {
 		if v, ok := item[key]; ok {
 			out[key] = contentClone(v)
 		}
@@ -202,7 +218,9 @@ func (c *Hooks) projectContentItem(ctx context.Context, item, selection, subscri
 	}
 	scope.Item = contentClone(out).(map[string]any)
 	authorized := false
-	if c.opts.Content.AuthorizeContent != nil {
+	if preparing, _ := ctx.Value(uploadPreparationContextKey{}).(bool); preparing {
+		authorized = true
+	} else if c.opts.Content.AuthorizeContent != nil {
 		var err error
 		authorized, err = c.opts.Content.AuthorizeContent(ctx, scope)
 		if err != nil {
@@ -213,6 +231,18 @@ func (c *Hooks) projectContentItem(ctx context.Context, item, selection, subscri
 		out["gap"] = map[string]any{"reason": "withheld"}
 		return out, nil
 	}
+	if item["kind"] == "text" {
+		if text, ok := item["text"].(string); ok && item["selection"] == "body" {
+			out["text"] = text
+			delete(out, "size")
+			delete(out, "sha256")
+		} else if gap, ok := item["gap"]; ok {
+			out["gap"] = contentClone(gap)
+		} else {
+			out["gap"] = map[string]any{"reason": "unavailable"}
+		}
+		return out, nil
+	}
 	body, exists := item["body"]
 	if !exists || body == nil {
 		if gap, present := item["gap"]; present {
@@ -221,6 +251,20 @@ func (c *Hooks) projectContentItem(ctx context.Context, item, selection, subscri
 			out["gap"] = map[string]any{"reason": "unavailable"}
 		}
 		return out, nil
+	}
+	if preparing, _ := ctx.Value(uploadPreparationContextKey{}).(bool); !preparing {
+		if owner, ok := body.(*ContentSource); ok {
+			ref, planned, err := plannedUpload(ctx, owner)
+			if err != nil {
+				return nil, err
+			}
+			if planned {
+				out["body"] = map[string]any{"ref": ref}
+				delete(out, "size")
+				delete(out, "sha256")
+				return out, nil
+			}
+		}
 	}
 	upload, ok := subscription["upload"].(map[string]any)
 	if !ok {
@@ -389,6 +433,14 @@ func (c *Hooks) uploadContent(ctx context.Context, config map[string]any, raw []
 	backendID := ""
 	if len(backendIDs) > 0 {
 		backendID = backendIDs[0]
+	}
+	if c.uploads != nil {
+		select {
+		case c.uploads <- struct{}{}:
+			defer func() { <-c.uploads }()
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 	response, err := auth.Do(&client, request, auth.Request{Binding: binding, BackendID: backendID, Destination: endpoint, Purpose: auth.Upload}, c.opts.AuthProvider, false)
 	if err != nil {

@@ -7,7 +7,7 @@ import (
 
 func elicitationFixture(stage, mode, payload string) (map[string]any, map[string][]byte) {
 	raw := []byte(payload)
-	item := map[string]any{"id": "item", "kind": "data", "mediaType": "application/json", "selection": "body", "body": map[string]any{"ref": stage}}
+	item := map[string]any{"id": "item", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": payload}
 	meta := map[string]any{"server": "requester", "mode": mode, stage: item}
 	event := map[string]any{"type": "user.elicitation." + stage, "id": "request-id", "source": "urn:adapter", "session": map[string]any{"id": "session"}, "elicitation": meta}
 	if stage == "result" {
@@ -96,7 +96,7 @@ func TestElicitationSelectionAndPinnedRequestValidation(t *testing.T) {
 		event, _ := elicitationFixture("request", "form", elicitationForm)
 		meta := event["elicitation"].(map[string]any)
 		item := meta["request"].(map[string]any)
-		delete(item, "body")
+		delete(item, "text")
 		item["selection"] = selection
 		if selection == "absent" {
 			delete(meta, "request")
@@ -124,11 +124,11 @@ func TestElicitationSelectionAndPinnedRequestValidation(t *testing.T) {
 		}
 	}
 	event, _ := elicitationFixture("request", "form", elicitationForm)
+	item := event["elicitation"].(map[string]any)["request"].(map[string]any)
+	delete(item, "text")
 	if _, err := prepareElicitation(event, nil, nil); err == nil {
 		t.Fatal("missing bytes accepted")
 	}
-	item := event["elicitation"].(map[string]any)["request"].(map[string]any)
-	delete(item, "body")
 	item["gap"] = map[string]any{"reason": "unavailable"}
 	if _, err := prepareElicitation(event, nil, nil); err == nil {
 		t.Fatal("selected gap accepted")

@@ -32,6 +32,18 @@ func WithContentSource(path string, source *ContentSource) InterceptOption {
 	}
 }
 
+// withHostContentSource is the generated boundary's internal source collection.
+// A supplied wire descriptor never changes the exact owner selected for delivery.
+func withHostContentSource(path string, source *ContentSource) InterceptOption {
+	return func(cfg *interceptConfig) {
+		WithContentSource(path, source)(cfg)
+		if cfg.hostSources == nil {
+			cfg.hostSources = map[string]bool{}
+		}
+		cfg.hostSources[path] = true
+	}
+}
+
 func contentSourceConfig(options []InterceptOption) interceptConfig {
 	cfg := interceptConfig{claimedSources: map[*ContentSource]bool{}, transferredSources: map[*ContentSource]bool{}}
 	for _, option := range options {
@@ -55,8 +67,11 @@ func (cfg interceptConfig) bindSources(ctx context.Context, event map[string]any
 	seen := map[*ContentSource]bool{}
 	for path, source := range cfg.sources {
 		item := preparedAt(event, path)
-		if !contentItemPath(path) || item == nil {
+		if !canonicalPartPath(event, path) || item == nil {
 			return ctx, errors.New("content source requires an existing canonical content item")
+		}
+		if item["kind"] != "attachment" {
+			return ctx, errors.New("owned sources require immutable attachment parts")
 		}
 		if item["body"] != nil {
 			return ctx, errors.New("content source conflicts with an existing body reference")
@@ -76,32 +91,72 @@ func (cfg interceptConfig) bindSources(ctx context.Context, event map[string]any
 
 type contentSourceBudgetKey struct{}
 
-// One operation has a single bounded source cache, even during concurrent
-// observation fan-out. Each source consumes the shared budget only once.
+// One operation has a shared bounded owner budget, including concurrent
+// observation fan-out. Byte storage remains solely in each attachment owner.
 type contentSourceBudget struct {
-	mu   sync.Mutex
-	used int64
-	seen map[*ContentSource]bool
+	mu      sync.Mutex
+	used    int64
+	seen    map[*ContentSource]bool
+	pending *ContentSource
+	active  int
+	changed chan struct{}
 }
 
 func (b *contentSourceBudget) snapshot(ctx context.Context, source *ContentSource, limit, total int64) ([]byte, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return nil, err
+	// Different owners retain the aggregate admission order. Same-owner callers
+	// join its materializer instead of waiting behind a mutex held across I/O.
+	for {
+		b.mu.Lock()
+		if err := ctx.Err(); err != nil {
+			b.mu.Unlock()
+			return nil, err
+		}
+		// Confirmed owners are already charged once. Their immutable bytes
+		// do not compete with a different pending owner's admission.
+		if b.seen[source] {
+			b.mu.Unlock()
+			return ownedcontent.Borrow(source, ctx, limit)
+		}
+		if b.active == 0 || b.pending == source {
+			break
+		}
+		changed := b.changed
+		b.mu.Unlock()
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
+	if b.active == 0 {
+		b.pending = source
+		b.changed = make(chan struct{})
+	}
+	b.active++
 	if !b.seen[source] && total-b.used < limit {
 		limit = total - b.used
 	}
+	b.mu.Unlock()
 	raw, err := ownedcontent.Borrow(source, ctx, limit)
-	if err != nil {
-		return nil, err
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if err == nil && !b.seen[source] {
+		if int64(len(raw)) > total-b.used {
+			raw, err = nil, errors.New("content exceeds occurrence byte limit")
+		} else {
+			if b.seen == nil {
+				b.seen = map[*ContentSource]bool{}
+			}
+			b.seen[source] = true
+			b.used += int64(len(raw))
+		}
 	}
-	if !b.seen[source] {
-		b.seen[source] = true
-		b.used += int64(len(raw))
+	b.active--
+	if b.active == 0 {
+		b.pending = nil
+		close(b.changed)
 	}
-	return raw, nil
+	return raw, err
 }
 
 // forget removes accounting for an owner retired after an edit transaction.

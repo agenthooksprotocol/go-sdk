@@ -21,7 +21,7 @@ import (
 
 func schemaPath(t *testing.T) string {
 	t.Helper()
-	p, e := filepath.Abs("../../agent-hooks-protocol/schema/draft")
+	p, e := filepath.Abs(schemaFixtureDir())
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -29,7 +29,7 @@ func schemaPath(t *testing.T) string {
 }
 func fixturePath(t *testing.T, name string) string {
 	t.Helper()
-	p, e := filepath.Abs("../../agent-hooks-protocol/interop/fixtures/" + name)
+	p, e := filepath.Abs(interopFixturePath("fixtures/" + name))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -106,7 +106,7 @@ func TestValidationAndAtomic(t *testing.T) {
 	}
 }
 func TestSharedScenarios(t *testing.T) {
-	path := "../../agent-hooks-protocol/interop/scenarios.json"
+	path := interopFixturePath("scenarios.json")
 	if _, e := os.Stat(path); e != nil {
 		t.Skip("central scenarios not published yet")
 	}
@@ -196,7 +196,7 @@ func waitReady(t *testing.T, path string) Object {
 func transportScenarios(t *testing.T) []Scenario {
 	t.Helper()
 	all := testScenarios()
-	path := "../../agent-hooks-protocol/interop/scenarios.json"
+	path := interopFixturePath("scenarios.json")
 	if _, err := os.Stat(path); err == nil {
 		central, err := scenarios(path)
 		if err != nil {

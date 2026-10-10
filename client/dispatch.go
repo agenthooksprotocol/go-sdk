@@ -33,7 +33,7 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 	}); ok {
 		var bindings []InterceptOption
 		for path, source := range bound.AHPContentSources() {
-			bindings = append(bindings, WithContentSource(path, source))
+			bindings = append(bindings, withHostContentSource(path, source))
 		}
 		options = append(bindings, options...)
 	}
@@ -77,6 +77,15 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 	}
 	if event == nil {
 		return nil, errors.New("nil boundary input")
+	}
+	// Replace local pending descriptors before validation. Only generated schema-owned
+	// source slots are accepted; these private placeholders never reach a receiver.
+	for path := range cfg.sources {
+		item := preparedAt(event, path)
+		if item != nil && (sdkObj(item["body"])["ref"] == "ahp:owned:pending" || (cfg.hostSources[path] && item["body"] != nil)) {
+			delete(item, "body")
+			item["gap"] = map[string]any{"reason": "unavailable"}
+		}
 	}
 	for _, key := range []string{"source", "type", "manifest"} {
 		if _, ok := event[key]; ok {
@@ -124,7 +133,9 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 		}
 		if event["instructions"] == nil {
 			cfg.instructionsAbsent = true
-			event["instructions"], err = sdkMap(cfg.instructions)
+			var instruction map[string]any
+			instruction, err = sdkMap(cfg.instructions)
+			event["instructions"] = []any{instruction}
 			if err != nil {
 				return nil, err
 			}
@@ -158,9 +169,9 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 		}
 	}
 	if candidate := sdkObj(state["candidate"]); candidate != nil {
-		if name == "context.compact.before" {
-			if _, ok := candidate["value"].(string); !ok {
-				return nil, errors.New("compaction candidate summary must be text")
+		if name == "context.compact.before" || name == "model.request.before" {
+			if err := validateSuppliedValue(name, candidate["value"]); err != nil {
+				return nil, err
 			}
 		}
 		if name == "user.elicitation.request" && canonical.Validate("mcp-elicitation#result", sdkJSON(candidate["value"])) != nil {
@@ -194,6 +205,8 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 		}
 	}
 	ctx = context.WithValue(ctx, preparedContextKey{}, prepared)
+	uploads := c.planUploads(ctx, event, prepared)
+	ctx = context.WithValue(ctx, uploadPlanContextKey{}, uploads)
 	result := &Result{Response: ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: []*ahp.Effect{}}}
 	settled := state["permission"] == "deny" || state["flow"] == "stop"
 	pending := []observationDelivery{}
@@ -216,12 +229,32 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 			// Upload preparation has a separate receiver-configured deadline. The
 			// interception budget starts after preparation, never before it.
 			stage := "prepare"
-			projected, deliveryErr := c.projectContent(ctx, event, sub, backend.id)
+			receiver := uploadReceiver{backend.id, i}
+			deliveryCtx := context.WithValue(ctx, uploadReceiverContextKey{}, receiver)
+			deliveryErr := uploads.failure(receiver)
+			var projected map[string]any
+			if deliveryErr == nil {
+				projected, deliveryErr = c.projectContent(deliveryCtx, event, sub, backend.id)
+			}
+			var receiverState map[string]any
+			if deliveryErr == nil && statePresent {
+				receiverState, deliveryErr = c.projectReceiverState(deliveryCtx, event, state, sub, backend.id, prepared)
+			}
+
 			if deliveryErr == nil {
 				stage = "request"
 				params["event"] = projected
+				deliveryCaps := contentClone(caps).(map[string]any)
+				for target, rawGrant := range sdkObj(deliveryCaps["modify"]) {
+					if path, ok := inlineTargetPath(event, target); ok && inlineHasHiddenText(inlineAt(projected, path)) {
+						grant := sdkObj(rawGrant)
+						grant["replace"] = false
+					}
+				}
+				params["capabilities"] = deliveryCaps
 				if statePresent {
-					params["state"] = state
+
+					params["state"] = receiverState
 				} else {
 					delete(params, "state")
 				}
@@ -246,26 +279,35 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 							// Compose against the complete host event, not a subscriber's redacted
 							// projection. Projection is a delivery view, not an accepted mutation.
 							params["event"] = event
+							params["capabilities"] = caps
+							if statePresent {
+								params["state"] = state
+							}
 							full := ahp.ParseInterceptRequest(sdkJSON(request))
-							accepted, composeErr := composePrepared(full.Value, response.Value, prepared)
-							e = composeErr
-							if e == nil && callCtx.Err() != nil {
-								e = callCtx.Err()
-							}
-							if e == nil {
-								e = budget.reconcile(accepted.prepared.sources, accepted.prepared.limit)
-							}
-							if e == nil {
-								prepared = accepted.prepared
-								ctx = context.WithValue(ctx, preparedContextKey{}, prepared)
-								state, _ = sdkMap(accepted.State)
-								statePresent = true
-								if len(accepted.Event) > 0 {
-									event, _ = sdkMap(accepted.Event)
+							authorized, authErr := c.authorizeInlineEffects(callCtx, event, projected, sub, backend.id, response.Value)
+							if authErr != nil {
+								e = authErr
+							} else {
+								accepted, composeErr := composePrepared(full.Value, authorized, prepared)
+								e = composeErr
+								if e == nil && callCtx.Err() != nil {
+									e = callCtx.Err()
 								}
-								result.Response.Effects = append(result.Response.Effects, accepted.Response.Effects...)
+								if e == nil {
+									e = budget.reconcile(accepted.prepared.sources, accepted.prepared.limit)
+								}
+								if e == nil {
+									prepared = accepted.prepared
+									ctx = context.WithValue(ctx, preparedContextKey{}, prepared)
+									state, _ = sdkMap(accepted.State)
+									statePresent = true
+									if len(accepted.Event) > 0 {
+										event, _ = sdkMap(accepted.Event)
+									}
+									result.Response.Effects = append(result.Response.Effects, accepted.Response.Effects...)
+								}
+								prepared.releaseUnused(budget)
 							}
-							prepared.releaseUnused(budget)
 						}
 					}
 					done()

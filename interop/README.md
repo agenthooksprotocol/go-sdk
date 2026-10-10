@@ -110,3 +110,21 @@ and public test-only certificate fixtures. No shared scenarios are edited here.
 The lifecycle commands support `suite: "catalogue"` for authenticated Execution
 observations, source-local lineage rejection and registration enforcement against
 real discovery. See [CATALOGUE.md](CATALOGUE.md) for the wire and test contracts.
+
+### Coordinated draft validation
+
+Tests accept `AHP_INTEROP_FIXTURE_ROOT` (the canonical checkout's `interop`
+directory) and `AHP_SCHEMA_DIR` (its `schema/draft` directory). For example,
+from this SDK worktree:
+
+```sh
+AHP_INTEROP_FIXTURE_ROOT="$PWD/../canonical-inline-messages/interop" \
+AHP_SCHEMA_DIR="$PWD/../canonical-inline-messages/schema/draft" \
+go test ./interop -timeout 120s
+```
+
+Compaction instructions and summaries are ordered inline text-part arrays.
+Elicitation request/result objects are JSON serialized into inline text parts;
+these exchanges do not resolve references or upload text. Compaction snapshots
+are detached values, not a reference-to-byte cache. Binary upload receiver
+storage remains separate from client runtime content.

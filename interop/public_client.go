@@ -146,7 +146,20 @@ func PublicBoundary(ctx context.Context, request Object, exchange func(context.C
 func jsonBytes(value any) []byte { data, _ := json.Marshal(value); return data }
 
 func publicIntercept(ctx context.Context, request Object, exchange exchange) (Object, bool, error) {
-	response, received, err := PublicBoundary(ctx, request, exchange)
+	// Transport fixtures with context injection support explicitly grant text
+	// body selection for new messages, even when the incoming event has no text.
+	// Preserve every existing category selection, including metadata/omit.
+	params := obj(request["params"])
+	selection, err := fixtureContentSelection(obj(params["event"]))
+	if err != nil {
+		return nil, false, err
+	}
+	if obj(obj(obj(params["capabilities"])["inject"])["context"])["append"] == true {
+		if _, selected := selection["text"]; !selected {
+			selection["text"] = "body"
+		}
+	}
+	response, received, err := PublicBoundary(ctx, request, exchange, PublicBoundaryOptions{ContentSelection: selection})
 	if err != nil {
 		return nil, received, err
 	}

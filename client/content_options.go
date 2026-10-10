@@ -14,6 +14,7 @@ type ContentResolver func(context.Context, string) (io.ReadCloser, error)
 // ContentAuthorization identifies the local receiving backend and subscription.
 // Item is a copy of the descriptor, not an authorization claim from the payload.
 type ContentAuthorization struct {
+	Operation      string // "read" for disclosure; "write" for new or changed inline text.
 	BackendID      string
 	SubscriptionID string
 	Subscription   map[string]any
@@ -25,7 +26,7 @@ type ContentAuthorization struct {
 type ContentOptions struct {
 	Resolver         ContentResolver
 	AuthorizeContent func(context.Context, ContentAuthorization) (bool, error)
-	// ProjectOpaque explicitly projects duplicate bytes in native/input/output and
+	// ProjectOpaque explicitly projects duplicate bytes in native/input/output/params/extensions and
 	// other host-defined opaque fields. Native is considered only when includeNative
 	// is true. A nil callback withholds opaque fields. It must return a safe view;
 	// the SDK cannot discover embedded secrets in arbitrary application JSON.

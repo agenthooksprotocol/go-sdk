@@ -49,7 +49,7 @@ func TestSharedRequestEventConsumer(t *testing.T) {
 		}
 		return raw
 	}
-	event := `{"id":"event","source":"urn:test:host","time":"2026-09-15T12:00:00Z","type":"user.message.inbound","session":{"id":"session"},"message":{"channel":"chat","sender":"user","text":[{"id":"item","kind":"text","mediaType":"text/plain","role":"user","selection":"body","body":{"ref":"opaque"}}]}}`
+	event := `{"id":"event","source":"urn:test:host","time":"2026-09-15T12:00:00Z","type":"user.message.inbound","session":{"id":"session"},"message":{"channel":"chat","sender":"user","messages":[{"id":"message-1","role":"user","parts":[{"id":"item","kind":"attachment","mediaType":"application/pdf","selection":"body","body":{"ref":"opaque"}}]}]}}`
 	intercept := func(event string) []byte {
 		return []byte(`{"jsonrpc":"2.0","id":"event","method":"hooks/intercept","params":{"protocolVersion":"draft","event":` + event + `,"capabilities":{"effects":[]}}}`)
 	}

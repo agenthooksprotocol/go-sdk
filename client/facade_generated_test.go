@@ -37,3 +37,26 @@ func compileGeneratedFacadeExample(ctx context.Context, opts Options) {
 	}
 	var _ arguments = result.Input
 }
+
+// Owned content uses the same typed hook methods as wire-only host inputs.
+func compileOwnedAttachmentHostExample(ctx context.Context, hooks *Hooks, source *content.Source) {
+	messages := []*event.ModelVisibleItemInput{{
+		ModelVisibleItem: ahp.ModelVisibleItem{Role: "user"},
+		Parts: []*event.ContentPartInput{
+			{Text: &ahp.TextBodyPart{Text: "inspect this image"}},
+			{Attachment: &event.AttachmentBodyInput{
+				AttachmentBodyPart: ahp.AttachmentBodyPart{MediaType: "image/png", Category: ahp.Some("image")},
+				Body:               source,
+			}},
+		},
+	}}
+	_, _ = hooks.ContextCompactBefore(ctx, event.ContextCompactBeforeInput{ItemsHost: &messages})
+	parts := messages[0].Parts
+	type arguments struct{ Count int }
+	result, _ := hooks.ToolBefore(ctx, event.ToolBeforeInput[arguments]{
+		Name: "inspect", Origin: "native", CallID: "call", Path: "/inspect", Input: arguments{Count: 1}, ItemsHost: &parts,
+	})
+	if result != nil {
+		var _ arguments = result.Input
+	}
+}

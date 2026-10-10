@@ -74,9 +74,9 @@ func TestCompositionAtomicRejection(t *testing.T) {
 	req := compositionTestRequest(t)
 	original, _ := ahp.EncodeInterceptRequest(req)
 	for _, effects := range []string{
-		`[{"type":"deny","reason":"no"},{"type":"modify","target":"input","operation":"replace","value":null}]`,
+		`[{"type":"deny","reason":"no"},{"type":"modify","target":"workspace","operation":"replace","value":{}}]`,
 		`[{"type":"message","text":"never published"},{"type":"modify","target":"output","operation":"replace","value":{}}]`,
-		`[{"type":"inject","target":"context","operation":"append","deliverAt":"now","value":"never queued"},{"type":"flow","operation":"continue"}]`,
+		`[{"type":"inject","target":"context","operation":"append","deliverAt":"now","value":[{"id":"never-queued","role":"system","parts":[{"id":"text","kind":"text","mediaType":"text/plain","selection":"body","text":"never queued"}]}]},{"type":"flow","operation":"continue"}]`,
 	} {
 		c, err := compose(req, compositionTestResponse(t, effects))
 		if err == nil || c != nil {
@@ -162,7 +162,7 @@ func TestCompositionFlowAndInjectionQueues(t *testing.T) {
 		t.Fatal("exhausted continuation accepted")
 	}
 	req = compositionTestRequest(t)
-	c, err = compose(req, compositionTestResponse(t, `[{"type":"inject","target":"context","operation":"append","deliverAt":"now","value":"one"},{"type":"inject","target":"context","operation":"append","deliverAt":"next_turn","value":"two"}]`))
+	c, err = compose(req, compositionTestResponse(t, `[{"type":"inject","target":"context","operation":"append","deliverAt":"now","value":[{"id":"one","role":"system","parts":[{"id":"text","kind":"text","mediaType":"text/plain","selection":"body","text":"one"}]}]},{"type":"inject","target":"context","operation":"append","deliverAt":"next_turn","value":[{"id":"two","role":"system","parts":[{"id":"text","kind":"text","mediaType":"text/plain","selection":"body","text":"two"}]}]}]`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,12 +218,11 @@ func TestCompositionDescriptorBoundariesSerial(t *testing.T) {
 		{"context.compact.after", "summary"},
 	} {
 		t.Run(tc.target, func(t *testing.T) {
-			event := map[string]any{"id": "test", "source": "urn:test", "type": tc.event, "time": "2026-01-01T00:00:00Z", tc.target: compositionDescriptor()}
+			event := map[string]any{"id": "test", "source": "urn:test", "type": tc.event, "time": "2026-01-01T00:00:00Z", tc.target: []any{compositionDescriptor()}}
 			if tc.event == "context.compact.before" {
 				event["trigger"] = "manual"
 				event["items"] = []any{}
 			} else {
-				compositionMap(event[tc.target])["role"] = "assistant"
 				event["removed"] = []any{}
 				event["execution"] = map[string]any{"status": "executed"}
 			}
@@ -247,11 +246,12 @@ func TestCompositionDescriptorBoundariesSerial(t *testing.T) {
 			unsupported := compositionBoundaryRequest(t, compositionObject(second.Event), caps)
 			var admission *CapabilityAdmissionError
 			if err := validateInitial(unsupported); !errors.As(err, &admission) || admission.Target != tc.target || admission.Effect != "modify" {
-				t.Fatalf("expected typed admission rejection, got %v", err)
+				t.Fatalf("expected protocol-only admission rejection, got %v", err)
 			}
-			if c, err := compose(unsupported, compositionTestResponse(t, `[{"type":"modify","target":"`+tc.target+`","operation":"replace","value":"raw new body"}]`)); !errors.As(err, &admission) || c != nil {
-				t.Fatal("unpublishable mutation accepted", c, err)
+			if c, err := compose(unsupported, compositionTestResponse(t, `[{"type":"modify","target":"`+tc.target+`","operation":"replace","value":[{"id":"new","kind":"text","mediaType":"text/plain","selection":"body","text":"new body"}]}]`)); !errors.As(err, &admission) || c != nil {
+				t.Fatal("unprepared mutation accepted", c, err)
 			}
+
 		})
 	}
 }
@@ -285,7 +285,6 @@ func TestCompositionElicitationReturnRequiresRequestBodyCorrelation(t *testing.T
 	for _, mode := range []string{"form", "url"} {
 		t.Run(mode, func(t *testing.T) {
 			descriptor := compositionDescriptor()
-			descriptor["mediaType"] = "application/json"
 			event := map[string]any{"id": "test", "source": "urn:test", "type": "user.elicitation.request", "time": "2026-01-01T00:00:00Z", "elicitation": map[string]any{"server": "requester", "mode": mode, "request": descriptor}}
 			caps := map[string]any{"effects": []any{"return", "deny", "message"}, "elicitation": map[string]any{mode: map[string]any{}}}
 			req := compositionBoundaryRequest(t, event, caps)
@@ -319,7 +318,6 @@ func TestCompositionElicitationReturnRequiresRequestBodyCorrelation(t *testing.T
 func TestCompositionElicitationResultMutationRequiresExchange(t *testing.T) {
 	for _, mode := range []string{"form", "url"} {
 		descriptor := compositionDescriptor()
-		descriptor["mediaType"] = "application/json"
 		event := map[string]any{"id": "test", "source": "urn:test", "type": "user.elicitation.result", "time": "2026-01-01T00:00:00Z", "parentEventId": "original-request", "elicitation": map[string]any{"server": "requester", "mode": mode, "action": "accept", "result": descriptor}}
 		caps := map[string]any{"effects": []any{"modify"}, "modify": map[string]any{"content": map[string]any{"replace": true, "merge": true}}, "elicitation": map[string]any{mode: map[string]any{}}}
 		req := compositionBoundaryRequest(t, event, caps)

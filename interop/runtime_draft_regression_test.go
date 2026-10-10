@@ -135,12 +135,12 @@ func TestRuntimeDraftCatalogueReceipt(t *testing.T) {
 func TestRuntimeDraftCompactionRejectsUnknownEffectFields(t *testing.T) {
 	hook := CompactionHook{Supplier: "local", FailurePolicy: "fail-open", Run: func(Object) ([]Object, error) {
 		return []Object{
-			{"type": "modify", "target": "instructions", "operation": "replace", "value": "must not commit"},
+			{"type": "modify", "target": "instructions", "operation": "replace", "value": textParts("must not commit")},
 			{"type": "message", "text": "must not commit", "future": true},
 		}, nil
 	}}
 	state, err := RunCompaction("original", "summary", []CompactionHook{hook}, nil, nil, false)
-	if err != nil || state["instructions"] != "original" || len(array(state["messages"])) != 0 || len(array(state["failures"])) != 1 {
+	if err != nil || partsText(state["instructions"]) != "original" || len(array(state["messages"])) != 0 || len(array(state["failures"])) != 1 {
 		t.Fatal(state, err)
 	}
 }

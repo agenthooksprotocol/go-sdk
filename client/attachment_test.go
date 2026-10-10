@@ -29,7 +29,7 @@ func TestOwnedAttachmentsTypedLifetime(t *testing.T) {
 				return io.NopCloser(strings.NewReader("file bytes")), nil
 			}, func() error { closes++; return nil })
 			var item ahp.ContentItem
-			if err := item.UnmarshalJSON([]byte(`{"id":"report","kind":"file","mediaType":"application/octet-stream","selection":"metadata"}`)); err != nil {
+			if err := item.UnmarshalJSON([]byte(`{"id":"report","kind":"attachment","mediaType":"application/octet-stream","selection":"metadata"}`)); err != nil {
 				t.Fatal(err)
 			}
 			result, err := c.ToolBefore(context.Background(), event.ToolBeforeInput[map[string]any]{
@@ -320,7 +320,8 @@ func TestMetadataEagerOwnerCountsAgainstSelectedLazyUpload(t *testing.T) {
 	first := contentTestItem(nil)
 	delete(first, "body")
 	first["selection"] = "metadata"
-	second := map[string]any{"id": "file", "kind": "file", "mediaType": "application/octet-stream", "category": "files", "selection": "metadata"}
+	first["category"] = "text"
+	second := map[string]any{"id": "file", "kind": "attachment", "mediaType": "application/octet-stream", "category": "files", "selection": "metadata"}
 	input := testInput()
 	input["items"] = []any{first, second}
 	result, err := c.Dispatch(context.Background(), "tool.before", input, WithContentSource("/items/0", a), WithContentSource("/items/1", b))

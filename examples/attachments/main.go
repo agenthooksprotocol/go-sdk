@@ -29,22 +29,34 @@ func run(registrationPath, filePath string) error {
 	if err != nil {
 		return err
 	}
-	hooks, err := client.New(registration, client.Options{Source: "urn:example:document-review", Events: map[string]client.EventCapabilities{"tool.before": caps}, MaxContentBytes: 8 << 20})
+	hooks, err := client.New(registration, client.Options{Source: "urn:example:document-review", Events: map[string]client.EventCapabilities{"model.request.before": caps}, MaxContentBytes: 8 << 20, MaxConcurrentUploads: 8})
 	if err != nil {
 		return err
 	}
 	defer hooks.Close()
-	// No file is opened for metadata-only selection. The factory owns its reader.
+	// No file is opened without authorized attachment-body demand. The factory
+	// owns its reader. Matched uploads finish before the first interceptor;
+	// MaxConcurrentUploads caps transfers across calls on this Hooks instance.
 	attachment := content.NewLazyAttachment(func(ctx context.Context) (io.ReadCloser, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		return os.Open(filePath)
 	}, nil)
-	item := &ahp.ContentItem{Metadata: ahp.Some(ahp.ContentItemMetadata{ID: "report", Kind: "file", MediaType: "application/pdf", Selection: "metadata"})}
-	result, err := hooks.ToolBefore(context.Background(), event.ToolBeforeInput[map[string]string]{
-		CallID: "review-1", Path: "execute", Name: "review_document", Origin: ahp.ExecutionEventToolOriginNative,
-		Input: map[string]string{"path": filePath}, Items: ahp.Some([]*ahp.ContentItem{item}), ItemsSources: []*content.Source{attachment},
+	messages := []*event.ModelVisibleItemInput{{
+		ModelVisibleItem: ahp.ModelVisibleItem{ID: "review-1", Role: ahp.ModelVisibleItemRoleUser},
+		Parts: []*event.ContentPartInput{
+			{Text: &ahp.TextBodyPart{ID: "request-text", Text: "Review this report."}},
+			{Attachment: &event.AttachmentBodyInput{
+				AttachmentBodyPart: ahp.AttachmentBodyPart{ID: "report", MediaType: "application/pdf"},
+				Body:               attachment,
+			}},
+		},
+	}}
+	result, err := hooks.ModelRequestBefore(context.Background(), event.ModelRequestBeforeInput{
+		Attempt:   &ahp.ExecutionEventAttempt{ID: "attempt-1", Number: json.Number("1")},
+		Model:     &ahp.ExecutionEventModel{ID: "model-1", Provider: "example"},
+		ItemsHost: &messages,
 	})
 	if result != nil {
 		defer result.Close()
@@ -55,7 +67,7 @@ func run(registrationPath, filePath string) error {
 	if err = hooks.Close(); err != nil {
 		return err
 	}
-	body, err := result.ReadContent(context.Background(), "/items/0")
+	body, err := result.ReadContent(context.Background(), "/items/0/parts/1")
 	if err != nil {
 		return err
 	}

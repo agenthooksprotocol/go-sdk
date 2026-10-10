@@ -28,6 +28,16 @@ func catalogueManifest() Object {
 type catalogueRejection struct{ kind string }
 
 func (e catalogueRejection) Error() string { return "catalogue " + e.kind + " rejection" }
+
+// validateCatalogueObserve validates the complete canonical event. Event items
+// are messages with ordered parts, not standalone attachment content items.
+func validateCatalogueObserve(v *lifecycleValidator, message Object) error {
+	if !ahp.ParseObserveNotification(jsonBytes(message)).OK {
+		return fmt.Errorf("generated observe codec rejected notification")
+	}
+	return v.observe.Validate(message)
+}
+
 func (s *lifecycleReceiver) catalogueDispatch(m Object) (Object, error) {
 	if m["method"] == "hooks/capabilities" {
 		if e := s.validator.validate("capabilities-request", m); e != nil {
@@ -52,7 +62,7 @@ func (s *lifecycleReceiver) catalogueDispatch(m Object) (Object, error) {
 		s.record(Object{"kind": "rejected", "eventId": event["id"], "message": clone(m), "errorKind": kind})
 		return nil, catalogueRejection{kind}
 	}
-	if e := s.validator.validate("observe", m); e != nil {
+	if e := validateCatalogueObserve(s.validator, m); e != nil {
 		return reject("schema")
 	}
 	// Content access is receiver policy, never a payload correlation claim.
@@ -121,7 +131,7 @@ func catalogueClient(ctx context.Context, c LifecycleConfig, v *lifecycleValidat
 				delete(obj(m["params"]), "subscriptionId")
 				event := obj(obj(m["params"])["event"])
 				if step["op"] == "notify" {
-					if e := v.validate("observe", m); e != nil {
+					if e := validateCatalogueObserve(v, m); e != nil {
 						return e
 					}
 					if e := checkContent(event, "", nil); e != nil {
