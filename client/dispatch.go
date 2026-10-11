@@ -211,7 +211,7 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 	ctx = context.WithValue(ctx, preparedContextKey{}, prepared)
 	uploads := c.planUploads(ctx, event, prepared)
 	ctx = context.WithValue(ctx, uploadPlanContextKey{}, uploads)
-	result := &Result{Response: ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: ahp.Some([]*ahp.Effect{})}}
+	result := &Result{AcceptedResponses: []ahp.ContextualResponse{}, Response: ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: ahp.Some([]*ahp.Effect{})}}
 	settled := state["permission"] == "deny" || state["flow"] == "stop"
 	pending := []observationDelivery{}
 	for _, backend := range c.backends {
@@ -310,6 +310,8 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 										event, _ = sdkMap(accepted.Event)
 									}
 									result.Response.Effects.Value = append(result.Response.Effects.Value, accepted.Response.Effects.Value...)
+									result.AcceptedResponses = append(result.AcceptedResponses, contextual.Value)
+									result.AcceptedResponse = contextual.Value
 								}
 								prepared.releaseUnused(budget)
 							}
@@ -346,6 +348,9 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 	}
 	if err = json.Unmarshal(sdkJSON(state), &result.State); err != nil {
 		return nil, err
+	}
+	if err := result.decodeSettlement(name); err != nil {
+		return result, err
 	}
 	result.Permission = result.State.Permission
 	result.Diagnostics = append([]DeliveryError(nil), result.Errors...)

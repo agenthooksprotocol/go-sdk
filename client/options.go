@@ -146,7 +146,8 @@ func sdkNarrow(base, next any) bool {
 }
 
 // DecodeError means protocol acceptance succeeded but the effective input cannot
-// be represented by the application's type. The returned Result remains usable.
+// be represented by the application's type. The returned Result retains accepted
+// settlement for audit; Interrupted gates execution and Permission is not a grant.
 type DecodeError struct{ Err error }
 
 func (e *DecodeError) Error() string {
@@ -167,6 +168,10 @@ func decodeToolBefore[T any](result *Result, err error) (*ToolBeforeResult[T], e
 	out := &ToolBeforeResult[T]{Result: result}
 	var input T
 	if e := json.Unmarshal(result.EffectiveInput, &input); e != nil {
+		// Accepted wire settlement is retained, but cannot authorize native
+		// execution with an unavailable application input.
+		result.Interrupted = true
+		result.Permission = "none"
 		return out, errors.Join(err, &DecodeError{Err: e})
 	}
 	out.Input = input
