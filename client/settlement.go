@@ -26,7 +26,7 @@ type SettledCandidate struct {
 
 // decodeSettlement validates all schema-owned projections before publishing any
 // of them. Raw reducer output remains separate from the consumer facade.
-func (r *Result) decodeSettlement(name string, interceptable bool) (err error) {
+func (r *Result) decodeSettlement(name string) (err error) {
 	defer func() {
 		if err != nil {
 			// Keep raw accepted settlement, but never expose partial typed views or
@@ -34,7 +34,6 @@ func (r *Result) decodeSettlement(name string, interceptable bool) (err error) {
 			r.Interrupted = true
 			r.Permission = "none"
 			r.SettledEvent = nil
-			r.AcceptedResponse = nil
 			r.SettledCandidate = ahp.Null[SettledCandidate]()
 		}
 	}()
@@ -42,17 +41,9 @@ func (r *Result) decodeSettlement(name string, interceptable bool) (err error) {
 	if !event.OK {
 		return &SettlementDecodeError{Err: fmt.Errorf("invalid settled event")}
 	}
-	kind, id, err := eventIdentity(&event.Value)
+	kind, _, err := eventIdentity(&event.Value)
 	if err != nil || kind != name {
 		return &SettlementDecodeError{Err: fmt.Errorf("settled event identity mismatch")}
-	}
-	var response ahp.ContextualResponse
-	if interceptable {
-		parsed := ahp.ResponseForRequest(name, sdkJSON(map[string]any{"jsonrpc": "2.0", "id": id, "result": r.Response}))
-		if !parsed.OK {
-			return &SettlementDecodeError{Err: fmt.Errorf("invalid accepted response")}
-		}
-		response = parsed.Value
 	}
 	candidate := ahp.Null[SettledCandidate]()
 	if r.State.Candidate.Valid {
@@ -83,7 +74,6 @@ func (r *Result) decodeSettlement(name string, interceptable bool) (err error) {
 		candidate = ahp.NonNull(value)
 	}
 	r.SettledEvent = &event.Value
-	r.AcceptedResponse = response
 	r.SettledCandidate = candidate
 	return nil
 }

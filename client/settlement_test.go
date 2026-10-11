@@ -4,11 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
 
 	ahp "github.com/agenthooksprotocol/go-sdk"
 	"github.com/agenthooksprotocol/go-sdk/event"
 	"github.com/agenthooksprotocol/go-sdk/internal/canonical"
+	"github.com/agenthooksprotocol/go-sdk/transport"
 )
 
 // These assignments are compiler regressions: callers need no schema-owned JSON
@@ -97,7 +102,7 @@ func TestTypedSettlementCandidateNullAndExtras(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.State.Candidate = ahp.NonNull(candidate)
-	if err := r.decodeSettlement("tool.before", true); err != nil {
+	if err := r.decodeSettlement("tool.before"); err != nil {
 		t.Fatal(err)
 	}
 	if !r.SettledCandidate.Valid || string(r.SettledCandidate.Value.Opaque.Value) != "null" {
@@ -108,13 +113,13 @@ func TestTypedSettlementCandidateNullAndExtras(t *testing.T) {
 		t.Fatal("candidate extras/provenance lost")
 	}
 	r.State.Candidate = ahp.Null[ahp.InterceptRequestParamsStateCandidateValue]()
-	if err := r.decodeSettlement("tool.before", true); err != nil || r.SettledCandidate.Valid {
+	if err := r.decodeSettlement("tool.before"); err != nil || r.SettledCandidate.Valid {
 		t.Fatal("absent candidate became present", err)
 	}
 }
 
 func TestTypedSettlementInvalidFailsAtomically(t *testing.T) {
-	for _, kind := range []string{"event", "identity", "response", "candidate"} {
+	for _, kind := range []string{"event", "identity", "candidate"} {
 		t.Run(kind, func(t *testing.T) {
 			r := settlementFixture(t)
 			name := "tool.before"
@@ -123,15 +128,13 @@ func TestTypedSettlementInvalidFailsAtomically(t *testing.T) {
 				r.Event = json.RawMessage(`{"type":"unknown.future"}`)
 			case "identity":
 				name = "tool.after"
-			case "response":
-				r.Response.Effects.Value = []*ahp.Effect{{}}
 			case "candidate":
 				name = "model.request.before"
 				r.Event = sdkJSON(targetTestCanonicalEvent(t, name, []any{}))
 				r.State.Candidate = ahp.NonNull(ahp.InterceptRequestParamsStateCandidateValue{Value: json.RawMessage(`42`)})
 			}
 			r.Permission = "allow"
-			err := r.decodeSettlement(name, true)
+			err := r.decodeSettlement(name)
 			var decode *SettlementDecodeError
 			if !errors.As(err, &decode) {
 				t.Fatalf("expected decode error: %v", err)
@@ -167,7 +170,7 @@ func TestTypedSettlementOtherCandidateOrigins(t *testing.T) {
 				t.Fatal(err)
 			}
 			r.State.Candidate = ahp.NonNull(raw)
-			if err := r.decodeSettlement(kind, true); err != nil {
+			if err := r.decodeSettlement(kind); err != nil {
 				t.Fatal(err)
 			}
 			var envelope any
@@ -210,5 +213,85 @@ func TestTypedSettlementNamedModelRequest(t *testing.T) {
 	}
 	if _, ok := result.AcceptedResponse.(*ahp.ModelRequestBeforeInterceptResponse); !ok {
 		t.Fatal("named consumer response lost context")
+	}
+}
+
+func TestAcceptedReceiverEnvelopesHTTP(t *testing.T) {
+	for _, accept := range []bool{true, false} {
+		t.Run(fmt.Sprintf("accept=%t", accept), func(t *testing.T) {
+			c, _ := testClient(t, "fail-open", "fail-open", "fail-open", "fail-open")
+			setDispatchBoundary(c, "tool.before", map[string]any{"effects": []any{"return", "message"}})
+			originals := []map[string]any{}
+			var originalsMu sync.Mutex
+			for i := range c.backends {
+				endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+					var request map[string]any
+					if err := json.NewDecoder(req.Body).Decode(&request); err != nil {
+						t.Error(err)
+						return
+					}
+					if request["method"] != "hooks/intercept" {
+						w.WriteHeader(http.StatusNoContent)
+						return
+					}
+					effects := []any{map[string]any{"type": "return", "value": map[string]any{"receiver": i}}}
+					if i == 1 || (!accept && (i == 0 || i == 3)) {
+						effects = []any{map[string]any{"type": "unknown.invalid"}}
+					}
+					if i == 2 {
+						effects = []any{map[string]any{"type": "modify", "target": "input", "operation": "replace", "value": map[string]any{"unauthorized": true}}}
+					}
+					response := map[string]any{
+						"jsonrpc": "2.0", "id": request["id"],
+						"receiverExtra": map[string]any{"receiver": i, "exact": json.Number("9007199254740993"), "null": nil},
+						"result":        map[string]any{"protocolVersion": "draft", "effects": effects, "provenance": map[string]any{"receiver": i}, "resultExtra": []any{i, nil}},
+					}
+					if accept && (i == 0 || i == 3) {
+						originalsMu.Lock()
+						originals = append(originals, compositionObject(sdkJSON(response)))
+						originalsMu.Unlock()
+					}
+					w.Header().Set("Content-Type", "application/json")
+					if err := json.NewEncoder(w).Encode(response); err != nil {
+						t.Error(err)
+					}
+				}))
+				t.Cleanup(endpoint.Close)
+				tr, err := newBackendTransport(&ahp.Backend{Transport: transport.NewHttp(endpoint.URL)}, endpoint.Client())
+				if err != nil {
+					t.Fatal(err)
+				}
+				c.backends[i].transport = tr
+			}
+			result, err := c.ToolBefore(context.Background(), event.ToolBeforeInput[map[string]any]{CallID: "call", Path: "execute", Name: "task", Origin: "native", Input: map[string]any{"count": 1}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer result.Close()
+			if !accept {
+				if result.AcceptedResponses == nil || len(result.AcceptedResponses) != 0 || result.AcceptedResponse != nil {
+					t.Fatal("fabricated accepted response")
+				}
+				if len(result.Errors) != 4 {
+					t.Fatalf("expected all responses rejected: %v", result.Errors)
+				}
+				return
+			}
+			if len(result.Errors) != 2 || len(result.AcceptedResponses) != 2 || len(result.Response.Effects.Value) != 2 {
+				t.Fatalf("acceptance counts: responses=%d errors=%d", len(result.AcceptedResponses), len(result.Errors))
+			}
+			originalsMu.Lock()
+			defer originalsMu.Unlock()
+			for i, accepted := range result.AcceptedResponses {
+				var envelope *ahp.ToolBeforeInterceptResponse = accepted.(*ahp.ToolBeforeInterceptResponse)
+				encoded := compositionObject(sdkJSON(envelope))
+				if !contractPreserves(originals[i], encoded) || !contractPreserves(encoded, originals[i]) {
+					t.Fatalf("receiver envelope %d lost extras, provenance, identity, or order", i)
+				}
+			}
+			if result.AcceptedResponse != result.AcceptedResponses[1] {
+				t.Fatal("last response alias is not a receiver envelope")
+			}
+		})
 	}
 }

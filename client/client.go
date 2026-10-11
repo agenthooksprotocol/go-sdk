@@ -100,8 +100,11 @@ type Result struct {
 	Event          json.RawMessage
 	EffectiveInput json.RawMessage
 	SettledEvent   *ahp.Event
-	// AcceptedResponse retains contextual effect payloads and complete injection
-	// envelopes. It is nil for observe-only boundaries.
+	// AcceptedResponses retains complete receiver envelopes in atomic acceptance
+	// order, including envelope/result extras. Response is the composed effect
+	// aggregate, not a receiver response. The list is empty when none are accepted.
+	AcceptedResponses []ahp.ContextualResponse
+	// AcceptedResponse is the last accepted receiver envelope, or nil if none.
 	AcceptedResponse ahp.ContextualResponse
 	// SettledCandidate distinguishes no candidate from an opaque candidate whose
 	// value is JSON null. Schema-owned values are decoded using event context.
