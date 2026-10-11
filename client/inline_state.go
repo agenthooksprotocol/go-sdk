@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/agenthooksprotocol/go-sdk/content"
 
 	ahp "github.com/agenthooksprotocol/go-sdk"
 )
@@ -23,10 +24,10 @@ func (c *Hooks) projectReceiverState(ctx context.Context, event, state, sub map[
 		}
 		wrapper := map[string]any{field: compositionValue(value)}
 		indexed := prepared.clone()
-		indexed.sources = map[string]*ContentSource{}
+		indexed.sources = map[string]*content.Source{}
 		if messages, ok := value.(*ahp.CanonicalMessages); ok {
 			for nextPath, part := range canonicalAttachments(messages, "/"+field) {
-				var owner *ContentSource
+				var owner *content.Source
 				for oldPath, source := range prepared.sources {
 					if wireEqual(part, preparedAt(event, oldPath)) {
 						if owner != nil && owner != source {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/agenthooksprotocol/go-sdk/content"
 	"io"
 	"math"
 	"mime"
@@ -19,8 +20,8 @@ import (
 // indexes only; byte storage lives exclusively inside the referenced owners.
 type preparedBoundary struct {
 	declared *declaredContracts
-	sources  map[string]*ContentSource
-	owned    map[*ContentSource]bool
+	sources  map[string]*content.Source
+	owned    map[*content.Source]bool
 	slots    map[string][]string
 	limit    int64
 	snapshot *ElicitationRequest
@@ -30,7 +31,7 @@ type preparedBoundary struct {
 type preparedContextKey struct{}
 
 func (p *preparedBoundary) clone() *preparedBoundary {
-	q := &preparedBoundary{declared: p.declared, sources: map[string]*ContentSource{}, owned: p.owned, slots: map[string][]string{}, limit: p.limit, snapshot: p.snapshot, bindings: map[string]ModificationTarget{}, absent: map[string]bool{}}
+	q := &preparedBoundary{declared: p.declared, sources: map[string]*content.Source{}, owned: p.owned, slots: map[string][]string{}, limit: p.limit, snapshot: p.snapshot, bindings: map[string]ModificationTarget{}, absent: map[string]bool{}}
 	for k, v := range p.absent {
 		q.absent[k] = v
 	}
@@ -78,7 +79,7 @@ func preparedItemPaths(event map[string]any, target string) ([]string, error) {
 	return nil, errors.New("ambiguous native target requires WithModificationTarget")
 }
 func (c *Hooks) prepareBoundary(ctx context.Context, event, caps map[string]any, cfg interceptConfig) (_ *preparedBoundary, err error) {
-	p := &preparedBoundary{declared: cfg.declared, sources: map[string]*ContentSource{}, owned: map[*ContentSource]bool{}, slots: map[string][]string{}, limit: c.opts.MaxContentBytes, bindings: map[string]ModificationTarget{}, absent: map[string]bool{}}
+	p := &preparedBoundary{declared: cfg.declared, sources: map[string]*content.Source{}, owned: map[*content.Source]bool{}, slots: map[string][]string{}, limit: c.opts.MaxContentBytes, bindings: map[string]ModificationTarget{}, absent: map[string]bool{}}
 	defer func() {
 		if err != nil {
 			for source := range p.owned {
@@ -250,7 +251,7 @@ func (p *preparedBoundary) resolve(ctx context.Context, c *Hooks, path string, i
 }
 func (p *preparedBoundary) bound() error {
 	var total int64
-	seen := map[*ContentSource]bool{}
+	seen := map[*content.Source]bool{}
 	for _, source := range p.sources {
 		if seen[source] {
 			continue

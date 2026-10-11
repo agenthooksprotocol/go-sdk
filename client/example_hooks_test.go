@@ -63,7 +63,7 @@ func ExampleHooks_ToolBefore() {
 	}
 	hooks, err := client.New(registration, client.Options{
 		Source: "urn:example:host",
-		Events: map[string]client.EventCapabilities{
+		Events: map[string]capability.Event{
 			"tool.before": toolCapabilities,
 		},
 		EventClient: peer.Client(),
@@ -94,7 +94,7 @@ func ExampleHooks_ToolBefore() {
 	if err != nil {
 		var decode *client.DecodeError
 		if errors.As(err, &decode) && result != nil {
-			// Protocol effects remain accepted. result.EffectiveInput is available;
+			// Protocol effects remain accepted. sdkJSON(result.Event.ToolBeforeEvent.Value.Tool.Input) is available;
 			// do not execute result.Input when InputAvailable is false.
 			return
 		}

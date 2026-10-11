@@ -161,8 +161,10 @@ func main() {
 			} else if c["op"] == "apply" {
 				effects, _ := c["effects"].([]any)
 				summary, err = sdk.ApplyElicitationEffects(obj(c["request"]), obj(c["result"]), resolve, validate, principal, effects)
+			} else if _, obsolete := c["effect"]; obsolete {
+				err = fmt.Errorf("single-effect validation is unsupported; use apply with effects")
 			} else {
-				summary, err = sdk.ValidateElicitationExchange(obj(c["request"]), obj(c["result"]), resolve, validate, principal, obj(c["effect"]))
+				summary, err = sdk.ValidateElicitationExchange(obj(c["request"]), obj(c["result"]), resolve, validate, principal)
 			}
 			after, _ := json.Marshal(c)
 			if !bytes.Equal(before, after) {
@@ -254,7 +256,7 @@ func main() {
 					if !ok {
 						return nil, fmt.Errorf("host elicitation rejected")
 					}
-					summary, err = sdk.ValidateElicitationExchange(req, message, resolve, validate, principal, nil)
+					summary, err = sdk.ValidateElicitationExchange(req, message, resolve, validate, principal)
 					if err != nil {
 						return nil, fmt.Errorf("host elicitation rejected")
 					}

@@ -7,36 +7,6 @@ import (
 	"testing"
 )
 
-// Reviewed test-only metadata overlays older sibling fixtures without changing
-// their wire requests/responses or relaxing exact acceptance/rejection checks.
-func withHostRefusalExpectations(t *testing.T, scenarios []Scenario) []Scenario {
-	t.Helper()
-	var overlay struct {
-		Scenarios map[string]struct {
-			Tags         []string `json:"tags"`
-			HostExpected Object   `json:"hostExpected"`
-		} `json:"scenarios"`
-	}
-	if err := Load("testdata/host-refusal-outcomes.json", &overlay); err != nil {
-		t.Fatal(err)
-	}
-	out := append([]Scenario(nil), scenarios...)
-	for i := range out {
-		expected, ok := overlay.Scenarios[out[i].ID]
-		if !ok {
-			continue
-		}
-		if !out[i].ExpectError || !containsTag(out[i].Tags, "application-invalid") {
-			t.Fatalf("host overlay no longer matches %s", out[i].ID)
-		}
-		if out[i].HostExpected != nil && !reflect.DeepEqual(out[i].HostExpected, expected.HostExpected) {
-			t.Fatalf("host expectation diverged for %s", out[i].ID)
-		}
-		out[i].HostExpected = obj(clone(expected.HostExpected))
-	}
-	return out
-}
-
 func assertHostRefusal(t *testing.T, scenario Scenario, actual Object, err error) {
 	t.Helper()
 	if err != nil {

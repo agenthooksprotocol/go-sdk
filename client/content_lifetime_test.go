@@ -24,10 +24,10 @@ func TestPublicDispatchRetainedResultsAndSources(t *testing.T) {
 	sub := c.backends[0].subscriptions[0]
 	projection := contentTestSubscription(server.URL)
 	sub["content"], sub["upload"] = projection["content"], projection["upload"]
-	var sources []*ContentSource
+	var sources []*content.Source
 	var results []*Result
 	for i := 0; i < 4097; i++ {
-		source := NewContentSource(io.NopCloser(strings.NewReader("original")))
+		source := content.NewSource(io.NopCloser(strings.NewReader("original")))
 		input := testInput()
 		item := contentTestItem(nil)
 		delete(item, "body")
@@ -71,22 +71,16 @@ func TestPreparedResultRetainsReplacementOwner(t *testing.T) {
 	path := "/items/0/parts/1"
 	attachment := map[string]any{"id": "binary", "kind": "attachment", "mediaType": "application/octet-stream", "selection": "metadata"}
 	event := targetTestCanonicalEvent(t, "model.request.before", []any{targetInlineMessage("message", targetInlineText("text", "inline replacement"), attachment)})
-	p := &preparedBoundary{sources: map[string]*ContentSource{path: source}, slots: map[string][]string{"request": {"/items"}}}
-	result := &Result{Event: sdkJSON(event)}
+	p := &preparedBoundary{sources: map[string]*content.Source{path: source}, slots: map[string][]string{"request": {"/items"}}}
+	result := &Result{Event: parsedFixtureEvent(t, event)}
 	result.retainAttachments(contentSourceConfig(nil), context.Background(), p, 64)
 	delete(p.sources, path)
 	if result.attachments[path] != source || len(result.attachments) != 1 {
 		t.Fatal("result created a second owner or text snapshot")
 	}
-	encoded, err := result.EffectiveValue("request")
-	want := string(sdkJSON(event["items"]))
-	if err != nil || string(encoded) != want {
-		t.Fatal(err, string(encoded))
-	}
-	encoded[0] = 'X'
-	againValue, err := result.EffectiveValue("request")
-	if err != nil || string(againValue) != want {
-		t.Fatal("effective value shared caller bytes", err)
+	items := result.Event.ModelRequestBeforeEvent.Value.Items
+	if string(sdkJSON(items)) != string(sdkJSON(event["items"])) {
+		t.Fatal("typed canonical items changed during owner transfer")
 	}
 	got, ok := result.Content(path)
 	if !ok || string(got) != "replacement" {
@@ -116,7 +110,7 @@ func TestPublicDispatchCancellationRetiresSource(t *testing.T) {
 			sub["content"], sub["upload"] = projection["content"], projection["upload"]
 			r, w := io.Pipe()
 			defer w.Close()
-			source := NewContentSource(r)
+			source := content.NewSource(r)
 			input := testInput()
 			item := contentTestItem(nil)
 			delete(item, "body")

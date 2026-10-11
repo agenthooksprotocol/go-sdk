@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"github.com/agenthooksprotocol/go-sdk/content"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -19,7 +20,7 @@ type sourceTestReader struct {
 
 func (r *sourceTestReader) Read(p []byte) (int, error) { r.reads.Add(1); return r.Reader.Read(p) }
 func (r *sourceTestReader) Close() error               { r.closes.Add(1); return nil }
-func sourceTestBinding(t *testing.T, source *ContentSource) (context.Context, map[string]any, interceptConfig) {
+func sourceTestBinding(t *testing.T, source *content.Source) (context.Context, map[string]any, interceptConfig) {
 	t.Helper()
 	item := contentTestItem(nil)
 	delete(item, "body")
@@ -37,7 +38,7 @@ func TestContentSourceUnusedIsNeverReadAndClosed(t *testing.T) {
 	for _, mode := range []string{"metadata", "omit", "body"} {
 		t.Run(mode, func(t *testing.T) {
 			reader := &sourceTestReader{Reader: strings.NewReader("private")}
-			source := NewContentSource(reader)
+			source := content.NewSource(reader)
 			if reader.reads.Load() != 0 {
 				t.Fatal("construction read")
 			}
@@ -69,7 +70,7 @@ func TestContentSourceConcurrentFanoutSnapshotsOnce(t *testing.T) {
 	}))
 	defer server.Close()
 	reader := &sourceTestReader{Reader: strings.NewReader("actual")}
-	source := NewContentSource(reader)
+	source := content.NewSource(reader)
 	ctx, event, cfg := sourceTestBinding(t, source)
 	defer cfg.closeSources()
 	c := &Hooks{opts: Options{Content: ContentOptions{AuthorizeContent: contentTestAllow, AllowLoopbackHTTP: true}}}
@@ -100,7 +101,7 @@ func TestContentSourceConcurrentFanoutSnapshotsOnce(t *testing.T) {
 
 func TestContentSourceLimitFailureIsCached(t *testing.T) {
 	reader := &sourceTestReader{Reader: strings.NewReader("too long")}
-	source := NewContentSource(reader)
+	source := content.NewSource(reader)
 	if _, err := source.Snapshot(context.Background(), 2); err == nil {
 		t.Fatal("expected byte limit")
 	}
@@ -115,7 +116,7 @@ func TestContentSourceLimitFailureIsCached(t *testing.T) {
 
 func TestContentSourceCancelledBeforeRead(t *testing.T) {
 	reader := &sourceTestReader{Reader: strings.NewReader("private")}
-	source := NewContentSource(reader)
+	source := content.NewSource(reader)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := source.Snapshot(ctx, 100); !errors.Is(err, context.Canceled) {
@@ -128,7 +129,7 @@ func TestContentSourceCancelledBeforeRead(t *testing.T) {
 
 func TestContentSourceDeferredModificationBaseline(t *testing.T) {
 	reader := &sourceTestReader{Reader: strings.NewReader("original")}
-	source := NewContentSource(reader)
+	source := content.NewSource(reader)
 	ctx, event, cfg := sourceTestBinding(t, source)
 	defer cfg.closeSources()
 	event["type"] = "model.response.complete"
@@ -147,7 +148,7 @@ func TestContentSourceDeferredModificationBaseline(t *testing.T) {
 }
 
 func TestContentSourceSnapshotIsDetached(t *testing.T) {
-	source := NewContentSource(io.NopCloser(strings.NewReader("original")))
+	source := content.NewSource(io.NopCloser(strings.NewReader("original")))
 	raw, err := source.Snapshot(context.Background(), 128)
 	if err != nil {
 		t.Fatal(err)
@@ -166,7 +167,7 @@ func TestContentSourceSnapshotIsDetached(t *testing.T) {
 
 func TestContentSourceProjectionTimeoutClosesRead(t *testing.T) {
 	reader, _ := cancellationPipe(t)
-	source := NewContentSource(reader)
+	source := content.NewSource(reader)
 	ctx, event, cfg := sourceTestBinding(t, source)
 	defer cfg.closeSources()
 	c := &Hooks{opts: Options{Content: ContentOptions{AuthorizeContent: contentTestAllow}}}
@@ -183,7 +184,7 @@ func TestContentSourceFailureAndUnusedBoundaryClose(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			c, _ := testClient(t, "fail-open")
 			reader := &sourceTestReader{Reader: strings.NewReader("private")}
-			source := NewContentSource(reader)
+			source := content.NewSource(reader)
 			input := testInput()
 			item := contentTestItem(nil)
 			delete(item, "body")
@@ -258,9 +259,9 @@ func TestContentSourceElicitationInvalidBodyNeverUploads(t *testing.T) {
 }
 
 func TestContentSourceOccurrenceBudget(t *testing.T) {
-	first := NewContentSource(io.NopCloser(strings.NewReader("123")))
-	second := NewContentSource(io.NopCloser(strings.NewReader("456")))
-	b := &contentSourceBudget{seen: map[*ContentSource]bool{}}
+	first := content.NewSource(io.NopCloser(strings.NewReader("123")))
+	second := content.NewSource(io.NopCloser(strings.NewReader("456")))
+	b := &contentSourceBudget{seen: map[*content.Source]bool{}}
 	if _, err := b.snapshot(context.Background(), first, 4, 4); err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +280,7 @@ func TestContentSourceUploadLimitsAreReceiverSpecific(t *testing.T) {
 	}))
 	defer server.Close()
 	reader := &sourceTestReader{Reader: strings.NewReader("actual")}
-	source := NewContentSource(reader)
+	source := content.NewSource(reader)
 	ctx, event, cfg := sourceTestBinding(t, source)
 	defer cfg.closeSources()
 	c := &Hooks{opts: Options{Content: ContentOptions{AuthorizeContent: contentTestAllow, AllowLoopbackHTTP: true}}}

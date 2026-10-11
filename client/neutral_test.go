@@ -32,12 +32,12 @@ func TestDispatchNeutralEffects(t *testing.T) {
 			}
 			defer result.Close()
 			if field == "null" || field == "invalid" {
-				if len(result.Errors) == 0 {
+				if len(result.Diagnostics) == 0 {
 					t.Fatal("invalid effects accepted")
 				}
 				return
 			}
-			if len(result.Errors) != 0 || result.Response.Effects.Value == nil || len(result.Response.Effects.Value) != 0 {
+			if len(result.Diagnostics) != 0 || result.response.Effects.Value == nil || len(result.response.Effects.Value) != 0 {
 				t.Fatalf("not typed neutral: %+v", result)
 			}
 			if !reflect.DeepEqual(input, before) {

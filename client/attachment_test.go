@@ -261,7 +261,7 @@ func TestCanonicalFileReferencesUseSharedOwners(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	result := &Result{Event: sdkJSON(event)}
+	result := &Result{Event: parsedFixtureEvent(t, event)}
 	result.retainAttachments(cfg, ctx, p, 64)
 	defer result.Close()
 	if opens.Load() != 1 {

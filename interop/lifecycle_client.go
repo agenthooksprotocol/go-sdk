@@ -443,7 +443,7 @@ func LifecycleClient(ctx context.Context, c LifecycleConfig) error {
 				}
 				// A failed retry must not reuse an earlier fixture alias as a ready ref.
 				delete(aliases, contentKey(sub, str(step["ref"])))
-				descriptor, status, err := uploadFixture(ctx, binding, sub, str(step["ref"]), body, step)
+				descriptor, status, err := uploadFixture(ctx, binding, body, step)
 				if err == nil {
 					confirmed[contentKey(sub, str(descriptor["ref"]))] = string(body)
 					aliases[contentKey(sub, str(step["ref"]))] = str(descriptor["ref"])

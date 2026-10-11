@@ -211,7 +211,7 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 	ctx = context.WithValue(ctx, preparedContextKey{}, prepared)
 	uploads := c.planUploads(ctx, event, prepared)
 	ctx = context.WithValue(ctx, uploadPlanContextKey{}, uploads)
-	result := &Result{AcceptedResponses: []ahp.ContextualResponse{}, Response: ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: ahp.Some([]*ahp.Effect{})}}
+	result := &Result{AcceptedResponses: []ahp.ContextualResponse{}, response: ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: ahp.Some([]*ahp.Effect{})}}
 	settled := state["permission"] == "deny" || state["flow"] == "stop"
 	pending := []observationDelivery{}
 	for _, backend := range c.backends {
@@ -309,9 +309,8 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 									if len(accepted.Event) > 0 {
 										event, _ = sdkMap(accepted.Event)
 									}
-									result.Response.Effects.Value = append(result.Response.Effects.Value, accepted.Response.Effects.Value...)
+									result.response.Effects.Value = append(result.response.Effects.Value, accepted.Response.Effects.Value...)
 									result.AcceptedResponses = append(result.AcceptedResponses, contextual.Value)
-									result.AcceptedResponse = contextual.Value
 								}
 								prepared.releaseUnused(budget)
 							}
@@ -327,7 +326,7 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 			}
 			if deliveryErr != nil {
 				closed := sub["failurePolicy"] == "fail-closed"
-				result.Errors = append(result.Errors, DeliveryError{BackendID: backend.id, Subscription: i, Stage: stage, Code: deliveryCode(stage, deliveryErr), Err: deliveryErr, FailClosed: closed})
+				result.errors = append(result.errors, DeliveryError{BackendID: backend.id, Subscription: i, Stage: stage, Code: deliveryCode(stage, deliveryErr), Err: deliveryErr, FailClosed: closed})
 				if closed {
 					state["permission"] = "deny"
 					settled = true
@@ -342,30 +341,28 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 		result.Interrupted = true
 	}
 	result.Snapshot = prepared.snapshot
-	result.Event = sdkJSON(event)
-	if tool := sdkObj(event["tool"]); tool != nil {
-		result.EffectiveInput = sdkJSON(tool["input"])
-	}
-	if err = json.Unmarshal(sdkJSON(state), &result.State); err != nil {
+	result.eventWire = sdkJSON(event)
+	if err = json.Unmarshal(sdkJSON(state), &result.state); err != nil {
 		return nil, err
 	}
+	result.Diagnostics = append([]DeliveryError(nil), result.errors...)
 	if err := result.decodeSettlement(name); err != nil {
 		return result, err
 	}
-	result.Permission = result.State.Permission
-	result.Diagnostics = append([]DeliveryError(nil), result.Errors...)
+	result.Permission = result.state.Permission
+	result.Diagnostics = append([]DeliveryError(nil), result.errors...)
 	if _, err := prepared.values(event); err != nil {
 		return result, err
 	}
 
 	result.Snapshot = prepared.snapshot
-	result.Observations = c.scheduleObservations(ctx, event, pending, prepared)
+	observationErrors := c.scheduleObservations(ctx, event, pending, prepared)
 	// Observer preparation can make original request bytes available, but a
 	// failed observer must never reopen settlement or publish an invalid snapshot.
 	if prepared.materializeElicitation(event) == nil {
 		result.Snapshot = prepared.snapshot
 	}
-	result.Diagnostics = append(append([]DeliveryError(nil), result.Errors...), result.Observations.errors...)
+	result.Diagnostics = append(append([]DeliveryError(nil), result.errors...), observationErrors...)
 	if ctx.Err() != nil {
 		result.Interrupted = true
 	}

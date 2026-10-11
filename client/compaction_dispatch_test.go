@@ -56,7 +56,7 @@ func TestPreparedCompactionSerialAndObservedInlineText(t *testing.T) {
 			}
 			trs[1].reply = func(map[string]any) []any { return []any{} }
 			result, err := c.intercept(context.Background(), name, input)
-			if err != nil || result == nil || len(result.Errors) != 0 {
+			if err != nil || result == nil || len(result.Diagnostics) != 0 {
 				t.Fatalf("result: %+v %v", result, err)
 			}
 			defer result.Close()
@@ -86,7 +86,7 @@ func TestPreparedCompactionSerialAndObservedInlineText(t *testing.T) {
 				t.Fatal("host input mutated")
 			}
 			if stage == "after" {
-				event := compositionObject(result.Event)
+				event := compositionObject(sdkJSON(result.Event))
 				if sdkObj(event["execution"])["status"] != "executed" || len(sdkArray(event["removed"])) != 0 {
 					t.Fatal("compaction fabricated execution or installation")
 				}

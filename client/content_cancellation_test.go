@@ -29,7 +29,7 @@ func cancellationPipe(t *testing.T) (*cancellationPipeReader, *io.PipeWriter) {
 	t.Cleanup(func() { _ = w.Close() })
 	return &cancellationPipeReader{PipeReader: r, started: make(chan struct{})}, w
 }
-func cancellationContent(c *Client, reader *cancellationPipeReader) {
+func cancellationContent(c *Hooks, reader *cancellationPipeReader) {
 	c.opts.Content.AuthorizeContent = contentTestAllow
 	c.opts.Content.Resolver = func(context.Context, string) (io.ReadCloser, error) { return reader, nil }
 	for i := range c.backends {
@@ -48,7 +48,7 @@ func cancellationInput() map[string]any {
 
 func TestContentProjectionDeadlineClosesOwnedReader(t *testing.T) {
 	reader, writer := cancellationPipe(t)
-	c := &Client{}
+	c := &Hooks{}
 	cancellationContent(c, reader)
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -125,13 +125,7 @@ func TestContentObservationDeadlineReleasesReaderAndCapacity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wait, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	failures, err := result.Observations.Wait(wait)
-	if err != nil {
-		_ = writer.Close()
-		t.Fatal("observation deadline did not release work", err)
-	}
+	failures := result.Diagnostics
 	if len(failures) != 1 || !errors.Is(failures[0].Err, context.DeadlineExceeded) {
 		t.Fatal(failures)
 	}

@@ -36,12 +36,12 @@ func TestUploadCanonicalOctetsAndImmutableReferences(t *testing.T) {
 	bindings["scope"] = binding
 	previous := ""
 	for _, body := range [][]byte{{0, 255, 128, 13, 10}, {}, {1, 2, 3}} {
-		descriptor, status, err := UploadContent(context.Background(), binding, "untrusted-scope", "sender-ref", body)
+		descriptor, status, err := UploadContent(context.Background(), binding, body)
 		if err != nil || status != 201 {
 			t.Fatalf("upload: %d %v", status, err)
 		}
 		ref := str(descriptor["ref"])
-		if ref == "sender-ref" || ref == previous {
+		if ref == "" || ref == previous {
 			t.Fatal("reference not freshly allocated")
 		}
 		previous = ref
@@ -143,7 +143,7 @@ func TestUploadFixtureMismatchReachesReceiver(t *testing.T) {
 	defer server.Close()
 	binding := UploadBinding{Endpoint: server.URL + "/upload"}
 	for _, step := range []Object{{"size": float64(4)}, {"sha256": strings.Repeat("0", 64)}} {
-		_, status, err := uploadFixture(context.Background(), binding, "ignored", "ignored", []byte("abc"), step)
+		_, status, err := uploadFixture(context.Background(), binding, []byte("abc"), step)
 		if status != 400 || err == nil {
 			t.Fatalf("status=%d error=%v", status, err)
 		}
@@ -200,7 +200,7 @@ func TestUploadSenderPolicyAndAnonymousIsolation(t *testing.T) {
 	}))
 	defer receiver.Close()
 	binding := UploadBinding{Endpoint: receiver.URL}
-	if _, status, err := UploadContent(context.Background(), binding, "", "", nil); err == nil || status != 307 {
+	if _, status, err := UploadContent(context.Background(), binding, nil); err == nil || status != 307 {
 		t.Fatalf("redirect status=%d err=%v", status, err)
 	}
 	if calls != 0 {
@@ -208,13 +208,13 @@ func TestUploadSenderPolicyAndAnonymousIsolation(t *testing.T) {
 	}
 	limit := int64(0)
 	binding.MaxBytes = &limit
-	if _, status, err := UploadContent(context.Background(), binding, "", "", []byte("x")); err == nil || status != 0 {
+	if _, status, err := UploadContent(context.Background(), binding, []byte("x")); err == nil || status != 0 {
 		t.Fatal("maxBytes not enforced locally")
 	}
 	binding.MaxBytes = nil
 	binding.Auth = &UploadAuth{Type: "bearer", TokenEnv: "AHP_TEST_ABSENT_UPLOAD_TOKEN"}
 	t.Setenv(binding.Auth.TokenEnv, "")
-	if _, status, err := UploadContent(context.Background(), binding, "", "", nil); err == nil || status != 0 {
+	if _, status, err := UploadContent(context.Background(), binding, nil); err == nil || status != 0 {
 		t.Fatal("missing credential accepted")
 	}
 }
@@ -252,3 +252,9 @@ func TestUploadReceiverFramingAndAnonymousPolicy(t *testing.T) {
 		})
 	}
 }
+
+// Upload has no ignored sender labels or legacy scope/ref arguments.
+var _ func(context.Context, UploadBinding, []byte) (Object, int, error) = UploadContent
+
+// Passive exchange validation has no single-effect compatibility adapter.
+var _ func(Object, Object, func(Object) ([]byte, error), func(string, any) error, string) (Object, error) = ValidateElicitationExchange

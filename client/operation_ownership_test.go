@@ -5,6 +5,7 @@ import (
 	"errors"
 	ahp "github.com/agenthooksprotocol/go-sdk"
 	"github.com/agenthooksprotocol/go-sdk/content"
+	"github.com/agenthooksprotocol/go-sdk/diagnostic"
 	"github.com/agenthooksprotocol/go-sdk/event"
 	"strings"
 	"sync"
@@ -57,11 +58,6 @@ func TestBoundaryOwnsObservationCompletion(t *testing.T) {
 	default:
 		t.Fatal("owned transport not retired")
 	}
-	select {
-	case <-r.Observations.Done():
-	default:
-		t.Fatal("compatibility observations handle incomplete")
-	}
 	if r.Permission != "none" || r.Interrupted || len(r.Diagnostics) != 0 {
 		t.Fatalf("unexpected settlement: %+v", r)
 	}
@@ -79,7 +75,7 @@ func TestObservationUsesRemainingOperationBudget(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) || r == nil || !r.Interrupted {
 		t.Fatalf("result %+v error %v", r, err)
 	}
-	if len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != DeliveryDeadlineExceeded || r.Diagnostics[0].BackendID != c.backends[0].id {
+	if len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != diagnostic.DeadlineExceeded || r.Diagnostics[0].BackendID != c.backends[0].id {
 		t.Fatalf("diagnostics: %+v", r.Diagnostics)
 	}
 	if r.Permission != "none" {
@@ -147,7 +143,7 @@ func (r *retirementReader) Close() error             { close(r.started); <-r.rel
 func TestCloseIncludesUnusedSourceCleanup(t *testing.T) {
 	c, _ := testClient(t, "fail-open")
 	reader := &retirementReader{started: make(chan struct{}), release: make(chan struct{})}
-	source := NewContentSource(reader)
+	source := content.NewSource(reader)
 	call := make(chan error, 1)
 	go func() {
 		_, err := c.intercept(context.Background(), "tool.before", testInput(), WithContentSource("/items/0", source))

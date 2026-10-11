@@ -8,7 +8,6 @@ import (
 	"reflect"
 	"sync"
 	"testing"
-	"time"
 )
 
 type testTransport struct {
@@ -43,7 +42,7 @@ func (t *testTransport) Close() error { return nil }
 func testCaps() map[string]any {
 	return map[string]any{"effects": []any{"deny", "allow", "ask", "modify", "return"}, "modify": map[string]any{"input": map[string]any{"replace": true, "merge": true}}}
 }
-func testClient(t *testing.T, policies ...string) (*Client, []*testTransport) {
+func testClient(t *testing.T, policies ...string) (*Hooks, []*testTransport) {
 	t.Helper()
 	hooks := []any{}
 	for i, p := range policies {
@@ -77,12 +76,17 @@ func testInput() map[string]any {
 }
 func waitObservations(t *testing.T, r *Result) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	es, err := r.Observations.Wait(ctx)
-	if err != nil || len(es) != 0 {
-		t.Fatalf("observations: %v %v", es, err)
+	for _, diagnostic := range r.Diagnostics {
+		if diagnostic.Stage == "observation" {
+			t.Fatal(diagnostic)
+		}
 	}
+}
+func lastAccepted(r *Result) ahp.ContextualResponse {
+	if len(r.AcceptedResponses) == 0 {
+		return nil
+	}
+	return r.AcceptedResponses[len(r.AcceptedResponses)-1]
 }
 
 func TestSerialCompositionAndNativeApprovalInvalidation(t *testing.T) {
@@ -109,7 +113,7 @@ func TestSerialCompositionAndNativeApprovalInvalidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitObservations(t, r)
-	if len(r.Errors) != 0 || r.State.Permission != "ask" {
+	if len(r.Diagnostics) != 0 || r.state.Permission != "ask" {
 		t.Fatalf("result: %+v", r)
 	}
 	if string(before) != string(sdkJSON(input)) {
@@ -132,14 +136,14 @@ func TestTypedDecodeFailurePreservesProtocolAcceptance(t *testing.T) {
 	if !errors.As(err, &decode) || r == nil || r.InputAvailable {
 		t.Fatalf("decode contract: %+v %v", r, err)
 	}
-	if !r.Interrupted || r.Permission != "none" || r.SettledEvent == nil || r.AcceptedResponse == nil {
+	if !r.Interrupted || r.Permission != "none" || r.Event == nil || lastAccepted(r.Result) == nil {
 		t.Fatal("host decode failure must retain typed settlement without execution grant")
 	}
-	if r.State.Permission != "allow" || len(r.Response.Effects.Value) != 2 || len(r.Errors) != 0 {
+	if r.state.Permission != "allow" || len(r.response.Effects.Value) != 2 || len(r.Diagnostics) != 0 {
 		t.Fatalf("accepted effects lost: %+v", r)
 	}
-	if string(r.EffectiveInput) != `{"count":"not-an-integer"}` {
-		t.Fatal(string(r.EffectiveInput))
+	if string(sdkJSON(r.Event.ToolBeforeEvent.Value.Tool.Input)) != `{"count":"not-an-integer"}` {
+		t.Fatal(string(sdkJSON(r.Event.ToolBeforeEvent.Value.Tool.Input)))
 	}
 }
 func TestShortCircuitObservesOnlyUncalledSubscriptions(t *testing.T) {
@@ -188,11 +192,11 @@ func TestFailClosedKeepsEarlierEffectsAndAuditsFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.State.Permission != "deny" || len(r.Errors) != 1 || !r.Errors[0].FailClosed || len(r.Response.Effects.Value) != 1 {
+	if r.state.Permission != "deny" || len(r.Diagnostics) != 1 || !r.Diagnostics[0].FailClosed || len(r.response.Effects.Value) != 1 {
 		t.Fatalf("bad prefix: %+v", r)
 	}
 	var input map[string]any
-	_ = json.Unmarshal(r.EffectiveInput, &input)
+	_ = json.Unmarshal(sdkJSON(r.Event.ToolBeforeEvent.Value.Tool.Input), &input)
 	if !reflect.DeepEqual(input, map[string]any{"count": float64(1), "accepted": true}) {
 		t.Fatal(input)
 	}

@@ -103,7 +103,7 @@ func TestContentPreservesExplicitUnavailableGap(t *testing.T) {
 	delete(item, "text")
 	item["selection"] = "body"
 	item["gap"] = original
-	c := &Client{opts: Options{Content: ContentOptions{AuthorizeContent: contentTestAllow}}}
+	c := &Hooks{opts: Options{Content: ContentOptions{AuthorizeContent: contentTestAllow}}}
 	projected, err := c.projectContent(context.Background(), contentTestEvent(map[string]any{"items": []any{item}}), map[string]any{"content": map[string]any{"default": "body"}}, "receiver")
 	if err != nil {
 		t.Fatal(err)

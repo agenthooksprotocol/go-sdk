@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/agenthooksprotocol/go-sdk/diagnostic"
 	"io"
 	"reflect"
 	"testing"
@@ -48,7 +49,7 @@ func TestInlineCanonicalMessagesSelectionPrivacy(t *testing.T) {
 			if result != nil {
 				defer result.Close()
 			}
-			if err != nil || result == nil || len(result.Errors) != 0 {
+			if err != nil || result == nil || len(result.Diagnostics) != 0 {
 				t.Fatalf("dispatch: %v %+v", err, result)
 			}
 			if len(transports[0].calls) != 1 {
@@ -111,7 +112,7 @@ func TestInlineCanonicalMessagesMergeAppendAndReplaceSubstitute(t *testing.T) {
 			if result != nil {
 				defer result.Close()
 			}
-			if err != nil || result == nil || len(result.Errors) != 0 {
+			if err != nil || result == nil || len(result.Diagnostics) != 0 {
 				t.Fatalf("composition: %v %+v", err, result)
 			}
 			want := value
@@ -126,11 +127,11 @@ func TestInlineCanonicalMessagesMergeAppendAndReplaceSubstitute(t *testing.T) {
 				t.Fatalf("next receiver list: %s want %s", sdkJSON(next), sdkJSON(want))
 			}
 			var effective map[string]any
-			if err := json.Unmarshal(result.Event, &effective); err != nil {
+			if err := json.Unmarshal(sdkJSON(result.Event), &effective); err != nil {
 				t.Fatal(err)
 			}
 			if !compositionEqual(effective["items"], want) {
-				t.Fatalf("effective list: %s", result.Event)
+				t.Fatalf("effective list: %s", sdkJSON(result.Event))
 			}
 			if !reflect.DeepEqual(input, before) {
 				t.Fatal("composition mutated host input")
@@ -147,7 +148,7 @@ func TestInlineCanonicalMessagesBodySelectionRequiresAuthorization(t *testing.T)
 	if result != nil {
 		defer result.Close()
 	}
-	if err != nil || result == nil || len(result.Errors) != 0 {
+	if err != nil || result == nil || len(result.Diagnostics) != 0 {
 		t.Fatalf("dispatch: %v %+v", err, result)
 	}
 	if len(transports[0].calls) != 1 {
@@ -181,15 +182,15 @@ func inlineTestRejectEdit(t *testing.T, selection map[string]any, original, inco
 	if err != nil || result == nil {
 		t.Fatalf("dispatch: %v %+v", err, result)
 	}
-	if len(result.Errors) != 1 || result.Errors[0].Code != DeliveryCode("protocol_rejection") {
-		t.Fatalf("edit was not rejected: %+v", result.Errors)
+	if len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != diagnostic.Code("protocol_rejection") {
+		t.Fatalf("edit was not rejected: %+v", result.Diagnostics)
 	}
 	var effective map[string]any
-	if err := json.Unmarshal(result.Event, &effective); err != nil {
+	if err := json.Unmarshal(sdkJSON(result.Event), &effective); err != nil {
 		t.Fatal(err)
 	}
 	if !compositionEqual(effective["items"], original) {
-		t.Fatalf("rejected edit changed host list: %s", result.Event)
+		t.Fatalf("rejected edit changed host list: %s", sdkJSON(result.Event))
 	}
 	if len(transports[1].calls) != 1 {
 		t.Fatal("fail-open did not deliver original to next receiver")
@@ -310,7 +311,7 @@ func TestInlineCanonicalReceiverStatePrivacy(t *testing.T) {
 				if result != nil {
 					defer result.Close()
 				}
-				if err != nil || result == nil || len(result.Errors) != 0 {
+				if err != nil || result == nil || len(result.Diagnostics) != 0 {
 					t.Fatalf("state composition: %v %+v", err, result)
 				}
 				if len(transports[1].calls) != 1 {
@@ -360,7 +361,7 @@ func TestInlineCanonicalReceiverStatePrivacy(t *testing.T) {
 				if bytes.Contains(sdkJSON(second), []byte("private cumulative reasoning")) {
 					t.Fatalf("private text escaped through another delivery field: %s", sdkJSON(second))
 				}
-				hostState, err := sdkMap(result.State)
+				hostState, err := sdkMap(result.state)
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -45,7 +45,7 @@ func contentTestConfirm(w http.ResponseWriter, ref string, raw []byte) {
 }
 
 func TestContentSelectionIsNotPermission(t *testing.T) {
-	c := &Client{opts: Options{Content: ContentOptions{Resolver: func(context.Context, string) (io.ReadCloser, error) {
+	c := &Hooks{opts: Options{Content: ContentOptions{Resolver: func(context.Context, string) (io.ReadCloser, error) {
 		t.Fatal("unauthorized resolver call")
 		return nil, nil
 	}}}}
@@ -83,7 +83,7 @@ func TestContentSelectionIsNotPermission(t *testing.T) {
 }
 
 func TestContentCategoryPrecedence(t *testing.T) {
-	c := &Client{}
+	c := &Hooks{}
 	a := contentTestItem(map[string]any{"ref": "secret"})
 	// Reasoning kind precedence is a classifier rule, not a declared attachment kind.
 	if got := contentCategory(map[string]any{"kind": "reasoning", "category": "text"}); got != "reasoning" {
@@ -127,7 +127,7 @@ func TestContentRemoteHandlesUploadPerReceiver(t *testing.T) {
 		contentTestConfirm(w, fmt.Sprintf("receiver-handle-%d", calls), data)
 	}))
 	defer server.Close()
-	c := &Client{opts: Options{MaxContentBytes: 128, Content: ContentOptions{AllowLoopbackHTTP: true, Resolver: func(_ context.Context, ref string) (io.ReadCloser, error) {
+	c := &Hooks{opts: Options{MaxContentBytes: 128, Content: ContentOptions{AllowLoopbackHTTP: true, Resolver: func(_ context.Context, ref string) (io.ReadCloser, error) {
 		reads++
 		if ref != "https://never-fetch.example/private" {
 			t.Errorf("unexpected resolver handle %q", ref)
@@ -179,7 +179,7 @@ func TestContentRawUploadsAndIndependentAuthentication(t *testing.T) {
 		t.Error("event client used for upload")
 		return nil, fmt.Errorf("event client used")
 	})
-	c := &Client{opts: Options{EventClient: &http.Client{Transport: eventTransport}, Content: ContentOptions{AllowLoopbackHTTP: true, AuthorizeContent: contentTestAllow}}}
+	c := &Hooks{opts: Options{EventClient: &http.Client{Transport: eventTransport}, Content: ContentOptions{AllowLoopbackHTTP: true, AuthorizeContent: contentTestAllow}}}
 	sub := contentTestSubscription(server.URL)
 	sub["upload"].(map[string]any)["auth"] = map[string]any{"type": "bearer", "tokenEnv": "AHP_CONTENT_TEST_TOKEN"}
 	for _, raw := range [][]byte{{0, 128, 255}, {}} {
@@ -208,22 +208,22 @@ func TestContentLimitsAndDeclaredIntegrity(t *testing.T) {
 	defer server.Close()
 	for _, test := range []struct {
 		name   string
-		mutate func(map[string]any, map[string]any, *Client)
+		mutate func(map[string]any, map[string]any, *Hooks)
 	}{
-		{"local limit", func(_ map[string]any, _ map[string]any, c *Client) { c.opts.MaxContentBytes = 2 }},
-		{"upload limit", func(_ map[string]any, s map[string]any, _ *Client) { s["upload"].(map[string]any)["maxBytes"] = 2 }},
-		{"size mismatch", func(i map[string]any, _ map[string]any, _ *Client) { i["size"] = 4 }},
-		{"hash mismatch", func(i map[string]any, _ map[string]any, _ *Client) { i["sha256"] = strings.Repeat("0", 64) }},
-		{"reference mismatch", func(i map[string]any, _ map[string]any, c *Client) {
+		{"local limit", func(_ map[string]any, _ map[string]any, c *Hooks) { c.opts.MaxContentBytes = 2 }},
+		{"upload limit", func(_ map[string]any, s map[string]any, _ *Hooks) { s["upload"].(map[string]any)["maxBytes"] = 2 }},
+		{"size mismatch", func(i map[string]any, _ map[string]any, _ *Hooks) { i["size"] = 4 }},
+		{"hash mismatch", func(i map[string]any, _ map[string]any, _ *Hooks) { i["sha256"] = strings.Repeat("0", 64) }},
+		{"reference mismatch", func(i map[string]any, _ map[string]any, c *Hooks) {
 			i["body"] = map[string]any{"ref": "handle", "size": 4}
 			c.opts.Content.Resolver = func(context.Context, string) (io.ReadCloser, error) {
 				return io.NopCloser(strings.NewReader("abc")), nil
 			}
 		}},
-		{"loopback disabled", func(_ map[string]any, _ map[string]any, c *Client) { c.opts.Content.AllowLoopbackHTTP = false }},
+		{"loopback disabled", func(_ map[string]any, _ map[string]any, c *Hooks) { c.opts.Content.AllowLoopbackHTTP = false }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			c := &Client{opts: Options{Content: ContentOptions{AllowLoopbackHTTP: true, AuthorizeContent: contentTestAllow}}}
+			c := &Hooks{opts: Options{Content: ContentOptions{AllowLoopbackHTTP: true, AuthorizeContent: contentTestAllow}}}
 			c.opts.Content.Resolver = func(context.Context, string) (io.ReadCloser, error) {
 				return io.NopCloser(strings.NewReader("abc")), nil
 			}
@@ -270,7 +270,7 @@ func TestContentRejectsInvalidConfirmationsAndRedirects(t *testing.T) {
 				_, _ = io.WriteString(w, test.body)
 			}))
 			defer server.Close()
-			c := &Client{opts: Options{Content: ContentOptions{AllowLoopbackHTTP: true, AuthorizeContent: contentTestAllow, Resolver: func(context.Context, string) (io.ReadCloser, error) {
+			c := &Hooks{opts: Options{Content: ContentOptions{AllowLoopbackHTTP: true, AuthorizeContent: contentTestAllow, Resolver: func(context.Context, string) (io.ReadCloser, error) {
 				return io.NopCloser(strings.NewReader("abc")), nil
 			}}}}
 			out, err := c.projectContent(context.Background(), contentTestEvent(map[string]any{"items": []any{contentTestItem(map[string]any{"ref": "abc"})}}), contentTestSubscription(server.URL), "b")
@@ -283,7 +283,7 @@ func TestContentRejectsInvalidConfirmationsAndRedirects(t *testing.T) {
 
 func TestContentNativeRequiresExplicitProjection(t *testing.T) {
 	calls := 0
-	c := &Client{opts: Options{Content: ContentOptions{ProjectOpaque: func(_ context.Context, scope ContentAuthorization, path string, value any) (any, error) {
+	c := &Hooks{opts: Options{Content: ContentOptions{ProjectOpaque: func(_ context.Context, scope ContentAuthorization, path string, value any) (any, error) {
 		calls++
 		if scope.BackendID != "backend" || scope.Subscription["content"] == nil {
 			t.Error("missing opaque scope")
@@ -310,7 +310,7 @@ func TestContentNativeRequiresExplicitProjection(t *testing.T) {
 }
 
 func TestContentOnlyProjectsDeclaredDescriptorPositions(t *testing.T) {
-	c := &Client{}
+	c := &Hooks{}
 	lookalike := contentTestItem("application-owned")
 	event := contentTestEvent(map[string]any{"custom": lookalike, "items": []any{contentTestItem(map[string]any{"ref": "secret"})}})
 	sub := map[string]any{"content": map[string]any{"default": "metadata"}}
@@ -343,7 +343,7 @@ func TestContentFileReferencesAreReceiverAllocated(t *testing.T) {
 		contentTestConfirm(w, "receiver-file", raw)
 	}))
 	defer server.Close()
-	c := &Client{opts: Options{Content: ContentOptions{AllowLoopbackHTTP: true, AuthorizeContent: contentTestAllow, Resolver: func(context.Context, string) (io.ReadCloser, error) {
+	c := &Hooks{opts: Options{Content: ContentOptions{AllowLoopbackHTTP: true, AuthorizeContent: contentTestAllow, Resolver: func(context.Context, string) (io.ReadCloser, error) {
 		return io.NopCloser(strings.NewReader("abc")), nil
 	}}}}
 	sub := contentTestSubscription(server.URL)

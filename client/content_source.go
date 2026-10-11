@@ -3,18 +3,11 @@ package client
 import (
 	"context"
 	"errors"
-	"io"
 	"sync"
 
 	"github.com/agenthooksprotocol/go-sdk/content"
 	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 )
-
-// ContentSource is an owned single-occurrence stream. It is not a wire reference.
-type ContentSource = content.Source
-
-// NewContentSource wraps an owned reader without reading or uploading bytes.
-func NewContentSource(reader io.ReadCloser) *ContentSource { return content.NewSource(reader) }
 
 type contentSourcesContextKey struct{}
 
@@ -22,10 +15,10 @@ type contentSourcesContextKey struct{}
 // The item supplies identity and media metadata; it must not have a body reference.
 // Prefer generated named input source fields when available. This path-based
 // option is the advanced escape hatch, not a wire field or a content reference.
-func WithContentSource(path string, source *ContentSource) InterceptOption {
+func WithContentSource(path string, source *content.Source) InterceptOption {
 	return func(cfg *interceptConfig) {
 		if cfg.sources == nil {
-			cfg.sources = map[string]*ContentSource{}
+			cfg.sources = map[string]*content.Source{}
 		}
 		cfg.sources[path] = source
 		cfg.ownedSources = append(cfg.ownedSources, source)
@@ -34,7 +27,7 @@ func WithContentSource(path string, source *ContentSource) InterceptOption {
 
 // withHostContentSource is the generated boundary's internal source collection.
 // A supplied wire descriptor never changes the exact owner selected for delivery.
-func withHostContentSource(path string, source *ContentSource) InterceptOption {
+func withHostContentSource(path string, source *content.Source) InterceptOption {
 	return func(cfg *interceptConfig) {
 		WithContentSource(path, source)(cfg)
 		if cfg.hostSources == nil {
@@ -45,7 +38,7 @@ func withHostContentSource(path string, source *ContentSource) InterceptOption {
 }
 
 func contentSourceConfig(options []InterceptOption) interceptConfig {
-	cfg := interceptConfig{claimedSources: map[*ContentSource]bool{}, transferredSources: map[*ContentSource]bool{}}
+	cfg := interceptConfig{claimedSources: map[*content.Source]bool{}, transferredSources: map[*content.Source]bool{}}
 	for _, option := range options {
 		if option != nil {
 			option(&cfg)
@@ -64,7 +57,7 @@ func (cfg interceptConfig) closeSources() {
 }
 
 func (cfg interceptConfig) bindSources(ctx context.Context, event map[string]any) (context.Context, error) {
-	seen := map[*ContentSource]bool{}
+	seen := map[*content.Source]bool{}
 	slots, err := schemaSourceSlots(event)
 	if err != nil {
 		return ctx, err
@@ -90,7 +83,7 @@ func (cfg interceptConfig) bindSources(ctx context.Context, event map[string]any
 		seen[source] = true
 	}
 	ctx = context.WithValue(ctx, contentSourcesContextKey{}, cfg.sources)
-	return context.WithValue(ctx, contentSourceBudgetKey{}, &contentSourceBudget{seen: map[*ContentSource]bool{}}), nil
+	return context.WithValue(ctx, contentSourceBudgetKey{}, &contentSourceBudget{seen: map[*content.Source]bool{}}), nil
 }
 
 type contentSourceBudgetKey struct{}
@@ -100,13 +93,13 @@ type contentSourceBudgetKey struct{}
 type contentSourceBudget struct {
 	mu      sync.Mutex
 	used    int64
-	seen    map[*ContentSource]bool
-	pending *ContentSource
+	seen    map[*content.Source]bool
+	pending *content.Source
 	active  int
 	changed chan struct{}
 }
 
-func (b *contentSourceBudget) snapshot(ctx context.Context, source *ContentSource, limit, total int64) ([]byte, error) {
+func (b *contentSourceBudget) snapshot(ctx context.Context, source *content.Source, limit, total int64) ([]byte, error) {
 	// Different owners retain the aggregate admission order. Same-owner callers
 	// join its materializer instead of waiting behind a mutex held across I/O.
 	for {
@@ -149,7 +142,7 @@ func (b *contentSourceBudget) snapshot(ctx context.Context, source *ContentSourc
 			raw, err = nil, errors.New("content exceeds occurrence byte limit")
 		} else {
 			if b.seen == nil {
-				b.seen = map[*ContentSource]bool{}
+				b.seen = map[*content.Source]bool{}
 			}
 			b.seen[source] = true
 			b.used += int64(len(raw))
@@ -165,7 +158,7 @@ func (b *contentSourceBudget) snapshot(ctx context.Context, source *ContentSourc
 
 // forget removes accounting for an owner retired after an edit transaction.
 // This index never owns bytes; each live attachment owns its own snapshot.
-func (b *contentSourceBudget) forget(source *ContentSource) {
+func (b *contentSourceBudget) forget(source *content.Source) {
 	if b == nil {
 		return
 	}
@@ -180,13 +173,13 @@ func (b *contentSourceBudget) forget(source *ContentSource) {
 
 // reconcile accounts all materialized effective owners, including eager inputs,
 // preparation reads and edits. It owns no buffers and never opens lazy sources.
-func (b *contentSourceBudget) reconcile(sources map[string]*ContentSource, limit int64) error {
+func (b *contentSourceBudget) reconcile(sources map[string]*content.Source, limit int64) error {
 	if b == nil {
 		return nil
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	seen := map[*ContentSource]bool{}
+	seen := map[*content.Source]bool{}
 	var used int64
 	for _, source := range sources {
 		if seen[source] {

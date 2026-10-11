@@ -24,11 +24,11 @@ func TestSessionCountersLosslessFullPublicDecode(t *testing.T) {
 		t.Fatalf("public decode: %v", err)
 	}
 	defer result.Close()
-	if len(result.Errors) != 0 {
-		t.Fatalf("counter admission: %+v", result.Errors)
+	if len(result.Diagnostics) != 0 {
+		t.Fatalf("counter admission: %+v", result.Diagnostics)
 	}
 	var event ahp.Event
-	if err := json.Unmarshal(result.Event, &event); err != nil {
+	if err := json.Unmarshal(sdkJSON(result.Event), &event); err != nil {
 		t.Fatal(err)
 	}
 	decoded := event.ToolBeforeEvent.Value.Session.Value.Counters.Value

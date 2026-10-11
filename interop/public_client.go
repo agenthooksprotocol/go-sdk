@@ -121,23 +121,24 @@ func PublicBoundary(ctx context.Context, request Object, exchange func(context.C
 	if err != nil {
 		return nil, false, err
 	}
-	if result.Observations != nil {
-		if failures, waitErr := result.Observations.Wait(ctx); waitErr != nil {
-			return nil, false, waitErr
-		} else if len(failures) > 0 {
-			return nil, false, failures[0]
-		}
-	}
-	if len(result.Errors) > 0 {
-		return nil, transport.received, result.Errors[0]
+	if len(result.Diagnostics) > 0 {
+		return nil, transport.received, result.Diagnostics[0]
 	}
 	if config.Accepted != nil {
 		config.Accepted(result)
 	}
 	// Apply retains synthetic execution/native policy. Protocol delivery and atomic
 	// acceptance above are the public SDK's, not this host evaluator's authority.
+	effects := []any{}
+	for _, accepted := range result.AcceptedResponses {
+		var envelope Object
+		if err := json.Unmarshal(jsonBytes(accepted), &envelope); err != nil {
+			return nil, false, err
+		}
+		effects = append(effects, array(obj(envelope["result"])["effects"])...)
+	}
 	var response Object
-	if err := json.Unmarshal(jsonBytes(Object{"jsonrpc": "2.0", "id": request["id"], "result": result.Response}), &response); err != nil {
+	if err := json.Unmarshal(jsonBytes(Object{"jsonrpc": "2.0", "id": request["id"], "result": Object{"protocolVersion": "draft", "effects": effects}}), &response); err != nil {
 		return nil, false, err
 	}
 	return response, transport.received, nil

@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"github.com/agenthooksprotocol/go-sdk/content"
 	"math"
 	"net"
 	"net/url"
@@ -29,7 +30,7 @@ type uploadPlan struct {
 }
 type receiverUploads struct {
 	mu   sync.Mutex
-	refs map[*ContentSource]string
+	refs map[*content.Source]string
 	err  error
 }
 
@@ -49,7 +50,7 @@ func (p *uploadPlan) failure(receiver uploadReceiver) error {
 	defer r.mu.Unlock()
 	return r.err
 }
-func plannedUpload(ctx context.Context, owner *ContentSource) (string, bool, error) {
+func plannedUpload(ctx context.Context, owner *content.Source) (string, bool, error) {
 	plan, _ := ctx.Value(uploadPlanContextKey{}).(*uploadPlan)
 	if plan == nil {
 		return "", false, nil
@@ -77,7 +78,7 @@ func plannedUpload(ctx context.Context, owner *ContentSource) (string, bool, err
 type plannedTransfer struct {
 	receiver uploadReceiver
 	sub      map[string]any
-	owner    *ContentSource
+	owner    *content.Source
 	items    []map[string]any
 }
 
@@ -97,7 +98,7 @@ func (c *Hooks) planUploads(ctx context.Context, event map[string]any, p *prepar
 				continue
 			}
 			key := uploadReceiver{backend.id, index}
-			r := &receiverUploads{refs: map[*ContentSource]string{}}
+			r := &receiverUploads{refs: map[*content.Source]string{}}
 			plan.receivers[key] = r
 			selection := sdkObj(sub["content"])
 			if !contentMode(compositionString(selection["default"])) {
@@ -114,7 +115,7 @@ func (c *Hooks) planUploads(ctx context.Context, event map[string]any, p *prepar
 				r.fail(errors.New("invalid content selection"))
 				continue
 			}
-			groups := map[*ContentSource]int{}
+			groups := map[*content.Source]int{}
 			selected := []plannedTransfer{}
 			for _, path := range paths {
 				owner := p.sources[path]
@@ -174,12 +175,12 @@ func (c *Hooks) planUploads(ctx context.Context, event map[string]any, p *prepar
 	type demand struct {
 		tasks   []plannedTransfer
 		limit   int64
-		owner   *ContentSource
+		owner   *content.Source
 		timeout time.Duration
 		started time.Time
 		err     error
 	}
-	demands := map[*ContentSource]*demand{}
+	demands := map[*content.Source]*demand{}
 	ordered := []*demand{}
 	for _, task := range tasks {
 		ms, _ := contentInt(sdkObj(task.sub["upload"])["timeoutMs"])

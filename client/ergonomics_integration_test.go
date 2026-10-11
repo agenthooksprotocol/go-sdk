@@ -34,7 +34,7 @@ func TestGeneratedCapabilityCompositionAndBoundaryAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(sdkJSON(first.Capabilities)) != before || !reflect.DeepEqual(first.Modes, []Mode{Intercept, Observe}) {
+	if string(sdkJSON(first.Capabilities)) != before || !reflect.DeepEqual(first.Modes, []capability.Mode{capability.InterceptMode, capability.ObserveMode}) {
 		t.Fatal("reused grant mutated declaration or modes")
 	}
 	base, _ := sdkMap(first.Capabilities)
@@ -62,7 +62,7 @@ func TestGeneratedCapabilityCompositionAndBoundaryAdmission(t *testing.T) {
 	if err == nil {
 		t.Fatal("boundary incompatibility accepted")
 	}
-	if !reflect.DeepEqual(capability.Observe().Modes, []Mode{Observe}) {
+	if !reflect.DeepEqual(capability.Observe().Modes, []capability.Mode{capability.ObserveMode}) {
 		t.Fatal("observe constructor added interception")
 	}
 	// Numeric limits are always checked by canonical runtime admission even
@@ -77,7 +77,7 @@ func TestGeneratedCapabilityCompositionAndBoundaryAdmission(t *testing.T) {
 			t.Fatal("invalid limits reached delivery")
 		}
 	}
-	var code diagnostic.Code = DeliveryRemoteRPC
+	var code diagnostic.Code = diagnostic.RemoteRpc
 	if code != diagnostic.RemoteRpc {
 		t.Fatal("diagnostic vocabulary diverged")
 	}

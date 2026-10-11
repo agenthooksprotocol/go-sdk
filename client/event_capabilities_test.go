@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"github.com/agenthooksprotocol/go-sdk/capability"
 	"reflect"
 	"strings"
 	"testing"
@@ -44,18 +45,18 @@ func eventOptionsCaps(effects ...string) *ahp.Capabilities {
 }
 
 func TestEventOptionsRejectInvalidAuthority(t *testing.T) {
-	cases := map[string]map[string]EventCapabilities{
+	cases := map[string]map[string]capability.Event{
 		"absent":                 {},
 		"no modes":               {"tool.before": {Capabilities: eventOptionsCaps("deny")}},
-		"empty mode":             {"tool.before": {Modes: []Mode{""}}},
-		"duplicate mode":         {"tool.before": {Modes: []Mode{Intercept, Intercept}, Capabilities: eventOptionsCaps()}},
-		"unknown mode":           {"tool.before": {Modes: []Mode{"execute"}}},
-		"unknown event":          {"tool.unknown": {Modes: []Mode{Observe}}},
-		"intercept missing caps": {"tool.before": {Modes: []Mode{Intercept}}},
-		"observe decision caps":  {"tool.before": {Modes: []Mode{Observe}, Capabilities: eventOptionsCaps("deny")}},
-		"observe empty caps":     {"tool.before": {Modes: []Mode{Observe}, Capabilities: eventOptionsCaps()}},
-		"noninterceptable event": {"session.end": {Modes: []Mode{Intercept}, Capabilities: eventOptionsCaps()}},
-		"wrong mode":             {"tool.before": {Modes: []Mode{Observe}}},
+		"empty mode":             {"tool.before": {Modes: []capability.Mode{""}}},
+		"duplicate mode":         {"tool.before": {Modes: []capability.Mode{capability.InterceptMode, capability.InterceptMode}, Capabilities: eventOptionsCaps()}},
+		"unknown mode":           {"tool.before": {Modes: []capability.Mode{"execute"}}},
+		"unknown event":          {"tool.unknown": {Modes: []capability.Mode{capability.ObserveMode}}},
+		"intercept missing caps": {"tool.before": {Modes: []capability.Mode{capability.InterceptMode}}},
+		"observe decision caps":  {"tool.before": {Modes: []capability.Mode{capability.ObserveMode}, Capabilities: eventOptionsCaps("deny")}},
+		"observe empty caps":     {"tool.before": {Modes: []capability.Mode{capability.ObserveMode}, Capabilities: eventOptionsCaps()}},
+		"noninterceptable event": {"session.end": {Modes: []capability.Mode{capability.InterceptMode}, Capabilities: eventOptionsCaps()}},
+		"wrong mode":             {"tool.before": {Modes: []capability.Mode{capability.ObserveMode}}},
 	}
 	for name, events := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -72,13 +73,13 @@ func TestEventOptionsRejectInvalidAuthority(t *testing.T) {
 }
 
 func TestEventOptionsExplicitModesAndPolicy(t *testing.T) {
-	for _, mode := range []Mode{Intercept, Observe} {
+	for _, mode := range []capability.Mode{capability.InterceptMode, capability.ObserveMode} {
 		t.Run(string(mode), func(t *testing.T) {
 			caps := (*ahp.Capabilities)(nil)
-			if mode == Intercept {
+			if mode == capability.InterceptMode {
 				caps = eventOptionsCaps()
 			}
-			c, err := New(eventOptionsRegistration(t, "tool.before", string(mode), nil), Options{Source: "urn:test:events", Events: map[string]EventCapabilities{"tool.before": {Modes: []Mode{mode}, Capabilities: caps}}})
+			c, err := New(eventOptionsRegistration(t, "tool.before", string(mode), nil), Options{Source: "urn:test:events", Events: map[string]capability.Event{"tool.before": {Modes: []capability.Mode{mode}, Capabilities: caps}}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -89,7 +90,7 @@ func TestEventOptionsExplicitModesAndPolicy(t *testing.T) {
 		})
 	}
 	for _, policy := range []map[string]any{{"scope": "project"}, {"scope": "managed", "disableable": false}, {"disableable": false}} {
-		c, err := New(eventOptionsRegistration(t, "tool.before", "intercept", policy), Options{Source: "urn:test:events", Events: map[string]EventCapabilities{"tool.before": {Modes: []Mode{Intercept}, Capabilities: eventOptionsCaps()}}})
+		c, err := New(eventOptionsRegistration(t, "tool.before", "intercept", policy), Options{Source: "urn:test:events", Events: map[string]capability.Event{"tool.before": {Modes: []capability.Mode{capability.InterceptMode}, Capabilities: eventOptionsCaps()}}})
 		if err == nil {
 			c.Close()
 			t.Fatal("ordinary options admitted stronger policy")
@@ -99,15 +100,15 @@ func TestEventOptionsExplicitModesAndPolicy(t *testing.T) {
 
 func TestEventOptionsSnapshotAndNarrowing(t *testing.T) {
 	caps := eventOptionsCaps("deny", "allow")
-	modes := []Mode{Intercept}
-	events := map[string]EventCapabilities{"tool.before": {Modes: modes, Capabilities: caps}}
+	modes := []capability.Mode{capability.InterceptMode}
+	events := map[string]capability.Event{"tool.before": {Modes: modes, Capabilities: caps}}
 	c, err := New(eventOptionsRegistration(t, "tool.before", "intercept", nil), Options{Source: "urn:test:events", Events: events})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.Close()
 	before := string(sdkJSON(c.manifest))
-	modes[0] = Observe
+	modes[0] = capability.ObserveMode
 	caps.Effects[0] = eventOptionsCaps("modify").Effects[0]
 	delete(events, "tool.before")
 	if string(sdkJSON(c.manifest)) != before {
@@ -127,7 +128,7 @@ func TestEventOptionsSnapshotAndNarrowing(t *testing.T) {
 
 func TestEventOptionsManifestCompatibility(t *testing.T) {
 	reg := eventOptionsRegistration(t, "tool.before", "intercept", nil)
-	opts := Options{Source: "urn:test:events", Events: map[string]EventCapabilities{"tool.before": {Modes: []Mode{Intercept}, Capabilities: eventOptionsCaps()}}}
+	opts := Options{Source: "urn:test:events", Events: map[string]capability.Event{"tool.before": {Modes: []capability.Mode{capability.InterceptMode}, Capabilities: eventOptionsCaps()}}}
 	m, err := manifestForOptions(reg, opts)
 	if err != nil {
 		t.Fatal(err)
@@ -153,9 +154,9 @@ func TestEventOptionsManifestCompatibility(t *testing.T) {
 
 func TestEventOptionsMinimalMetadata(t *testing.T) {
 	reg := eventOptionsRegistration(t, "session.start", "intercept", nil)
-	c, err := New(reg, Options{Source: "urn:test:events", Events: map[string]EventCapabilities{
-		"tool.before":   {Modes: []Mode{Observe}},
-		"session.start": {Modes: []Mode{Intercept}, Capabilities: eventOptionsCaps()},
+	c, err := New(reg, Options{Source: "urn:test:events", Events: map[string]capability.Event{
+		"tool.before":   {Modes: []capability.Mode{capability.ObserveMode}},
+		"session.start": {Modes: []capability.Mode{capability.InterceptMode}, Capabilities: eventOptionsCaps()},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -180,7 +181,7 @@ func TestEventOptionsMinimalMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	var delivered map[string]any
-	if err := json.Unmarshal(r.Event, &delivered); err != nil {
+	if err := json.Unmarshal(sdkJSON(r.Event), &delivered); err != nil {
 		t.Fatal(err)
 	}
 	if string(sdkJSON(delivered["manifest"])) != string(sdkJSON(c.manifest)) {

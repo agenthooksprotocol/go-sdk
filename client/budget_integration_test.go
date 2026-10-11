@@ -242,11 +242,6 @@ func TestNamedSourceOuterBudgetThroughAuthRetryAndOwnedObservation(t *testing.T)
 	if result.Interrupted || !result.InputAvailable || result.Input["count"] != 1 || len(result.Diagnostics) != 0 {
 		t.Fatalf("unexpected settlement: %+v", result)
 	}
-	select {
-	case <-result.Observations.Done():
-	default:
-		t.Fatal("observer still running after owned operation returned")
-	}
 	if reader.reads.Load() != 2 || reader.closes.Load() != 1 {
 		t.Fatalf("source was reread or not closed: reads=%d closes=%d", reader.reads.Load(), reader.closes.Load())
 	}

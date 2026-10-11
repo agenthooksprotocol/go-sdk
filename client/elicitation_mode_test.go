@@ -124,7 +124,7 @@ func TestPublicElicitationModeAdmission(t *testing.T) {
 							t.Fatalf("explicit grant rejected: %v", err)
 						}
 						waitObservations(t, result)
-						if len(result.Errors) != 0 || len(result.Response.Effects.Value) != 1 || len(transports[0].calls) != 1 {
+						if len(result.Diagnostics) != 0 || len(result.response.Effects.Value) != 1 || len(transports[0].calls) != 1 {
 							t.Fatalf("explicit grant did not accept decision: %+v", result)
 						}
 
@@ -156,7 +156,7 @@ func TestPublicElicitationInformationalDeliveryWithoutModeGrant(t *testing.T) {
 				t.Fatalf("informational delivery required a decision grant: %v", err)
 			}
 			waitObservations(t, result)
-			if len(result.Errors) != 0 || len(result.Response.Effects.Value) != len(effects) {
+			if len(result.Diagnostics) != 0 || len(result.response.Effects.Value) != len(effects) {
 				t.Fatalf("informational delivery failed: %+v", result)
 			}
 		})

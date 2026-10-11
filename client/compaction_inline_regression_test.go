@@ -48,10 +48,10 @@ func TestPublicCompactionInlineTextEdits(t *testing.T) {
 					t.Fatalf("dispatch: %v", err)
 				}
 				defer result.Close()
-				if len(result.Errors) != 0 {
-					t.Fatalf("composition: %+v", result.Errors)
+				if len(result.Diagnostics) != 0 {
+					t.Fatalf("composition: %+v", result.Diagnostics)
 				}
-				effective := inlineAt(compositionObject(result.Event), "/"+target)
+				effective := inlineAt(compositionObject(sdkJSON(result.Event)), "/"+target)
 				expected := []any{replacement}
 				if operation == "merge" {
 					expected = []any{original, replacement}
@@ -126,8 +126,8 @@ func TestPublicCompactionResponseRollbackRetainsEarlierAcceptedEdits(t *testing.
 		t.Fatalf("dispatch: %v", err)
 	}
 	defer result.Close()
-	if len(result.Errors) != 1 || len(result.Response.Effects.Value) != 1 || !compositionEqual(compositionObject(result.Event)["instructions"], []any{accepted}) {
-		t.Fatalf("response not atomic: errors=%d effects=%d", len(result.Errors), len(result.Response.Effects.Value))
+	if len(result.Diagnostics) != 1 || len(result.response.Effects.Value) != 1 || !compositionEqual(compositionObject(sdkJSON(result.Event))["instructions"], []any{accepted}) {
+		t.Fatalf("response not atomic: errors=%d effects=%d", len(result.Diagnostics), len(result.response.Effects.Value))
 	}
 }
 
@@ -145,10 +145,10 @@ func TestPublicWorkspaceModifyPreservesOpaquePrior(t *testing.T) {
 		t.Fatalf("dispatch: %v", err)
 	}
 	defer result.Close()
-	if len(result.Errors) != 0 {
-		t.Fatalf("composition: %+v", result.Errors)
+	if len(result.Diagnostics) != 0 {
+		t.Fatalf("composition: %+v", result.Diagnostics)
 	}
-	effective := compositionObject(result.Event)
+	effective := compositionObject(sdkJSON(result.Event))
 	workspace := sdkObj(effective["workspace"])
 	if !compositionEqual(effective["future"], input["future"]) {
 		t.Fatal("unknown event metadata changed")
@@ -170,10 +170,10 @@ func TestPublicModelReturnCanonicalMessages(t *testing.T) {
 		t.Fatalf("dispatch: %v", err)
 	}
 	defer result.Close()
-	if len(result.Errors) != 0 {
-		t.Fatalf("composition: %+v", result.Errors)
+	if len(result.Diagnostics) != 0 {
+		t.Fatalf("composition: %+v", result.Diagnostics)
 	}
-	state := compositionObject(sdkJSON(result.State))
+	state := compositionObject(sdkJSON(result.state))
 	candidate := sdkObj(state["candidate"])["value"]
 	var typed ahp.CanonicalMessages
 	if err := json.Unmarshal(sdkJSON(candidate), &typed); err != nil || len(typed) != 1 || typed[0].Parts[0].TextBodyPart.Value.Text != "answer" {

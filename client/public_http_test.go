@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http/httptest"
 	"testing"
 
@@ -41,13 +40,12 @@ func TestGenericBoundaryThroughPublicHTTPHandler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.InputAvailable || result.Input.Count != 2 || result.State.Permission != "allow" || len(result.Errors) != 0 {
+	if !result.InputAvailable || result.Input.Count != 2 || result.state.Permission != "allow" || len(result.Diagnostics) != 0 {
 		t.Fatalf("public result: %+v", result)
 	}
-	waitObservations(t, result.Result)
 }
 
-func TestGenericDecodeErrorThroughPublicHTTPHandler(t *testing.T) {
+func TestGenericContractRejectsInvalidEditThroughPublicHTTPHandler(t *testing.T) {
 	h, err := server.NewHandler(server.Handlers{Intercept: func(_ context.Context, _ ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
 		modification, err := effect.ModifyInputReplace(map[string]string{"count": "host-refuses"})
 		if err != nil {
@@ -71,12 +69,18 @@ func TestGenericDecodeErrorThroughPublicHTTPHandler(t *testing.T) {
 		Count int `json:"count"`
 	}
 	result, err := c.ToolBefore(context.Background(), event.ToolBeforeInput[Args]{CallID: "call-public", Path: "execute", Name: "task", Origin: "native", Input: Args{Count: 1}})
-	var decode *DecodeError
-	if !errors.As(err, &decode) || result == nil || result.InputAvailable || len(result.Errors) != 0 || len(result.Response.Effects.Value) != 1 {
-		t.Fatalf("public decode result: %+v %v", result, err)
+	if err != nil || result == nil {
+		t.Fatalf("public contract result: %+v %v", result, err)
+	}
+	defer result.Close()
+	if !result.InputAvailable || result.Input.Count != 1 || result.Permission != "deny" || len(result.Diagnostics) != 1 || len(result.AcceptedResponses) != 0 || len(result.response.Effects.Value) != 0 {
+		t.Fatalf("invalid edit was not rejected atomically: %+v", result)
 	}
 	raw, err := c.ToolBefore(context.Background(), event.ToolBeforeInput[json.RawMessage]{CallID: "call-dynamic", Path: "execute", Name: "task", Origin: "native", Input: json.RawMessage(`{"count":1}`)})
-	if err != nil || !raw.InputAvailable || string(raw.Input) != `{"count":"host-refuses"}` {
+	if raw != nil {
+		defer raw.Close()
+	}
+	if err != nil || raw == nil || !raw.InputAvailable || string(raw.Input) != `{"count":"host-refuses"}` {
 		t.Fatalf("raw path: %+v %v", raw, err)
 	}
 }

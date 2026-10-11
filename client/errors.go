@@ -10,7 +10,7 @@ import (
 
 // AdmissionError describes a failure before a boundary was admitted. No backend
 // call was made for a rejected boundary. Configuration failures use Kind config.
-// Protocol delivery failures after admission live in Result.Errors instead.
+// Protocol delivery failures after admission live in Result.Diagnostics instead.
 type AdmissionError struct {
 	Kind string
 	Err  error
@@ -18,20 +18,6 @@ type AdmissionError struct {
 
 func (e *AdmissionError) Error() string { return "client " + e.Kind + ": " + e.Err.Error() }
 func (e *AdmissionError) Unwrap() error { return e.Err }
-
-// DeliveryCode is a stable, payload-free classification of a delivery failure.
-// Stage identifies where it happened; Code identifies the failure category.
-type DeliveryCode = diagnostic.Code
-
-const (
-	DeliveryProtocolRejection DeliveryCode = diagnostic.ProtocolRejection
-	DeliveryRemoteRPC         DeliveryCode = diagnostic.RemoteRpc
-	DeliveryTransport         DeliveryCode = diagnostic.Transport
-	DeliveryCancelled         DeliveryCode = diagnostic.Cancelled
-	DeliveryDeadlineExceeded  DeliveryCode = diagnostic.DeadlineExceeded
-	DeliveryPreparation       DeliveryCode = diagnostic.Preparation
-	DeliveryCapacity          DeliveryCode = diagnostic.Capacity
-)
 
 var errRemoteRPC = errors.New("backend JSON-RPC error")
 
@@ -47,21 +33,21 @@ func interceptResponseFailure(raw []byte, requestID any) error {
 	return errors.New("invalid intercept response")
 }
 
-func deliveryCode(stage string, err error) DeliveryCode {
+func deliveryCode(stage string, err error) diagnostic.Code {
 	switch {
 	case errors.Is(err, context.Canceled):
-		return DeliveryCancelled
+		return diagnostic.Cancelled
 	case errors.Is(err, context.DeadlineExceeded):
-		return DeliveryDeadlineExceeded
+		return diagnostic.DeadlineExceeded
 	case errors.Is(err, errRemoteRPC):
-		return DeliveryRemoteRPC
+		return diagnostic.RemoteRpc
 	case stage == "acceptance" || stage == "request":
-		return DeliveryProtocolRejection
+		return diagnostic.ProtocolRejection
 	case stage == "prepare":
-		return DeliveryPreparation
+		return diagnostic.Preparation
 	case stage == "admission":
-		return DeliveryCapacity
+		return diagnostic.Capacity
 	default:
-		return DeliveryTransport
+		return diagnostic.Transport
 	}
 }

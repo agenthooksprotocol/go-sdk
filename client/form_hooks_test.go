@@ -90,8 +90,8 @@ func TestFormHooksSingleDeclarationAndStagedReturnValidation(t *testing.T) {
 				t.Fatalf("elicitation: %v", err)
 			}
 			defer result.Close()
-			if len(result.Errors) != 1 || len(result.Response.Effects.Value) != 1 || !result.Candidate.Present || !result.Candidate.Value.Available || result.Candidate.Value.Answer.Count != 2 {
-				t.Fatalf("candidate validation failed: errors=%d", len(result.Errors))
+			if len(result.Diagnostics) != 1 || len(result.response.Effects.Value) != 1 || !result.Candidate.Present || !result.Candidate.Value.Available || result.Candidate.Value.Answer.Count != 2 {
+				t.Fatalf("candidate validation failed: errors=%d", len(result.Diagnostics))
 			}
 			encoded := sdkJSON(result.Candidate.Value.Result)
 			if !strings.Contains(string(encoded), `"parts":null`) || !strings.Contains(string(encoded), `"flag":false`) {
@@ -115,7 +115,7 @@ func TestFormHooksDeclineCancelAndURL(t *testing.T) {
 		if err != nil || result == nil {
 			t.Fatalf("%s: %v", action, err)
 		}
-		if len(result.Errors) != 0 || !result.Candidate.Present || result.Candidate.Value.Available {
+		if len(result.Diagnostics) != 0 || !result.Candidate.Present || result.Candidate.Value.Available {
 			t.Fatal("nonaccept result acquired typed content")
 		}
 		result.Close()
@@ -165,7 +165,7 @@ func TestFormHooksCorrelatedResultTypedMerge(t *testing.T) {
 		t.Fatalf("result: %v", err)
 	}
 	defer result.Close()
-	if len(result.Errors) != 1 || !result.Answer.Present || !result.Answer.Value.Available || result.Answer.Value.Answer.Count != 2 || result.Answer.Value.Answer.Name != "name" {
+	if len(result.Diagnostics) != 1 || !result.Answer.Present || !result.Answer.Value.Available || result.Answer.Value.Answer.Count != 2 || result.Answer.Value.Answer.Name != "name" {
 		t.Fatal("typed partial answer merge not atomic")
 	}
 	if !strings.Contains(string(sdkJSON(result.Answer.Value.Result)), `"flag":false`) {
@@ -206,7 +206,7 @@ func TestFormHooksCorrelatedNonacceptResults(t *testing.T) {
 		if err != nil || result == nil {
 			t.Fatalf("%s result: %v", action, err)
 		}
-		if len(result.Errors) != 0 || !result.Answer.Present || result.Answer.Value.Available || result.Answer.Value.Result.Content.Present {
+		if len(result.Diagnostics) != 0 || !result.Answer.Present || result.Answer.Value.Available || result.Answer.Value.Result.Content.Present {
 			t.Fatal("nonaccept result acquired content")
 		}
 		result.Close()
@@ -243,13 +243,13 @@ func checkFormOmittedAcceptContent[T any](t *testing.T, wantValid bool) {
 	}
 	defer result.Close()
 	if wantValid {
-		if len(result.Errors) != 0 || !result.Candidate.Present || !result.Candidate.Value.Available || result.Candidate.Value.Result.Content.Present {
-			t.Fatalf("public candidate: %+v errors=%v", result.Candidate, result.Errors)
+		if len(result.Diagnostics) != 0 || !result.Candidate.Present || !result.Candidate.Value.Available || result.Candidate.Value.Result.Content.Present {
+			t.Fatalf("public candidate: %+v errors=%v", result.Candidate, result.Diagnostics)
 		}
 		if strings.Contains(string(sdkJSON(result.Candidate.Value.Result)), `"content"`) {
 			t.Fatal("candidate acquired content")
 		}
-	} else if len(result.Errors) != 1 || result.Candidate.Present || len(result.Response.Effects.Value) != 0 {
+	} else if len(result.Diagnostics) != 1 || result.Candidate.Present || len(result.response.Effects.Value) != 0 {
 		t.Fatal("invalid required answer was published")
 	}
 }
@@ -289,7 +289,7 @@ func TestPublicNeutralElicitationMetadataResult(t *testing.T) {
 		t.Fatalf("metadata result: %v", err)
 	}
 	defer result.Close()
-	if len(result.Errors) != 0 || len(transports[0].calls) != before+1 {
-		t.Fatalf("neutral metadata delivery: %v", result.Errors)
+	if len(result.Diagnostics) != 0 || len(transports[0].calls) != before+1 {
+		t.Fatalf("neutral metadata delivery: %v", result.Diagnostics)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/agenthooksprotocol/go-sdk/content"
 	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 	"io"
 	"math"
@@ -69,7 +70,7 @@ func (c *Hooks) projectContentSlots(ctx context.Context, event, subscription map
 					return nil, errors.New("malformed normalized content item")
 				}
 				item := v
-				sources, _ := ctx.Value(contentSourcesContextKey{}).(map[string]*ContentSource)
+				sources, _ := ctx.Value(contentSourcesContextKey{}).(map[string]*content.Source)
 				if prepared, ok := ctx.Value(preparedContextKey{}).(*preparedBoundary); ok {
 					sources = prepared.sources
 				}
@@ -212,7 +213,7 @@ func (c *Hooks) projectContentItem(ctx context.Context, item, selection, subscri
 	out := map[string]any{}
 	var knownDescriptor ahp.ContentItem
 	descriptorItem := item
-	if _, owned := item["body"].(*ContentSource); owned {
+	if _, owned := item["body"].(*content.Source); owned {
 		descriptorItem = contentClone(item).(map[string]any)
 		delete(descriptorItem, "body")
 		descriptorItem["selection"] = "metadata"
@@ -301,7 +302,7 @@ func (c *Hooks) projectContentItem(ctx context.Context, item, selection, subscri
 		return out, nil
 	}
 	if preparing, _ := ctx.Value(uploadPreparationContextKey{}).(bool); !preparing {
-		if owner, ok := body.(*ContentSource); ok {
+		if owner, ok := body.(*content.Source); ok {
 			ref, planned, err := plannedUpload(ctx, owner)
 			if err != nil {
 				return nil, err
@@ -338,7 +339,7 @@ func (c *Hooks) projectContentItem(ctx context.Context, item, selection, subscri
 	}
 	var raw []byte
 	switch source := body.(type) {
-	case *ContentSource:
+	case *content.Source:
 		var err error
 		timeout, valid := contentInt(upload["timeoutMs"])
 		if !valid || timeout < 1 || timeout > math.MaxInt64/int64(time.Millisecond) {
@@ -600,7 +601,7 @@ func contentClone(value any) any {
 	}
 }
 
-// fileChangeReferencePath identifies legacy bare wire references, not content items.
+// fileChangeReferencePath identifies canonical file-change references, not content items.
 func fileChangeReferencePath(path string) bool {
 	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
 	return len(parts) == 3 && parts[0] == "changes" && (parts[2] == "before" || parts[2] == "after")

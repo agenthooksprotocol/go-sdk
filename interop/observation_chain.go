@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/agenthooksprotocol/go-sdk/capability"
 	"io"
 	"net/http"
 	"strconv"
@@ -225,7 +226,7 @@ func runObservationChain(parent context.Context, sc lifecycleScenario, send func
 	if err := json.Unmarshal(jsonBytes(params["capabilities"]), &capabilities); err != nil {
 		return nil, nil, err
 	}
-	client, err := hooks.New(registration.Value, hooks.Options{Source: str(event["source"]), Events: map[string]hooks.EventCapabilities{str(event["type"]): {Modes: []hooks.Mode{hooks.Intercept, hooks.Observe}, Capabilities: &capabilities}}, EventClient: &http.Client{Transport: transport}, ObservationTimeout: 20 * time.Second, Content: hooks.ContentOptions{ProjectOpaque: func(_ context.Context, _ hooks.ContentAuthorization, _ string, value any) (any, error) {
+	client, err := hooks.New(registration.Value, hooks.Options{Source: str(event["source"]), Events: map[string]capability.Event{str(event["type"]): {Modes: []capability.Mode{capability.InterceptMode, capability.ObserveMode}, Capabilities: &capabilities}}, EventClient: &http.Client{Transport: transport}, ObservationTimeout: 20 * time.Second, Content: hooks.ContentOptions{ProjectOpaque: func(_ context.Context, _ hooks.ContentAuthorization, _ string, value any) (any, error) {
 		return value, nil
 	}}})
 	if err != nil {
@@ -267,13 +268,18 @@ func runObservationChain(parent context.Context, sc lifecycleScenario, send func
 		return nil, nil, errors.New("chain cancellation did not interrupt SDK operation")
 	}
 	failures := []any{}
-	for _, failure := range result.Errors {
+	for _, failure := range result.Diagnostics {
 		if result.Interrupted && errors.Is(failure.Err, context.Canceled) {
 			continue
 		}
 		group := backendIDs[failure.BackendID]
 		if failure.Subscription < 0 || failure.Subscription >= len(group) {
 			return nil, nil, errors.New("unknown SDK failure attribution")
+		}
+		// Observe failures have their own diagnostics below; they are not
+		// failed interception attempts. Settled intercept subscriptions can also receive observations.
+		if failure.Stage == "observation" || group[failure.Subscription]["mode"] == "observe" {
+			continue
 		}
 		failures = append(failures, group[failure.Subscription]["id"])
 	}
@@ -300,7 +306,7 @@ func runObservationChain(parent context.Context, sc lifecycleScenario, send func
 		}
 	}
 	var effective any
-	if err = json.Unmarshal(result.EffectiveInput, &effective); err != nil {
+	if err = json.Unmarshal(jsonBytes(result.Event.ToolBeforeEvent.Value.Tool.Input), &effective); err != nil {
 		return nil, nil, err
 	}
 	return Object{"called": called, "failures": failures, "observations": observed, "input": effective}, diagnostics, nil

@@ -122,7 +122,7 @@ func TestLifecycleAuthParity(t *testing.T) {
 				t.Setenv("AHP_GO_EVENT_TOKEN", auth.Token)
 				bad := client.Upload
 				bad.Auth = &UploadAuth{Type: "bearer", TokenEnv: "AHP_GO_EVENT_TOKEN"}
-				if _, status, _ := UploadContent(ctx, bad, "body", "event-token-must-fail", []byte("x")); status != 401 {
+				if _, status, _ := UploadContent(ctx, bad, []byte("x")); status != 401 {
 					t.Fatal("event credential accepted by upload", status)
 				}
 			}

@@ -10,20 +10,6 @@ import (
 	"github.com/agenthooksprotocol/go-sdk/capability"
 )
 
-// Mode is an explicitly supported delivery mode for a boundary.
-type Mode = capability.Mode
-
-const (
-	Intercept Mode = ahp.StaticCapabilityManifestEventsItemModesItemIntercept
-	Observe   Mode = ahp.StaticCapabilityManifestEventsItemModesItemObserve
-)
-
-// EventCapabilities declares host authority for one exact boundary. Modes must
-// be nonempty and unique. Intercept requires an explicit Capabilities value,
-// including when its Effects list is empty. Observe-only entries omit Capabilities.
-// Neither registration subscriptions nor per-occurrence options grant authority.
-type EventCapabilities = capability.Event
-
 // manifestForOptions synthesizes only the metadata needed by the ordinary path.
 // Events are host declarations, never inferred from registration. Transport and
 // authentication lists describe the supplied registration, not blanket native
@@ -50,14 +36,14 @@ func manifestForOptions(reg ahp.Registration, opts Options) (map[string]any, err
 		if len(cfg.Modes) == 0 {
 			return nil, fmt.Errorf("event %q requires explicit modes", name)
 		}
-		seen := map[Mode]bool{}
+		seen := map[capability.Mode]bool{}
 		intercept := false
 		for _, mode := range cfg.Modes {
 			if seen[mode] {
 				return nil, fmt.Errorf("event %q repeats a mode", name)
 			}
 			seen[mode] = true
-			intercept = intercept || mode == Intercept
+			intercept = intercept || mode == capability.InterceptMode
 		}
 		if intercept && cfg.Capabilities == nil {
 			return nil, fmt.Errorf("event %q requires explicit intercept capabilities", name)

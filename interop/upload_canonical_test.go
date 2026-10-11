@@ -39,12 +39,12 @@ func TestCanonicalUploadRawBytesAndScope(t *testing.T) {
 	bindings["other"] = UploadBinding{Endpoint: binding.Endpoint, Auth: &UploadAuth{Type: "bearer", TokenEnv: "AHP_CANONICAL_OTHER"}}
 	seen := map[string]bool{}
 	for _, body := range [][]byte{{0, 255, 128, '\r', '\n'}, {0, 255, 128, '\r', '\n'}, {}, []byte("changed")} {
-		descriptor, status, err := UploadContent(context.Background(), binding, "other", "caller-ref", body)
+		descriptor, status, err := UploadContent(context.Background(), binding, body)
 		if err != nil || status != 201 {
 			t.Fatalf("upload: status=%d error=%v", status, err)
 		}
 		ref := str(descriptor["ref"])
-		if ref == "caller-ref" || seen[ref] {
+		if ref == "" || seen[ref] {
 			t.Fatalf("reference not newly allocated: %q", ref)
 		}
 		seen[ref] = true
@@ -67,7 +67,7 @@ func TestCanonicalUploadRawBytesAndScope(t *testing.T) {
 	// Omitted upload auth does not inherit the event or upload principal.
 	anonymous := binding
 	anonymous.Auth = nil
-	if _, status, err := UploadContent(context.Background(), anonymous, "granted", "unused", nil); status != 401 || err == nil {
+	if _, status, err := UploadContent(context.Background(), anonymous, nil); status != 401 || err == nil {
 		t.Fatalf("anonymous: %d %v", status, err)
 	}
 }
@@ -154,7 +154,7 @@ func TestCanonicalUploadFixtureNegativesReachReceiver(t *testing.T) {
 	binding := UploadBinding{Endpoint: server.URL + "/upload", TimeoutMs: 1000}
 	bindings["anonymous"] = binding
 	for _, step := range []Object{{"size": float64(4)}, {"size": float64(2)}, {"sha256": strings.Repeat("0", 64)}} {
-		descriptor, status, err := uploadFixture(context.Background(), binding, "ignored", "ignored", []byte("abc"), step)
+		descriptor, status, err := uploadFixture(context.Background(), binding, []byte("abc"), step)
 		if status != 400 || err == nil || descriptor != nil {
 			t.Fatalf("fixture negative did not receive rejection: %d %v %v", status, descriptor, err)
 		}
@@ -169,7 +169,7 @@ func TestCanonicalUploadFixtureNegativesReachReceiver(t *testing.T) {
 func TestCanonicalUploadRejectsCredentialFraming(t *testing.T) {
 	t.Setenv("AHP_CANONICAL_MALFORMED", "secret\r\nInjected: value")
 	binding := UploadBinding{Endpoint: "http://127.0.0.1:1/upload", Auth: &UploadAuth{Type: "bearer", TokenEnv: "AHP_CANONICAL_MALFORMED"}}
-	if _, status, err := UploadContent(context.Background(), binding, "", "", nil); err == nil || status != 0 || err.Error() != "invalid upload credential" {
+	if _, status, err := UploadContent(context.Background(), binding, nil); err == nil || status != 0 || err.Error() != "invalid upload credential" {
 		t.Fatalf("credential not rejected before request: %d %v", status, err)
 	}
 }

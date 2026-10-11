@@ -29,7 +29,7 @@ func run(registrationPath, filePath string) error {
 	if err != nil {
 		return err
 	}
-	hooks, err := client.New(registration, client.Options{Source: "urn:example:document-review", Events: map[string]client.EventCapabilities{"model.request.before": caps}, MaxContentBytes: 8 << 20, MaxConcurrentUploads: 8})
+	hooks, err := client.New(registration, client.Options{Source: "urn:example:document-review", Events: map[string]capability.Event{"model.request.before": caps}, MaxContentBytes: 8 << 20, MaxConcurrentUploads: 8})
 	if err != nil {
 		return err
 	}

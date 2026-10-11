@@ -134,7 +134,7 @@ func TestPublicResolvedInstructionsAcrossReceivers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result == nil || len(result.Errors) != 0 {
+	if result == nil || len(result.Diagnostics) != 0 {
 		t.Fatalf("not accepted: %+v", result)
 	}
 	defer result.Close()

@@ -279,17 +279,34 @@ func ToolBeforeWithProvenance[A, R, P any](ctx context.Context, hooks *Hooks, in
 	// Declared contracts cannot be overridden by later convenience options.
 	options = append(options, WithTargetCodec("input", contract.Arguments), WithReturnCodec(contract.Result), WithProvenanceCodec(provenance))
 	result, err := hooks.intercept(ctx, "tool.before", inputsources.PrepareToolBefore(input), options...)
+	return decodeToolDecision(result, err, contract, provenance)
+}
+
+func decodeToolDecision[A, R, P any](result *Result, err error, contract ToolContract[A, R], provenance Codec[P]) (*ToolDecision[A, R, P], error) {
 	if result == nil {
 		return nil, err
 	}
 	out := &ToolDecision[A, R, P]{Result: result}
-	decodedInput, errDecode := contract.Arguments.DecodeJSON(result.EffectiveInput)
+	complete := false
+	defer func() {
+		if !complete {
+			result.Interrupted = true
+			result.Permission = "none"
+			out.InputAvailable = false
+			out.Candidate = ahp.Optional[ahp.Candidate[R, P]]{}
+		}
+	}()
+	if e := result.requireSettledEvent("tool.before"); e != nil {
+		return out, errors.Join(err, e)
+	}
+	decodedInput, errDecode := contract.Arguments.DecodeJSON(sdkJSON(result.Event.ToolBeforeEvent.Value.Tool.Input))
 	out.Input = decodedInput
 	if errDecode != nil {
+		result.Interrupted = true
+		result.Permission = "none"
 		return out, errors.Join(err, &DecodeError{Err: errDecode})
 	}
-	out.InputAvailable = true
-	state, stateErr := sdkMap(result.State)
+	state, stateErr := sdkMap(result.state)
 	if stateErr != nil {
 		return out, stateErr
 	}
@@ -313,5 +330,7 @@ func ToolBeforeWithProvenance[A, R, P any](ctx context.Context, hooks *Hooks, in
 		}
 		out.Candidate = ahp.Some(typed)
 	}
+	out.InputAvailable = true
+	complete = true
 	return out, err
 }

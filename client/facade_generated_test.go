@@ -17,8 +17,8 @@ import (
 // supplies its source/manifest and owns actual backend execution. This checks the
 // complete public expression and generic inference without network or subprocesses.
 func compileGeneratedFacadeExample(ctx context.Context, opts Options) {
-	opts.Events = map[string]EventCapabilities{
-		"tool.before": {Modes: []Mode{Intercept, Observe}, Capabilities: capability.New([]string{"modify"}, capability.WithInputModification(true, true))},
+	opts.Events = map[string]capability.Event{
+		"tool.before": {Modes: []capability.Mode{capability.InterceptMode, capability.ObserveMode}, Capabilities: capability.New([]string{"modify"}, capability.WithInputModification(true, true))},
 	}
 	c, err := New(registration.New(registration.NewBackend("dev.example.guard",
 		transport.NewStdio("guard", ahp.StdioTransportLifecyclePersistent),

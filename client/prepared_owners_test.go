@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/content"
 	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 	"io"
 	"reflect"
@@ -33,7 +34,7 @@ func preparedOwnerCaps(target string) map[string]any {
 }
 func preparedOwnerPrepare(t *testing.T, event map[string]any, target string, cfg interceptConfig) *preparedBoundary {
 	t.Helper()
-	p, err := (&Client{opts: Options{Content: ContentOptions{AuthorizeContent: contentTestAllow}}}).prepareBoundary(context.Background(), event, preparedOwnerCaps(target), cfg)
+	p, err := (&Hooks{opts: Options{Content: ContentOptions{AuthorizeContent: contentTestAllow}}}).prepareBoundary(context.Background(), event, preparedOwnerCaps(target), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +87,7 @@ func TestPreparedIntegrityLimitsAndOwnership(t *testing.T) {
 	for _, text := range []string{"plain", ` {"x":1} `, `{"x":`} {
 		t.Run(text, func(t *testing.T) {
 			event := preparedOwnerEvent(preparedOwnerMessage("one", preparedOwnerText("text", text)))
-			c := &Client{opts: Options{Content: ContentOptions{Resolver: func(context.Context, string) (io.ReadCloser, error) { t.Fatal("inline text resolved"); return nil, nil }}}}
+			c := &Hooks{opts: Options{Content: ContentOptions{Resolver: func(context.Context, string) (io.ReadCloser, error) { t.Fatal("inline text resolved"); return nil, nil }}}}
 			p, err := c.prepareBoundary(context.Background(), event, preparedOwnerCaps("response"), interceptConfig{})
 			if err != nil {
 				t.Fatal(err)
@@ -175,7 +176,7 @@ func TestPreparedCancellationClosesReaderOnce(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ctx = context.WithValue(ctx, preparedContextKey{}, p)
-	c := &Client{opts: Options{Content: ContentOptions{AuthorizeContent: contentTestAllow}}}
+	c := &Hooks{opts: Options{Content: ContentOptions{AuthorizeContent: contentTestAllow}}}
 	done := make(chan error, 1)
 	go func() {
 		_, err := c.projectContent(ctx, event, contentTestSubscription("http://unused.invalid"), "backend")
@@ -248,7 +249,7 @@ func TestPreparedReferenceOwnersRemainLazy(t *testing.T) {
 	part["selection"] = "body"
 	part["body"] = map[string]any{"ref": "urn:original"}
 	event := preparedOwnerEvent(preparedOwnerMessage("one", part))
-	c := &Client{opts: Options{Content: ContentOptions{Resolver: func(context.Context, string) (io.ReadCloser, error) {
+	c := &Hooks{opts: Options{Content: ContentOptions{Resolver: func(context.Context, string) (io.ReadCloser, error) {
 		opens.Add(1)
 		return io.NopCloser(strings.NewReader("original")), nil
 	}}}}
@@ -261,7 +262,7 @@ func TestPreparedReferenceOwnersRemainLazy(t *testing.T) {
 		t.Fatal("reference not lazy")
 	}
 	defer ownedcontent.Retire(owner)
-	for _, source := range []*ContentSource{owner, p.clone().sources["/items/0/parts/0"]} {
+	for _, source := range []*content.Source{owner, p.clone().sources["/items/0/parts/0"]} {
 		raw, err := ownedcontent.Borrow(source, context.Background(), p.limit)
 		if err != nil || string(raw) != "original" {
 			t.Fatal(string(raw), err)
@@ -287,7 +288,7 @@ func TestPreparedEagerAttachmentsEnforceLimitsWithoutProjection(t *testing.T) {
 				items = append(items, preparedOwnerMessage(fmt.Sprint(i), preparedOwnerAttachment(fmt.Sprint(i))))
 			}
 			event := preparedOwnerEvent(items...)
-			p, err := (&Client{opts: Options{MaxContentBytes: 8}}).prepareBoundary(context.Background(), event, preparedOwnerCaps("response"), cfg)
+			p, err := (&Hooks{opts: Options{MaxContentBytes: 8}}).prepareBoundary(context.Background(), event, preparedOwnerCaps("response"), cfg)
 			if (err != nil) != tc.bad {
 				t.Fatal("unexpected bounds", err)
 			}
@@ -301,7 +302,7 @@ func TestPreparedEagerAttachmentsEnforceLimitsWithoutProjection(t *testing.T) {
 }
 func TestPreparedValuesCheckLimitsBeforeDecoding(t *testing.T) {
 	for _, payloads := range [][]string{{"123456789"}, {"12345", "67890"}} {
-		p := &preparedBoundary{sources: map[string]*ContentSource{}, slots: map[string][]string{"response": {"/items"}}, limit: 8}
+		p := &preparedBoundary{sources: map[string]*content.Source{}, slots: map[string][]string{"response": {"/items"}}, limit: 8}
 		items := []any{}
 		for i, raw := range payloads {
 			source := ownedcontent.NewAttachment([]byte(raw))

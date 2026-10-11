@@ -23,8 +23,8 @@ func targetTestItem(id, media, raw string) (map[string]any, map[string][]byte) {
 	item["id"], item["mediaType"], item["selection"] = id, media, "body"
 	return item, map[string][]byte{ref: []byte(raw)}
 }
-func targetTestClient(bodies map[string][]byte) *Client {
-	return &Client{opts: Options{Content: ContentOptions{Resolver: func(_ context.Context, ref string) (io.ReadCloser, error) {
+func targetTestClient(bodies map[string][]byte) *Hooks {
+	return &Hooks{opts: Options{Content: ContentOptions{Resolver: func(_ context.Context, ref string) (io.ReadCloser, error) {
 		raw, ok := bodies[ref]
 		if !ok {
 			return nil, fmt.Errorf("unknown reference %s", ref)
@@ -428,7 +428,7 @@ func TestToolAfterOutputCanonicalLists(t *testing.T) {
 			before := string(sdkJSON(event))
 			caps := map[string]any{"effects": []any{"modify"}, "modify": map[string]any{"output": map[string]any{"replace": true, "merge": true}}}
 			opens := 0
-			c := &Client{opts: Options{Content: ContentOptions{Resolver: func(context.Context, string) (io.ReadCloser, error) {
+			c := &Hooks{opts: Options{Content: ContentOptions{Resolver: func(context.Context, string) (io.ReadCloser, error) {
 				opens++
 				return io.NopCloser(strings.NewReader("immutable binary")), nil
 			}}}}

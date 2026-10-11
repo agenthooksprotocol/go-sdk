@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -75,10 +76,7 @@ func TestRegistrationAuthEventChallengeAndNotificationReplay(t *testing.T) {
 				}
 				return &auth.Credential{Type: "bearer", Token: "new"}, nil
 			}}
-			tr, err := newAuthenticatedBackendTransport(resolverTestBackend(t, server.URL), server.Client(), func(context.Context, *ahp.Backend) (*http.Client, error) {
-				t.Error("legacy resolver overrode provider")
-				return nil, errors.New("legacy")
-			}, p)
+			tr, err := newAuthenticatedBackendTransport(registrationAuthTestBackend(t, server.URL), server.Client(), p)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -106,7 +104,7 @@ func TestRegistrationAuthCancellationAndRedaction(t *testing.T) {
 		<-c.Done()
 		return auth.Credential{}, errors.New("credential-secret")
 	}}
-	tr, err := newAuthenticatedBackendTransport(resolverTestBackend(t, "https://not-dispatched.example"), nil, nil, provider)
+	tr, err := newAuthenticatedBackendTransport(registrationAuthTestBackend(t, "https://not-dispatched.example"), nil, provider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,4 +113,14 @@ func TestRegistrationAuthCancellationAndRedaction(t *testing.T) {
 	if !errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "credential-secret") {
 		t.Fatalf("bad error: %v", err)
 	}
+}
+
+func registrationAuthTestBackend(t *testing.T, endpoint string) *ahp.Backend {
+	t.Helper()
+	var backend ahp.Backend
+	raw := fmt.Sprintf(`{"id":"com.example.auth","transport":{"type":"http","url":%q},"authentication":{"type":"oauth","issuer":"https://issuer.example","resource":"https://resource.example","clientId":"client","flow":"client_credentials","scopes":["intercept"]},"subscriptions":[]}`, endpoint)
+	if err := json.Unmarshal([]byte(raw), &backend); err != nil {
+		t.Fatal(err)
+	}
+	return &backend
 }

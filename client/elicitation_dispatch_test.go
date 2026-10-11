@@ -28,7 +28,7 @@ func elicitationDispatchCaps(stage, mode string) map[string]any {
 	}
 	return c
 }
-func setDispatchBoundary(c *Client, name string, caps map[string]any) {
+func setDispatchBoundary(c *Hooks, name string, caps map[string]any) {
 	c.manifest["events"] = []any{map[string]any{"event": name, "modes": []any{"intercept", "observe"}, "capabilities": caps}}
 	for i := range c.backends {
 		for _, sub := range c.backends[i].subscriptions {
@@ -56,11 +56,11 @@ func TestElicitationDispatchSnapshotAndAtomicAnswers(t *testing.T) {
 	if result.Snapshot == nil || !result.Snapshot.requestValid || !compositionEqual(result.Snapshot.requestedSchema, compositionObject(original)["requestedSchema"]) {
 		t.Fatal("original form contract not snapshotted")
 	}
-	if len(result.Errors) != 1 || len(result.Response.Effects.Value) != 1 {
+	if len(result.Diagnostics) != 1 || len(result.response.Effects.Value) != 1 {
 		t.Fatalf("non-atomic acceptance: %+v", result)
 	}
 	var state map[string]any
-	_ = json.Unmarshal(sdkJSON(result.State), &state)
+	_ = json.Unmarshal(sdkJSON(result.state), &state)
 	if sdkObj(sdkObj(state["candidate"])["value"])["action"] != "accept" {
 		t.Fatal(state)
 	}
@@ -130,7 +130,7 @@ func TestElicitationResultSerialInlineReceivers(t *testing.T) {
 	input := elicitationDispatchInput("result", "form", initial)
 
 	result, err := c.intercept(context.Background(), "user.elicitation.result", input, WithElicitationRequest(before.Snapshot))
-	if err != nil || result == nil || len(result.Errors) != 0 {
+	if err != nil || result == nil || len(result.Diagnostics) != 0 {
 		t.Fatalf("result: %+v %v", result, err)
 	}
 	if len(seen) != 2 || seen[0] != initial {
@@ -141,12 +141,12 @@ func TestElicitationResultSerialInlineReceivers(t *testing.T) {
 	if sdkObj(second["content"])["x"] != "b" || sdkObj(second["_meta"])["preserved"] != true {
 		t.Fatal(second)
 	}
-	raw := []byte(compositionString(sdkObj(sdkObj(compositionObject(result.Event)["elicitation"])["result"])["text"]))
+	raw := []byte(compositionString(sdkObj(sdkObj(compositionObject(sdkJSON(result.Event))["elicitation"])["result"])["text"]))
 	if string(raw) != seen[1] {
 		t.Fatal("effective inline bytes inaccessible")
 	}
 	raw[0] = 'x'
-	again := compositionString(sdkObj(sdkObj(compositionObject(result.Event)["elicitation"])["result"])["text"])
+	again := compositionString(sdkObj(sdkObj(compositionObject(sdkJSON(result.Event))["elicitation"])["result"])["text"])
 	if again != seen[1] {
 		t.Fatal("effective bytes alias caller buffer")
 	}
@@ -275,10 +275,10 @@ func TestElicitationStructuredEditPrivacy(t *testing.T) {
 				if string(sdkJSON(input)) != before {
 					t.Fatal("caller result mutated")
 				}
-				effectiveItem := preparedAt(compositionObject(result.Event), "/elicitation/result")
+				effectiveItem := preparedAt(compositionObject(sdkJSON(result.Event)), "/elicitation/result")
 				if tc.accepted {
-					if len(result.Errors) != 0 || len(result.Response.Effects.Value) != 2 || !visibleBody || writes != 1 {
-						t.Fatalf("authorized answer rejected: errors=%v visible=%v writes=%d reads=%d", result.Errors, visibleBody, writes, reads)
+					if len(result.Diagnostics) != 0 || len(result.response.Effects.Value) != 2 || !visibleBody || writes != 1 {
+						t.Fatalf("authorized answer rejected: errors=%v visible=%v writes=%d reads=%d", result.Diagnostics, visibleBody, writes, reads)
 					}
 					answer := compositionObject([]byte(compositionString(effectiveItem["text"])))
 					content := sdkObj(answer["content"])
@@ -287,8 +287,8 @@ func TestElicitationStructuredEditPrivacy(t *testing.T) {
 						t.Fatal("structured edit changed wrapper or used wrong object operation", answer)
 					}
 				} else {
-					if len(result.Errors) == 0 || len(result.Response.Effects.Value) != 0 {
-						t.Fatal("unauthorized/invalid edit published atomic prefix", result.Errors, result.Response.Effects)
+					if len(result.Diagnostics) == 0 || len(result.response.Effects.Value) != 0 {
+						t.Fatal("unauthorized/invalid edit published atomic prefix", result.Diagnostics, result.response.Effects)
 					}
 					if effectiveItem["text"] != item["text"] || effectiveItem["selection"] != item["selection"] {
 						t.Fatal("rejected structured edit changed host answer", effectiveItem)
