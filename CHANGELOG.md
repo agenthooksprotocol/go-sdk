@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/agenthooksprotocol/go-sdk/compare/v0.4.0...v0.4.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* **client:** preserve typed settlement events and response envelopes ([8a82f70](https://github.com/agenthooksprotocol/go-sdk/commit/8a82f707cbda800ed3408864b5cc4d0f7ca45933))
+
 ## [0.4.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.3.0...v0.4.0) (2026-10-11)
 
 
