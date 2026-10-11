@@ -94,10 +94,19 @@ type Result struct {
 	attachmentBudget  *contentSourceBudget
 	attachmentLimit   int64
 	// Snapshot retains the original MCP semantic contract, not body bytes.
-	Snapshot       *ElicitationRequest
+	Snapshot *ElicitationRequest
+	// Event and EffectiveInput are compatibility snapshots for raw consumers.
+	// SettledEvent is the SDK-decoded effective event, including opaque extras.
 	Event          json.RawMessage
 	EffectiveInput json.RawMessage
-	State          ahp.InterceptRequestParamsState
+	SettledEvent   *ahp.Event
+	// AcceptedResponse retains contextual effect payloads and complete injection
+	// envelopes. It is nil for observe-only boundaries.
+	AcceptedResponse ahp.ContextualResponse
+	// SettledCandidate distinguishes no candidate from an opaque candidate whose
+	// value is JSON null. Schema-owned values are decoded using event context.
+	SettledCandidate ahp.Nullable[SettledCandidate]
+	State            ahp.InterceptRequestParamsState
 	// Permission is the settled canonical permission, not proof of execution.
 	// None and Ask are not grants; Interrupted always gates execution.
 	Permission ahp.InterceptRequestParamsStatePermission

@@ -347,6 +347,9 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 	if err = json.Unmarshal(sdkJSON(state), &result.State); err != nil {
 		return nil, err
 	}
+	if err := result.decodeSettlement(name, interceptable); err != nil {
+		return result, err
+	}
 	result.Permission = result.State.Permission
 	result.Diagnostics = append([]DeliveryError(nil), result.Errors...)
 	if _, err := prepared.values(event); err != nil {

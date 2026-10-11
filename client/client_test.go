@@ -132,6 +132,9 @@ func TestTypedDecodeFailurePreservesProtocolAcceptance(t *testing.T) {
 	if !errors.As(err, &decode) || r == nil || r.InputAvailable {
 		t.Fatalf("decode contract: %+v %v", r, err)
 	}
+	if !r.Interrupted || r.Permission != "none" || r.SettledEvent == nil || r.AcceptedResponse == nil {
+		t.Fatal("host decode failure must retain typed settlement without execution grant")
+	}
 	if r.State.Permission != "allow" || len(r.Response.Effects.Value) != 2 || len(r.Errors) != 0 {
 		t.Fatalf("accepted effects lost: %+v", r)
 	}
