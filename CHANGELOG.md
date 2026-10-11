@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.3.0...v0.4.0) (2026-10-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* Consumer input and result APIs use domain names, and internal SDK assembly helpers are no longer exported.
+
+### Features
+
+* enforce typed operation contracts and clean public APIs ([197a872](https://github.com/agenthooksprotocol/go-sdk/commit/197a872e48c69c0947b1784e897cb8009dc979a8))
+
 ## [0.3.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.2.0...v0.3.0) (2026-10-10)
 
 
