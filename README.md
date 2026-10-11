@@ -172,6 +172,22 @@ rejects fractional milliseconds and nonpositive deadlines. Use the generated
 `NewInterceptMilliseconds` for explicit wire values. No timeout or stdio
 lifecycle default is invented.
 
+### Subscription interest
+
+`func (h *Hooks) Subscribes(event string) bool` reports static subscription
+interest. Call `hooks.Subscribes("tool.before")` before expensive hook input
+preparation; when it returns false, skip that preparation and hook delivery,
+not the host's permission checks. The synchronous lookup performs no input
+preparation, transport I/O, authentication, or uploads.
+
+Only configured events with intercept or observe support can match. The lookup
+uses dispatch's exact, `*`, and prefix selectors (such as `tool.*`) and covers
+both intercept and observe-only interest. Intercept subscriptions can receive
+observations after settlement, so interest is retained across subscription and
+host modes rather than requiring an intercept-mode match. Payload filters are
+ignored conservatively: true means possible interest, not that a particular
+input passes its filters. It is neither permission nor a guarantee of delivery.
+
 ### Consumer settlement
 
 `Result.Event` is the authoritative canonical `*ahp.Event`. Read its typed
