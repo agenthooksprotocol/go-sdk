@@ -33,4 +33,4 @@ func NewLazyAttachment(open func(context.Context) (io.ReadCloser, error), cleanu
 }
 
 // Claimed reports whether an adapter has already admitted this source.
-func (s *Source) Claimed() bool { return s != nil && s.claimed.Load() }
+func Claimed(s *Source) bool { return s != nil && s.claimed.Load() }

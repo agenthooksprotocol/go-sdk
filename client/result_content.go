@@ -78,7 +78,7 @@ func (r *Result) Close() error {
 	r.contentMu.Unlock()
 	var err error
 	for _, source := range sources {
-		err = errors.Join(err, source.Retire())
+		err = errors.Join(err, ownedcontent.Retire(source))
 	}
 	return err
 }

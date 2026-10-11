@@ -25,7 +25,7 @@ func compositionTestResponse(t *testing.T, effects string) ahp.InterceptResponse
 	}
 	return p.Value
 }
-func compositionTestState(t *testing.T, c *Composition) map[string]any {
+func compositionTestState(t *testing.T, c *composition) map[string]any {
 	t.Helper()
 	b, err := json.Marshal(c.State)
 	if err != nil {
@@ -46,7 +46,7 @@ func TestCompositionHostDecodeDoesNotRejectProtocol(t *testing.T) {
 	if json.Unmarshal(c.EffectiveInput, &host) == nil {
 		t.Fatal("expected host decode failure")
 	}
-	if len(c.Response.Effects) != 2 {
+	if len(c.Response.Effects.Value) != 2 {
 		t.Fatal("accepted effects lost")
 	}
 	v := compositionObject(c.EffectiveInput)
@@ -78,9 +78,15 @@ func TestCompositionAtomicRejection(t *testing.T) {
 		`[{"type":"message","text":"never published"},{"type":"modify","target":"output","operation":"replace","value":{}}]`,
 		`[{"type":"inject","target":"context","operation":"append","deliverAt":"now","value":[{"id":"never-queued","role":"system","parts":[{"id":"text","kind":"text","mediaType":"text/plain","selection":"body","text":"never queued"}]}]},{"type":"flow","operation":"continue"}]`,
 	} {
-		c, err := compose(req, compositionTestResponse(t, effects))
-		if err == nil || c != nil {
-			t.Fatal("accepted invalid response", effects)
+		// Generated codecs now reject malformed built-in payloads before composition.
+		parsed := ahp.ParseInterceptResponse([]byte(`{"jsonrpc":"2.0","id":"test","result":{"protocolVersion":"draft","effects":` + effects + `}}`))
+		if parsed.OK {
+			c, err := compose(req, parsed.Value)
+			if err == nil || c != nil {
+				t.Fatal("accepted invalid response", effects)
+			}
+		} else if len(parsed.Diagnostics) == 0 {
+			t.Fatal("invalid response rejected without diagnostics", effects)
 		}
 	}
 	current, _ := ahp.EncodeInterceptRequest(req)

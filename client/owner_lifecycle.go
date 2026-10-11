@@ -1,5 +1,7 @@
 package client
 
+import "github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
+
 // releaseUnused retires speculative and superseded owners after the caller has
 // chosen the authoritative prepared boundary. No discarded staging clone may be
 // used afterward. Call only between composition decisions, not during fan-out.
@@ -20,7 +22,7 @@ func (p *preparedBoundary) releaseUnused(budget *contentSourceBudget) {
 		if budget != nil {
 			budget.forget(source)
 		}
-		_ = source.Retire()
+		_ = ownedcontent.Retire(source)
 		delete(p.owned, source)
 	}
 }

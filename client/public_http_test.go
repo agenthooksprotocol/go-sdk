@@ -21,7 +21,7 @@ func TestGenericBoundaryThroughPublicHTTPHandler(t *testing.T) {
 			return ahp.InterceptResponseResult{}, err
 		}
 		version := ahp.ProtocolVersion("draft")
-		return ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: []*ahp.Effect{modification, effect.NewAllow()}}, nil
+		return ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: ahp.Some([]*ahp.Effect{modification, effect.NewAllow()})}, nil
 	}}, server.Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -54,7 +54,7 @@ func TestGenericDecodeErrorThroughPublicHTTPHandler(t *testing.T) {
 			return ahp.InterceptResponseResult{}, err
 		}
 		version := ahp.ProtocolVersion("draft")
-		return ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: []*ahp.Effect{modification}}, nil
+		return ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: ahp.Some([]*ahp.Effect{modification})}, nil
 	}}, server.Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +72,7 @@ func TestGenericDecodeErrorThroughPublicHTTPHandler(t *testing.T) {
 	}
 	result, err := c.ToolBefore(context.Background(), event.ToolBeforeInput[Args]{CallID: "call-public", Path: "execute", Name: "task", Origin: "native", Input: Args{Count: 1}})
 	var decode *DecodeError
-	if !errors.As(err, &decode) || result == nil || result.InputAvailable || len(result.Errors) != 0 || len(result.Response.Effects) != 1 {
+	if !errors.As(err, &decode) || result == nil || result.InputAvailable || len(result.Errors) != 0 || len(result.Response.Effects.Value) != 1 {
 		t.Fatalf("public decode result: %+v %v", result, err)
 	}
 	raw, err := c.ToolBefore(context.Background(), event.ToolBeforeInput[json.RawMessage]{CallID: "call-dynamic", Path: "execute", Name: "task", Origin: "native", Input: json.RawMessage(`{"count":1}`)})

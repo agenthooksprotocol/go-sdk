@@ -32,7 +32,7 @@ func TestLazyAttachmentFanout(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	_ = a.Retire()
+	_ = Retire(a)
 	if opens.Load() != 1 || closes.Load() != 1 {
 		t.Fatal(opens.Load(), closes.Load())
 	}
@@ -48,7 +48,7 @@ func TestLazyAttachmentOpenCancellation(t *testing.T) {
 		go func() { _, err := a.Snapshot(ctx, 64); done <- err }()
 		<-started
 		if closeSource {
-			_ = a.Retire()
+			_ = Retire(a)
 		} else {
 			cancel()
 		}
@@ -61,7 +61,7 @@ func TestLazyAttachmentOpenCancellation(t *testing.T) {
 			t.Fatal("open was not interrupted")
 		}
 		cancel()
-		_ = a.Retire()
+		_ = Retire(a)
 		if cleanup.Load() != 1 {
 			t.Fatal("cleanup", cleanup.Load())
 		}
@@ -77,7 +77,7 @@ func TestLazyAttachmentOpenError(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	_ = a.Retire()
+	_ = Retire(a)
 	if calls != 1 || cleanup != 1 {
 		t.Fatal(calls, cleanup)
 	}
@@ -93,7 +93,7 @@ func TestLazyAttachmentReadTimeout(t *testing.T) {
 	if _, err := a.Snapshot(ctx, 64); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal(err)
 	}
-	_ = a.Retire()
+	_ = Retire(a)
 	if cleanup.Load() != 1 {
 		t.Fatal("timeout did not clean up")
 	}
@@ -119,7 +119,7 @@ func TestLazyAttachmentCleanupJoinsOpener(t *testing.T) {
 	go func() { _, err := a.Snapshot(context.Background(), 64); read <- err }()
 	<-started
 	closed := make(chan error, 1)
-	go func() { closed <- a.Retire() }()
+	go func() { closed <- Retire(a) }()
 	select {
 	case <-closed:
 		t.Fatal("retirement did not join opener")
@@ -137,16 +137,16 @@ func TestLazyAttachmentCleanupJoinsOpener(t *testing.T) {
 func TestLazyAttachmentConcurrentClaim(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		a := NewLazyAttachment(func(context.Context) (io.ReadCloser, error) { return io.NopCloser(strings.NewReader("x")), nil }, nil)
-		if !a.Claim() {
+		if !Claim(a) {
 			t.Fatal("initial claim failed")
 		}
 		done := make(chan struct{})
 		go func() { defer close(done); _, _ = a.Snapshot(context.Background(), 2) }()
-		if a.Claim() {
+		if Claim(a) {
 			t.Fatal("reuse accepted")
 		}
 		<-done
-		_ = a.Retire()
+		_ = Retire(a)
 	}
 }
 

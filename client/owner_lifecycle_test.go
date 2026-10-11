@@ -30,7 +30,7 @@ func preparedLifecycleFixture(t *testing.T) (map[string]any, *preparedBoundary, 
 	if err != nil || string(raw) != "original" {
 		t.Fatal(string(raw), err)
 	}
-	t.Cleanup(func() { _ = owner.Retire() })
+	t.Cleanup(func() { _ = ownedcontent.Retire(owner) })
 	return event, p, owner
 }
 func TestReleaseUnusedRejectsSpeculativeOwners(t *testing.T) {
@@ -107,8 +107,8 @@ func TestReleaseUnusedCleansLazyOwnersWithoutOpening(t *testing.T) {
 	if raw, ok := ownedcontent.Available(live); !ok || string(raw) != "live" {
 		t.Fatal("live source retired")
 	}
-	_ = external.Retire()
-	_ = live.Retire()
+	_ = ownedcontent.Retire(external)
+	_ = ownedcontent.Retire(live)
 }
 
 func TestReleaseUnusedReclaimsSerialEditBudget(t *testing.T) {

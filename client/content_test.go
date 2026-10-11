@@ -14,6 +14,18 @@ import (
 	"testing"
 )
 
+// contentTestEvent completes the canonical tool.before envelope for private
+// projection tests. Descriptor payloads are left untouched, including negatives.
+func contentTestEvent(fields map[string]any) map[string]any {
+	event := testInput()
+	event["type"] = "tool.before"
+	event["source"] = "urn:content-test"
+	for key, value := range fields {
+		event[key] = value
+	}
+	return event
+}
+
 func contentTestItem(body any) map[string]any {
 	return map[string]any{"id": "item-1", "kind": "attachment", "mediaType": "application/octet-stream", "selection": "body", "body": body}
 }
@@ -40,7 +52,8 @@ func TestContentSelectionIsNotPermission(t *testing.T) {
 	item := contentTestItem(map[string]any{"ref": "private"})
 	item["authorized"] = true
 	item["permissions"] = map[string]any{"content": true}
-	event := map[string]any{"items": []any{item}, "native": map[string]any{"secret": "private"}, "tool": map[string]any{"input": "private", "output": "private", "name": "tool"}}
+	item["future"] = map[string]any{"kind": "attachment", "body": map[string]any{"ref": "never-resolve"}, "input": map[string]any{"secret": "opaque-extra"}}
+	event := contentTestEvent(map[string]any{"items": []any{item}, "native": map[string]any{"secret": "private"}, "tool": map[string]any{"input": map[string]any{"secret": "private"}, "output": "private", "name": "tool", "origin": "native"}})
 	before := contentClone(event)
 	for _, mode := range []string{"body", "metadata", "omit"} {
 		sub := contentTestSubscription("https://uploads.example/raw")
@@ -51,8 +64,11 @@ func TestContentSelectionIsNotPermission(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := contentTestBody(t, result)
-		if got["selection"] != mode || got["body"] != nil || got["authorized"] != nil {
+		if got["selection"] != mode || got["body"] != nil || got["authorized"] != true {
 			t.Fatalf("unsafe view: %#v", got)
+		}
+		if !compositionEqual(got["future"], item["future"]) || !compositionEqual(got["permissions"], item["permissions"]) {
+			t.Fatal("opaque descriptor metadata changed")
 		}
 		if mode == "body" && got["gap"].(map[string]any)["reason"] != "withheld" {
 			t.Fatalf("missing withholding gap: %#v", got)
@@ -68,18 +84,21 @@ func TestContentSelectionIsNotPermission(t *testing.T) {
 
 func TestContentCategoryPrecedence(t *testing.T) {
 	c := &Client{}
-	a := contentTestItem("secret")
-	a["kind"] = "reasoning"
-	a["category"] = "text"
-	b := contentTestItem("secret")
+	a := contentTestItem(map[string]any{"ref": "secret"})
+	// Reasoning kind precedence is a classifier rule, not a declared attachment kind.
+	if got := contentCategory(map[string]any{"kind": "reasoning", "category": "text"}); got != "reasoning" {
+		t.Fatalf("reasoning precedence = %q", got)
+	}
+	a["category"] = "reasoning"
+	b := contentTestItem(map[string]any{"ref": "secret"})
 	b["category"] = "custom"
 	b["mediaType"] = "image/png"
-	d := contentTestItem("secret")
+	d := contentTestItem(map[string]any{"ref": "secret"})
 	d["mediaType"] = "image/png"
-	e := contentTestItem("secret")
+	e := contentTestItem(map[string]any{"ref": "secret"})
 	e["category"] = "unknown"
 	sub := map[string]any{"content": map[string]any{"default": "omit", "text": "body", "reasoning": "metadata", "custom": "omit", "images": "metadata"}}
-	out, err := c.projectContent(context.Background(), map[string]any{"items": []any{a, b, d, e}}, sub, "backend")
+	out, err := c.projectContent(context.Background(), contentTestEvent(map[string]any{"items": []any{a, b, d, e}}), sub, "backend")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +144,7 @@ func TestContentRemoteHandlesUploadPerReceiver(t *testing.T) {
 	}}}}
 	sub := contentTestSubscription(server.URL + "/custom/raw?tenant=one")
 	item := contentTestItem(map[string]any{"ref": "https://never-fetch.example/private"})
-	event := map[string]any{"items": []any{item}}
+	event := contentTestEvent(map[string]any{"items": []any{item}})
 	for i, backend := range []string{"backend-A", "backend-B"} {
 		out, err := c.projectContent(context.Background(), event, sub, backend)
 		if err != nil {
@@ -164,7 +183,8 @@ func TestContentRawUploadsAndIndependentAuthentication(t *testing.T) {
 	sub := contentTestSubscription(server.URL)
 	sub["upload"].(map[string]any)["auth"] = map[string]any{"type": "bearer", "tokenEnv": "AHP_CONTENT_TEST_TOKEN"}
 	for _, raw := range [][]byte{{0, 128, 255}, {}} {
-		event := map[string]any{"items": []any{contentTestItem(raw)}}
+		c.opts.Content.Resolver = func(context.Context, string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(raw)), nil }
+		event := contentTestEvent(map[string]any{"items": []any{contentTestItem(map[string]any{"ref": "host-bytes"})}})
 		if _, err := c.projectContent(context.Background(), event, sub, "b"); err != nil {
 			t.Fatal(err)
 		}
@@ -204,10 +224,13 @@ func TestContentLimitsAndDeclaredIntegrity(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			c := &Client{opts: Options{Content: ContentOptions{AllowLoopbackHTTP: true, AuthorizeContent: contentTestAllow}}}
-			item := contentTestItem([]byte("abc"))
+			c.opts.Content.Resolver = func(context.Context, string) (io.ReadCloser, error) {
+				return io.NopCloser(strings.NewReader("abc")), nil
+			}
+			item := contentTestItem(map[string]any{"ref": "host-bytes"})
 			sub := contentTestSubscription(server.URL)
 			test.mutate(item, sub, c)
-			if out, err := c.projectContent(context.Background(), map[string]any{"items": []any{item}}, sub, "backend"); err == nil || out != nil {
+			if out, err := c.projectContent(context.Background(), contentTestEvent(map[string]any{"items": []any{item}}), sub, "backend"); err == nil || out != nil {
 				t.Fatalf("failed preparation leaked event: %#v %v", out, err)
 			}
 		})
@@ -247,8 +270,10 @@ func TestContentRejectsInvalidConfirmationsAndRedirects(t *testing.T) {
 				_, _ = io.WriteString(w, test.body)
 			}))
 			defer server.Close()
-			c := &Client{opts: Options{Content: ContentOptions{AllowLoopbackHTTP: true, AuthorizeContent: contentTestAllow}}}
-			out, err := c.projectContent(context.Background(), map[string]any{"items": []any{contentTestItem("abc")}}, contentTestSubscription(server.URL), "b")
+			c := &Client{opts: Options{Content: ContentOptions{AllowLoopbackHTTP: true, AuthorizeContent: contentTestAllow, Resolver: func(context.Context, string) (io.ReadCloser, error) {
+				return io.NopCloser(strings.NewReader("abc")), nil
+			}}}}
+			out, err := c.projectContent(context.Background(), contentTestEvent(map[string]any{"items": []any{contentTestItem(map[string]any{"ref": "abc"})}}), contentTestSubscription(server.URL), "b")
 			if err == nil || out != nil || redirected {
 				t.Fatalf("invalid confirmation published: %v %v redirected=%v", out, err, redirected)
 			}
@@ -265,7 +290,7 @@ func TestContentNativeRequiresExplicitProjection(t *testing.T) {
 		}
 		return []any{"approved", path}, nil
 	}}}}
-	event := map[string]any{"native": []any{"secret"}, "input": map[string]any{"secret": "x"}}
+	event := contentTestEvent(map[string]any{"native": []any{"secret"}, "input": map[string]any{"secret": "x"}})
 	sub := map[string]any{"content": map[string]any{"default": "omit"}}
 	out, err := c.projectContent(context.Background(), event, sub, "backend")
 	if err != nil {
@@ -287,7 +312,7 @@ func TestContentNativeRequiresExplicitProjection(t *testing.T) {
 func TestContentOnlyProjectsDeclaredDescriptorPositions(t *testing.T) {
 	c := &Client{}
 	lookalike := contentTestItem("application-owned")
-	event := map[string]any{"custom": lookalike, "items": []any{contentTestItem("secret")}}
+	event := contentTestEvent(map[string]any{"custom": lookalike, "items": []any{contentTestItem(map[string]any{"ref": "secret"})}})
 	sub := map[string]any{"content": map[string]any{"default": "metadata"}}
 	out, err := c.projectContent(context.Background(), event, sub, "backend")
 	if err != nil {
@@ -299,12 +324,12 @@ func TestContentOnlyProjectsDeclaredDescriptorPositions(t *testing.T) {
 	if contentTestBody(t, out)["body"] != nil {
 		t.Fatal("normalized body disclosed")
 	}
-	bad := map[string]any{"items": []any{map[string]any{"body": "secret"}}}
+	bad := contentTestEvent(map[string]any{"items": []any{map[string]any{"body": "secret"}}})
 	if _, err = c.projectContent(context.Background(), bad, sub, "backend"); err == nil {
 		t.Fatal("malformed descriptor bypassed projection")
 	}
 	for _, media := range []string{"application/json", " Application/JSON; charset=utf-8"} {
-		item := contentTestItem("secret")
+		item := contentTestItem(map[string]any{"ref": "secret"})
 		item["mediaType"] = media
 		if contentCategory(item) != "text" {
 			t.Fatalf("JSON misclassified: %q", media)
@@ -312,7 +337,7 @@ func TestContentOnlyProjectsDeclaredDescriptorPositions(t *testing.T) {
 	}
 }
 
-func TestContentBareFileReferencesAreReceiverAllocated(t *testing.T) {
+func TestContentFileReferencesAreReceiverAllocated(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		contentTestConfirm(w, "receiver-file", raw)
@@ -322,21 +347,31 @@ func TestContentBareFileReferencesAreReceiverAllocated(t *testing.T) {
 		return io.NopCloser(strings.NewReader("abc")), nil
 	}}}}
 	sub := contentTestSubscription(server.URL)
-	event := map[string]any{"type": "file.changed", "changes": []any{map[string]any{"path": "file.txt", "after": map[string]any{"ref": "host-file"}}}}
+	event := map[string]any{"type": "file.changed", "id": "file-event", "time": "2026-01-01T00:00:00Z", "source": "urn:content-test", "changes": []any{map[string]any{"path": "file.txt", "operation": "update", "agentCaused": true, "after": contentTestItem(map[string]any{"ref": "host-file"})}}}
+	// FileChangedEvent.after is a ContentItem, not a bare ContentReference.
+	invalid := contentClone(event).(map[string]any)
+	invalid["changes"].([]any)[0].(map[string]any)["after"] = map[string]any{"ref": "host-file"}
+	if out, err := c.projectContent(context.Background(), invalid, sub, "backend"); err == nil || out != nil {
+		t.Fatal("bare reference accepted in declared content-item slot")
+	}
 	out, err := c.projectContent(context.Background(), event, sub, "backend")
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := out["changes"].([]any)[0].(map[string]any)["after"].(map[string]any)
-	if got["ref"] != "receiver-file" || len(got) != 1 {
-		t.Fatalf("bare reference normalized or unallocated: %#v", got)
+	if body := sdkObj(got["body"]); body["ref"] != "receiver-file" || len(body) != 1 {
+		t.Fatalf("reference unallocated: %#v", got)
+	}
+	if got["id"] != "item-1" || got["kind"] != "attachment" {
+		t.Fatalf("descriptor metadata changed: %#v", got)
 	}
 	sub["content"] = map[string]any{"default": "metadata"}
 	out, err = c.projectContent(context.Background(), event, sub, "backend")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, exists := out["changes"].([]any)[0].(map[string]any)["after"]; exists {
-		t.Fatal("unselected bare reference leaked")
+	got = out["changes"].([]any)[0].(map[string]any)["after"].(map[string]any)
+	if got["body"] != nil || got["selection"] != "metadata" {
+		t.Fatal("unselected reference leaked", got)
 	}
 }

@@ -18,6 +18,7 @@ import (
 // preparedBoundary indexes occurrence-owned attachments. Edit transactions clone
 // indexes only; byte storage lives exclusively inside the referenced owners.
 type preparedBoundary struct {
+	declared *declaredContracts
 	sources  map[string]*ContentSource
 	owned    map[*ContentSource]bool
 	slots    map[string][]string
@@ -29,7 +30,7 @@ type preparedBoundary struct {
 type preparedContextKey struct{}
 
 func (p *preparedBoundary) clone() *preparedBoundary {
-	q := &preparedBoundary{sources: map[string]*ContentSource{}, owned: p.owned, slots: map[string][]string{}, limit: p.limit, snapshot: p.snapshot, bindings: map[string]ModificationTarget{}, absent: map[string]bool{}}
+	q := &preparedBoundary{declared: p.declared, sources: map[string]*ContentSource{}, owned: p.owned, slots: map[string][]string{}, limit: p.limit, snapshot: p.snapshot, bindings: map[string]ModificationTarget{}, absent: map[string]bool{}}
 	for k, v := range p.absent {
 		q.absent[k] = v
 	}
@@ -77,11 +78,11 @@ func preparedItemPaths(event map[string]any, target string) ([]string, error) {
 	return nil, errors.New("ambiguous native target requires WithModificationTarget")
 }
 func (c *Hooks) prepareBoundary(ctx context.Context, event, caps map[string]any, cfg interceptConfig) (_ *preparedBoundary, err error) {
-	p := &preparedBoundary{sources: map[string]*ContentSource{}, owned: map[*ContentSource]bool{}, slots: map[string][]string{}, limit: c.opts.MaxContentBytes, bindings: map[string]ModificationTarget{}, absent: map[string]bool{}}
+	p := &preparedBoundary{declared: cfg.declared, sources: map[string]*ContentSource{}, owned: map[*ContentSource]bool{}, slots: map[string][]string{}, limit: c.opts.MaxContentBytes, bindings: map[string]ModificationTarget{}, absent: map[string]bool{}}
 	defer func() {
 		if err != nil {
 			for source := range p.owned {
-				_ = source.Retire()
+				_ = ownedcontent.Retire(source)
 			}
 		}
 	}()
@@ -100,46 +101,26 @@ func (c *Hooks) prepareBoundary(ctx context.Context, event, caps map[string]any,
 	// Resolve references through lazy owners, never through a reference-byte cache.
 	// Capture only the inbound adapter and reference: results may outlive Hooks.
 	resolver := c.opts.Content.Resolver
-	var indexErr error
-	var index func(any, string)
-	index = func(value any, path string) {
-		switch v := value.(type) {
-		case map[string]any:
-			bare := event["type"] == "file.changed" && fileChangeReferencePath(path)
-			if canonicalPartPath(event, path) || bare {
-				ref := compositionString(sdkObj(v["body"])["ref"])
-				if bare {
-					ref = compositionString(v["ref"])
-				}
-				if strings.HasPrefix(ref, "ahp:owned:") {
-					indexErr = errors.New("local attachment reference cannot reach wire")
-					return
-				}
-				if ref != "" && p.sources[path] == nil && resolver != nil {
-					owner := ownedcontent.NewLazyAttachment(func(ctx context.Context) (io.ReadCloser, error) {
-						return resolver(ctx, ref)
-					}, nil)
-					p.sources[path] = owner
-					p.owned[owner] = true
-				}
-				return
-			}
-			for key, child := range v {
-				if key == "native" || key == "input" || key == "output" || key == "params" || key == "extensions" {
-					continue
-				}
-				index(child, path+"/"+strings.ReplaceAll(strings.ReplaceAll(key, "~", "~0"), "/", "~1"))
-			}
-		case []any:
-			for i, child := range v {
-				index(child, fmt.Sprintf("%s/%d", path, i))
-			}
+	slots, err := schemaSourceSlots(event)
+	if err != nil {
+		return nil, err
+	}
+	for path := range slots {
+		item := preparedAt(event, path)
+		if item == nil {
+			continue
+		}
+		ref := compositionString(sdkObj(item["body"])["ref"])
+		if strings.HasPrefix(ref, "ahp:owned:") {
+			return nil, errors.New("local attachment reference cannot reach wire")
+		}
+		if ref != "" && p.sources[path] == nil && resolver != nil {
+			owner := ownedcontent.NewLazyAttachment(func(ctx context.Context) (io.ReadCloser, error) { return resolver(ctx, ref) }, nil)
+			p.sources[path] = owner
+			p.owned[owner] = true
 		}
 	}
-	index(event, "")
-	if indexErr != nil {
-		return nil, indexErr
-	}
+
 	if err := p.bound(); err != nil {
 		return nil, err
 	}

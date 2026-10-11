@@ -30,7 +30,7 @@ func fixture(t *testing.T, name string) []byte {
 }
 func noEffect() ahp.InterceptResponseResult {
 	v := ahp.ProtocolVersion("draft")
-	return ahp.InterceptResponseResult{ProtocolVersion: &v, Effects: []*ahp.Effect{}}
+	return ahp.InterceptResponseResult{ProtocolVersion: &v, Effects: ahp.Some([]*ahp.Effect{})}
 }
 func request(h http.Handler, b []byte) *httptest.ResponseRecorder {
 	r := httptest.NewRequest("POST", "/hooks", bytes.NewReader(b))
@@ -418,5 +418,20 @@ func TestStdioBlockedWriteCancellation(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("blocked write not canceled")
+	}
+}
+
+func TestHandlerDefaultsNilEffects(t *testing.T) {
+	h, err := NewHandler(Handlers{Intercept: func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
+		v := ahp.ProtocolVersion("draft")
+		return ahp.InterceptResponseResult{ProtocolVersion: &v}, nil
+	}}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := request(h, fixture(t, "intercept"))
+	parsed := ahp.ParseInterceptResponse(w.Body.Bytes())
+	if w.Code != 200 || !parsed.OK || parsed.Value.Result.Effects.Present || len(parsed.Value.Result.Effects.Value) != 0 {
+		t.Fatalf("not neutral: %s", w.Body)
 	}
 }

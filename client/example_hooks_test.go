@@ -29,9 +29,9 @@ func ExampleHooks_ToolBefore() {
 				return ahp.InterceptResponseResult{}, err
 			}
 			version := ahp.ProtocolVersion("draft")
-			return ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: []*ahp.Effect{
+			return ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: ahp.Some([]*ahp.Effect{
 				replacement,
-			}}, nil
+			})}, nil
 		},
 		Observe: func(context.Context, ahp.ObserveNotification) error { return nil },
 	}, server.Options{})
@@ -117,7 +117,7 @@ func ExampleHooks_stdioServer() {
 	handler, err := server.NewHandler(server.Handlers{
 		Intercept: func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
 			version := ahp.ProtocolVersion("draft")
-			return ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: []*ahp.Effect{}}, nil
+			return ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: ahp.Some([]*ahp.Effect{})}, nil
 		},
 	}, server.Options{})
 	if err != nil {

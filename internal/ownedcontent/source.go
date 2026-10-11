@@ -55,10 +55,10 @@ func (s *Source) closeReader() error {
 
 // Close disposes this owner, including cached bytes and unopened factories.
 // Do not call it after transferring ownership to a boundary; close its result.
-func (s *Source) Close() error { return s.Retire() }
+func (s *Source) Close() error { return Retire(s) }
 
 // Retire interrupts and joins active materialization before releasing storage.
-func (s *Source) Retire() error {
+func Retire(s *Source) error {
 	if s == nil {
 		return nil
 	}
@@ -145,7 +145,7 @@ func Borrow(s *Source, ctx context.Context, limit int64) ([]byte, error) {
 	}
 	if limit < 0 || limit == math.MaxInt64 {
 		s.lifetime.Unlock()
-		_ = s.Retire()
+		_ = Retire(s)
 		return nil, errors.New("invalid content byte limit")
 	}
 	if s.cancelled {
@@ -224,7 +224,7 @@ func Available(s *Source) ([]byte, bool) {
 }
 
 // Claim transfers this source to one SDK occurrence. Adapters must reject reuse.
-func (s *Source) Claim() bool {
+func Claim(s *Source) bool {
 	if s == nil {
 		return false
 	}

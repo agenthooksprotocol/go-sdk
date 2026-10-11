@@ -93,7 +93,7 @@ func TestDeliveryDiagnosticCodesRetainAtomicPrefix(t *testing.T) {
 				if strings.Contains(failure.Error(), secret) || strings.Contains(failure.Err.Error(), secret) {
 					t.Fatal("unsafe backend error exposed")
 				}
-				if len(result.Response.Effects) != 1 || !strings.Contains(string(sdkJSON(result.EffectiveInput)), `"count":2`) {
+				if len(result.Response.Effects.Value) != 1 || !strings.Contains(string(sdkJSON(result.EffectiveInput)), `"count":2`) {
 					t.Fatalf("accepted prefix changed: %s", sdkJSON(result.Response))
 				}
 				if (result.State.Permission == "deny") != (policy == "fail-closed") {

@@ -54,9 +54,9 @@ func run(registrationPath, filePath string) error {
 		},
 	}}
 	result, err := hooks.ModelRequestBefore(context.Background(), event.ModelRequestBeforeInput{
-		Attempt:   &ahp.ExecutionEventAttempt{ID: "attempt-1", Number: json.Number("1")},
-		Model:     &ahp.ExecutionEventModel{ID: "model-1", Provider: "example"},
-		ItemsHost: &messages,
+		Attempt:    &ahp.ExecutionEventAttempt{ID: "attempt-1", Number: json.Number("1")},
+		Model:      &ahp.ExecutionEventModel{ID: "model-1", Provider: "example"},
+		ItemsInput: &messages,
 	})
 	if result != nil {
 		defer result.Close()

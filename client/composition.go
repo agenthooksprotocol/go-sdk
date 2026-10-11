@@ -26,10 +26,10 @@ func (e *CapabilityAdmissionError) Error() string {
 	return fmt.Sprintf("unsupported capability %s/%s at %s: %s", e.Effect, e.Target, e.Event, e.Reason)
 }
 
-// Composition is an atomically accepted protocol response. It does not authorize
+// composition is an atomically accepted protocol response. It does not authorize
 // native execution or validate effective values against an application's schema.
 // Response retains accepted effects even when a subsequent host decode fails.
-type Composition struct {
+type composition struct {
 	// Event is the accepted effective event; caller-owned input is never mutated.
 	Event          json.RawMessage
 	State          ahp.InterceptRequestParamsState
@@ -41,7 +41,7 @@ type Composition struct {
 // EffectiveValue encodes an available accepted non-input target on demand.
 // It never opens an unread attachment or retains another copy of its bytes.
 // Protocol-only compositions without prepared owners have no effective values.
-func (c *Composition) EffectiveValue(target string) (json.RawMessage, error) {
+func (c *composition) effectiveValue(target string) (json.RawMessage, error) {
 	if c == nil || c.prepared == nil || target == "input" {
 		return nil, fmt.Errorf("effective value %q unavailable", target)
 	}
@@ -63,14 +63,14 @@ func (c *Composition) EffectiveValue(target string) (json.RawMessage, error) {
 	return sdkJSON(value), nil
 }
 
-func compose(request ahp.InterceptRequest, response ahp.InterceptResponse) (*Composition, error) {
+func compose(request ahp.InterceptRequest, response ahp.InterceptResponse) (*composition, error) {
 	return composePrepared(request, response, nil)
 }
 
-func composePrepared(request ahp.InterceptRequest, response ahp.InterceptResponse, prepared *preparedBoundary) (*Composition, error) {
+func composePrepared(request ahp.InterceptRequest, response ahp.InterceptResponse, prepared *preparedBoundary) (*composition, error) {
 	reqBytes, err := ahp.EncodeInterceptRequest(request)
 	if err != nil {
-		return nil, fmt.Errorf("encode intercept request: %w", err)
+		return nil, err
 	}
 	if err := canonical.Validate("intercept-request", reqBytes); err != nil {
 		return nil, err
@@ -79,9 +79,13 @@ func composePrepared(request ahp.InterceptRequest, response ahp.InterceptRespons
 	if !req.OK {
 		return nil, fmt.Errorf("invalid intercept request")
 	}
+	kind, _, err := eventIdentity(req.Value.Params.Event)
+	if err != nil {
+		return nil, err
+	}
 	resBytes, err := ahp.EncodeInterceptResponse(response)
 	if err != nil {
-		return nil, fmt.Errorf("encode intercept response: %w", err)
+		return nil, err
 	}
 	if err := canonical.Validate("intercept-response", resBytes); err != nil {
 		return nil, err
@@ -90,200 +94,22 @@ func composePrepared(request ahp.InterceptRequest, response ahp.InterceptRespons
 	if !res.OK {
 		return nil, fmt.Errorf("invalid intercept response")
 	}
-	r, s := compositionObject(reqBytes), compositionObject(resBytes)
-	p := compositionMap(r["params"])
-	event, caps := compositionMap(p["event"]), compositionMap(p["capabilities"])
-	if !compositionEqual(r["id"], s["id"]) || !compositionEqual(r["id"], event["id"]) {
+	if !compositionEqual(compositionObject(reqBytes)["id"], compositionObject(resBytes)["id"]) {
 		return nil, fmt.Errorf("intercept correlation mismatch")
 	}
-	state := compositionMap(p["state"])
-	if state == nil {
-		state = map[string]any{"permission": "none", "candidate": nil}
-	}
-	kind := compositionString(event["type"])
-	if err := compositionEventConstraints(event); err != nil {
-		return nil, err
-	}
-	if err := compositionCapabilitiesPrepared(caps, event, prepared != nil); err != nil {
-		return nil, err
-	}
-	effects := compositionArray(compositionMap(s["result"])["effects"])
-	for _, raw := range effects {
-		if err := compositionAdmit(compositionMap(raw), caps, state, kind); err != nil {
-			return nil, err
+	var staged *composition
+	var stageErr error
+	admitted := ahp.StageResponseForRequest(kind, resBytes, func(contextual ahp.ContextualResponse) error {
+		staged, stageErr = stageContextualComposition(req.Value, contextual, res.Value.Result, prepared)
+		return stageErr
+	})
+	if !admitted.OK {
+		if stageErr != nil {
+			return nil, stageErr
 		}
+		return nil, fmt.Errorf("invalid correlated response")
 	}
-	values := map[string]any{}
-	var staged *preparedBoundary
-	if prepared != nil {
-		staged = prepared.clone()
-		values, err = staged.values(event)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if candidate := compositionMap(state["candidate"]); candidate != nil {
-		if kind == "user.elicitation.request" {
-			if staged == nil || staged.snapshot == nil {
-				return nil, fmt.Errorf("elicitation candidate requires an original request snapshot")
-			}
-			if err := validateElicitationAnswer(event, staged.snapshot, candidate["value"]); err != nil {
-				return nil, err
-			}
-		}
-		if kind == "context.compact.before" || kind == "model.request.before" {
-			if err := validateSuppliedValue(kind, candidate["value"]); err != nil {
-				return nil, err
-			}
-		}
-	}
-	tool := compositionMap(event["tool"])
-	if value, ok := tool["input"]; ok {
-		values["input"] = value
-	}
-
-	initial, _ := json.Marshal(values)
-	for _, raw := range effects {
-		e := compositionMap(raw)
-		if e["type"] != "modify" {
-			continue
-		}
-		target := compositionString(e["target"])
-		v := e["value"]
-		if e["operation"] == "merge" && inlineListTarget(kind, target) {
-			base, ok := values[target].([]any)
-			if !ok {
-				return nil, fmt.Errorf("list target unavailable")
-			}
-			extra, ok := v.([]any)
-			if !ok {
-				return nil, fmt.Errorf("list merge requires an array")
-			}
-			v = append(append([]any{}, base...), extra...)
-		} else if e["operation"] == "merge" {
-			base := compositionMap(values[target])
-			if base == nil {
-				return nil, fmt.Errorf("merge target %s is not an available object", target)
-			}
-			merged := make(map[string]any, len(base))
-			for k, v := range base {
-				merged[k] = v
-			}
-			for k, v := range compositionMap(e["value"]) {
-				merged[k] = v
-			}
-			v = merged
-		}
-		if target != "input" {
-			if staged == nil {
-				return nil, compositionUnsupportedTarget(kind, target)
-			}
-			bodyValue := v
-			if kind == "user.elicitation.result" {
-				original, err := selectedElicitation(sdkObj(event["elicitation"]), "result", nil)
-				if err != nil {
-					return nil, err
-				}
-				answer := sdkObj(original)
-				if answer == nil {
-					return nil, fmt.Errorf("elicitation result must be an object")
-				}
-				// content is the structured MCP answer, not the containing result.
-				// Preserve action and all extension fields, including _meta.
-				answer["content"] = v
-				if err := validateElicitationAnswer(event, staged.snapshot, answer); err != nil {
-					return nil, err
-				}
-				bodyValue = answer
-			}
-			if err := staged.apply(event, target, bodyValue); err != nil {
-				return nil, err
-			}
-		}
-		values[target] = v
-		if target == "input" {
-			if tool == nil {
-				return nil, fmt.Errorf("input target unavailable")
-			}
-			tool["input"] = v
-		}
-	}
-	if !compositionEqual(compositionObject(initial), values) {
-		state["candidate"] = nil
-		if state["permission"] == "allow" {
-			state["permission"] = "none"
-		}
-	}
-	for _, raw := range effects {
-		e := compositionMap(raw)
-		switch e["type"] {
-		case "deny":
-			state["permission"] = "deny"
-		case "ask":
-			if state["permission"] != "deny" {
-				state["permission"] = "ask"
-			}
-		case "allow":
-			if state["permission"] != "deny" && state["permission"] != "ask" {
-				state["permission"] = "allow"
-			}
-		case "return":
-			if err := validateSuppliedValue(kind, e["value"]); err != nil {
-				return nil, err
-			}
-			if kind == "user.elicitation.request" {
-				if staged == nil || staged.snapshot == nil {
-					return nil, fmt.Errorf("elicitation request snapshot unavailable")
-				}
-				if err := validateElicitationAnswer(event, staged.snapshot, e["value"]); err != nil {
-					return nil, err
-				}
-			}
-			if kind == "context.compact.before" {
-				if err := validateSuppliedValue(kind, e["value"]); err != nil {
-					return nil, err
-				}
-			}
-			state["candidate"] = map[string]any{"value": e["value"]}
-		case "flow":
-			if e["operation"] == "continue" {
-				if instruction, ok := e["instruction"]; ok {
-					state["instructions"] = append(compositionArray(state["instructions"]), instruction)
-				}
-			}
-			if state["flow"] != "stop" {
-				state["flow"] = e["operation"]
-			}
-		case "inject":
-			state["injections"] = append(compositionArray(state["injections"]), e)
-		}
-	}
-	if state["permission"] == "deny" || state["flow"] == "stop" {
-		state["candidate"] = nil
-	}
-	p["event"] = event
-	if err := canonical.Validate("intercept-request", sdkJSON(r)); err != nil {
-		return nil, err
-	}
-	out := &Composition{Response: res.Value.Result, prepared: staged}
-	stateBytes, err := json.Marshal(state)
-	if err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal(stateBytes, &out.State); err != nil {
-		return nil, fmt.Errorf("compose state: %w", err)
-	}
-	if value, ok := values["input"]; ok {
-		out.EffectiveInput, err = json.Marshal(value)
-		if err != nil {
-			return nil, err
-		}
-	}
-	out.Event, err = json.Marshal(event)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
+	return staged, nil
 }
 
 func compositionAdmit(e, caps, state map[string]any, event string) error {

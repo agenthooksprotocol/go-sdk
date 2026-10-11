@@ -172,6 +172,59 @@ rejects fractional milliseconds and nonpositive deadlines. Use the generated
 `NewInterceptMilliseconds` for explicit wire values. No timeout or stdio
 lifecycle default is invented.
 
+### Caller value contracts and forms
+
+Use `client.ToolBefore` when argument and result types need validation before
+accepted state reaches the next interceptor:
+
+```go
+type Arguments struct { Count int `json:"count"` }
+type Answer struct { Text string `json:"text"` }
+contract := client.ToolContract[Arguments, Answer]{
+    Arguments: client.JSONCodec(func(value Arguments) error {
+        if value.Count < 1 { return errors.New("positive count required") }
+        return nil
+    }),
+    Result: client.JSONCodec[Answer](nil),
+}
+decision, err := client.ToolBefore(ctx, hooks,
+    event.ToolBeforeInput[Arguments]{
+        CallID: "call-1", Path: "execute", Name: "task", Origin: "native",
+        Input: Arguments{Count: 1},
+    }, contract)
+// Check err and host execution policy. decision has type ToolDecision with
+// independent argument/result types. Candidate.Present distinguishes absence
+// from a candidate whose declared result value is null.
+```
+
+`client.ToolBeforeWithProvenance` also accepts a caller-defined provenance codec.
+A replacement candidate does not inherit earlier provenance. `Codec` defaults to
+lossless JSON decoding with `json.Number`; it rejects supplied fields that would
+be dropped or changed by a round trip. Types with opaque extension bags can
+retain them in custom codecs. Validators must be deterministic and not mutate
+values. A failed response publishes none of its effects; earlier accepted
+responses remain available.
+
+Generic object merge is shallow: omitted fields stay unchanged, null is literal,
+and nested values replace as a whole. The complete temporary value is decoded
+and validated before publication, not the partial patch.
+`WithHostValueCodec` optionally declares a codec at an explicit event JSON Pointer
+such as `/params`, `/task/change`, `/task/prior`, or `/native`. Otherwise host
+values remain opaque. `WithTargetCodec`, `WithReturnCodec`, and
+`WithProvenanceCodec` support advanced declared boundary contracts.
+
+For forms, `client.NewFormContract[Answer]` derives the restricted MCP
+`requestedSchema` and decodes answers from the same flat struct declaration.
+`WithFormField` supplies enum choices and supported bounds/format metadata.
+Unsupported nested, nullable, ambiguous, and unconstrained array declarations
+fail at construction. `client.ElicitForm` takes that contract plus a generated
+request input whose inline text descriptor has caller-owned identity.
+`client.ElicitFormResult` uses the original request snapshot to validate
+correlated result edits before publication. Decline and cancel have no answer;
+form helpers do not accept URL-mode confirmations.
+
+See [compiled public contract and form examples](client/contract_examples_test.go).
+
 ### Generated event, capability, state, and effect helpers
 
 Generated `event.*Input` structs are ergonomic boundary inputs, not copies of
@@ -386,7 +439,7 @@ messages := []*event.ModelVisibleItemInput{{
 result, err := hooks.ModelRequestBefore(ctx, event.ModelRequestBeforeInput{
     Attempt: &ahp.ExecutionEventAttempt{ID: "attempt-1", Number: json.Number("1")},
     Model: &ahp.ExecutionEventModel{ID: "model-1", Provider: "example"},
-    ItemsHost: &messages,
+    ItemsInput: &messages,
 })
 if result != nil { defer result.Close() }
 if err != nil { return err }
@@ -424,7 +477,7 @@ attachment bytes cannot be edited or replaced by an effect. MCP
 elicitation snapshots retain the parsed original form contract for validating
 the corresponding result boundary.
 
-`Result.EffectiveValue(target)` and `Composition.EffectiveValue(target)` encode
+`Result.EffectiveValue(target)` encode
 available target values on demand. They do not open unread sources; use
 `Result.ReadContent` to demand a body first. Call `Source.Close` to dispose a
 source that is never submitted.

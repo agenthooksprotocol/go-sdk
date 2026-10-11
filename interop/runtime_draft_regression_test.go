@@ -166,3 +166,29 @@ func TestRuntimeDraftCanonicalRequestCorrelation(t *testing.T) {
 		t.Fatal("mismatched response ID accepted")
 	}
 }
+
+func TestRuntimeDraftOmittedEffects(t *testing.T) {
+	req := request("neutral")
+	before := clone(req)
+	// Supply a non-nil array explicitly for the baseline; nil variadic slices
+	// encode as null and must not be confused with omitted effects.
+	baseline := response("neutral")
+	obj(baseline["result"])["effects"] = []any{}
+	empty, err := Apply(req, baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	omitted := clone(baseline).(Object)
+	delete(obj(omitted["result"]), "effects")
+	got, err := Apply(req, omitted)
+	if err != nil || !reflect.DeepEqual(got, empty) || !reflect.DeepEqual(req, before) {
+		t.Fatal("omitted effects changed accepted state", got, err)
+	}
+	for _, invalid := range []any{nil, Object{}, "effects", true} {
+		bad := clone(baseline).(Object)
+		obj(bad["result"])["effects"] = invalid
+		if state, err := Apply(req, bad); err == nil || state != nil {
+			t.Fatal("malformed effects accepted", invalid, state, err)
+		}
+	}
+}

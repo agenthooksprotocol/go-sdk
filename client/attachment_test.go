@@ -28,14 +28,10 @@ func TestOwnedAttachmentsTypedLifetime(t *testing.T) {
 				opens++
 				return io.NopCloser(strings.NewReader("file bytes")), nil
 			}, func() error { closes++; return nil })
-			var item ahp.ContentItem
-			if err := item.UnmarshalJSON([]byte(`{"id":"report","kind":"attachment","mediaType":"application/octet-stream","selection":"metadata"}`)); err != nil {
-				t.Fatal(err)
-			}
+			parts := []*event.ContentPartInput{{Attachment: &event.AttachmentBodyInput{AttachmentBodyPart: ahp.AttachmentBodyPart{ID: "report", MediaType: "application/octet-stream"}, Body: a}}}
 			result, err := c.ToolBefore(context.Background(), event.ToolBeforeInput[map[string]any]{
 				CallID: "call-1", Path: "execute", Name: "read_file", Origin: ahp.ExecutionEventToolOriginNative,
-				Input: map[string]any{}, Items: ahp.Optional[[]*ahp.ContentItem]{Present: true, Value: []*ahp.ContentItem{&item}},
-				ItemsSources: []*content.Source{a},
+				Input: map[string]any{}, ItemsInput: &parts,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -242,7 +238,7 @@ func TestSelectedUploadAndResultShareAttachmentOwner(t *testing.T) {
 	}
 }
 
-func TestBareFileReferencesUseSharedOwners(t *testing.T) {
+func TestCanonicalFileReferencesUseSharedOwners(t *testing.T) {
 	var opens atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
@@ -253,7 +249,7 @@ func TestBareFileReferencesUseSharedOwners(t *testing.T) {
 		opens.Add(1)
 		return io.NopCloser(strings.NewReader("file")), nil
 	}}}}
-	event := map[string]any{"type": "file.changed", "changes": []any{map[string]any{"path": "report.pdf", "after": map[string]any{"ref": "external-file"}}}}
+	event := map[string]any{"id": "file-event", "source": "urn:test:host", "time": "2026-01-01T00:00:00Z", "type": "file.changed", "changes": []any{map[string]any{"agentCaused": false, "operation": "update", "path": "report.pdf", "after": map[string]any{"id": "file-part", "kind": "attachment", "selection": "body", "mediaType": "application/pdf", "body": map[string]any{"ref": "external-file"}}}}}
 	cfg := contentSourceConfig(nil)
 	p, err := c.prepareBoundary(context.Background(), event, nil, cfg)
 	if err != nil {
@@ -272,7 +268,7 @@ func TestBareFileReferencesUseSharedOwners(t *testing.T) {
 		t.Fatalf("file reference opened %d times", opens.Load())
 	}
 	if result.attachments["/changes/0/after"] != p.sources["/changes/0/after"] {
-		t.Fatal("bare ref result copied owner")
+		t.Fatal("canonical file ref result copied owner")
 	}
 	raw, err := result.ReadContent(context.Background(), "/changes/0/after")
 	if err != nil || string(raw) != "file" {

@@ -7,7 +7,7 @@ import "encoding/json"
 type Input[T any] struct {
 	Input  T                                    `json:"input"`
 	Kind   ahp.Optional[string]                 `json:"kind"`
-	Mcp    ahp.Optional[*ahp.ExecutionEventMcp] `json:"mcp"`
+	MCP    ahp.Optional[*ahp.ExecutionEventMcp] `json:"mcp"`
 	Name   string                               `json:"name"`
 	Origin ahp.ExecutionEventToolOrigin         `json:"origin"`
 }
@@ -18,8 +18,8 @@ func (v Input[T]) MarshalJSON() ([]byte, error) {
 	if v.Kind.Present {
 		fields["kind"] = v.Kind.Value
 	}
-	if v.Mcp.Present {
-		fields["mcp"] = v.Mcp.Value
+	if v.MCP.Present {
+		fields["mcp"] = v.MCP.Value
 	}
 	fields["name"] = v.Name
 	fields["origin"] = v.Origin
@@ -28,15 +28,15 @@ func (v Input[T]) MarshalJSON() ([]byte, error) {
 
 type inputOptions struct {
 	Kind ahp.Optional[string]
-	Mcp  ahp.Optional[*ahp.ExecutionEventMcp]
+	MCP  ahp.Optional[*ahp.ExecutionEventMcp]
 }
 type InputOption func(*inputOptions)
 
 func WithInputKind(value string) InputOption {
 	return func(v *inputOptions) { v.Kind = ahp.Optional[string]{Present: true, Value: value} }
 }
-func WithInputMcp(value *ahp.ExecutionEventMcp) InputOption {
-	return func(v *inputOptions) { v.Mcp = ahp.Optional[*ahp.ExecutionEventMcp]{Present: true, Value: value} }
+func WithInputMCP(value *ahp.ExecutionEventMcp) InputOption {
+	return func(v *inputOptions) { v.MCP = ahp.Optional[*ahp.ExecutionEventMcp]{Present: true, Value: value} }
 }
 
 // NewInput preserves the caller's payload type; options set only declared metadata.
@@ -47,5 +47,5 @@ func NewInput[T any](argName string, argOrigin ahp.ExecutionEventToolOrigin, arg
 			opt(&config)
 		}
 	}
-	return Input[T]{Name: argName, Origin: argOrigin, Input: argInput, Kind: config.Kind, Mcp: config.Mcp}
+	return Input[T]{Name: argName, Origin: argOrigin, Input: argInput, Kind: config.Kind, MCP: config.MCP}
 }

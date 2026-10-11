@@ -66,7 +66,7 @@ func TestOverlappingBorrowSharesError(t *testing.T) {
 	if _, ok := Available(s); ok {
 		t.Fatal("failed owner available")
 	}
-	if err := s.Retire(); err != nil {
+	if err := Retire(s); err != nil {
 		t.Fatal(err)
 	}
 	if r.closes.Load() != 1 {
@@ -125,7 +125,7 @@ func TestOverlappingBorrowCancellationPreservesOtherWaiters(t *testing.T) {
 	if string(cached) != "shared" {
 		t.Fatal("snapshot mutated owner")
 	}
-	_ = s.Retire()
+	_ = Retire(s)
 	if cleanup.Load() != 1 {
 		t.Fatal("cleanup count", cleanup.Load())
 	}
@@ -152,7 +152,7 @@ func TestLastWaiterCancellationJoinsAndIsTerminal(t *testing.T) {
 	case <-time.After(20 * time.Millisecond):
 	}
 	retired := make(chan error, 1)
-	go func() { retired <- s.Retire() }()
+	go func() { retired <- Retire(s) }()
 	close(release)
 	if err := <-result; !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
@@ -189,5 +189,5 @@ func TestCancelledOwnerDoesNotReopen(t *testing.T) {
 	if _, ok := Available(s); ok {
 		t.Fatal("cancelled owner available")
 	}
-	_ = s.Retire()
+	_ = Retire(s)
 }

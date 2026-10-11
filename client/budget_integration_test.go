@@ -232,13 +232,9 @@ func TestNamedSourceOuterBudgetThroughAuthRetryAndOwnedObservation(t *testing.T)
 		t.Fatal(err)
 	}
 	defer hooks.Close()
-	var descriptor ahp.ContentItem
-	if err := json.Unmarshal([]byte(`{"id":"budget-item","kind":"attachment","mediaType":"application/octet-stream","selection":"metadata"}`), &descriptor); err != nil {
-		t.Fatal(err)
-	}
 	reader := &sourceTestReader{Reader: strings.NewReader("owned budget bytes")}
 	source := content.NewSource(reader)
-	input := event.ToolBeforeInput[map[string]int]{CallID: "budget-call", Name: "budget-tool", Input: map[string]int{"count": 1}, Path: "execute", Origin: "native", Items: ahp.Some([]*ahp.ContentItem{&descriptor}), ItemsSources: []*content.Source{source}}
+	input := event.ToolBeforeInput[map[string]int]{CallID: "budget-call", Name: "budget-tool", Input: map[string]int{"count": 1}, Path: "execute", Origin: "native", ItemsInput: &[]*event.ContentPartInput{{Attachment: &event.AttachmentBodyInput{AttachmentBodyPart: ahp.AttachmentBodyPart{ID: "budget-item", MediaType: "application/octet-stream"}, Body: source}}}}
 	result, err := hooks.ToolBefore(ctx, input)
 	if err != nil || result == nil {
 		t.Fatalf("result=%+v err=%v", result, err)

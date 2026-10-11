@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 	"io"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 
 func TestElicitationContentTargetsAnswerOnly(t *testing.T) {
 	request, bodies := elicitationFixture("request", "form", `{"message":"choose","requestedSchema":{"type":"object","properties":{"x":{"type":"string"},"keep":{"type":"string"}},"required":["x"]}}`)
+	request["time"] = "2026-01-01T00:00:00Z"
 	snapshot, err := prepareElicitation(request, nil, elicitationOwners(request, bodies))
 	if err != nil {
 		t.Fatal(err)
@@ -102,7 +104,7 @@ func TestContentPreservesExplicitUnavailableGap(t *testing.T) {
 	item["selection"] = "body"
 	item["gap"] = original
 	c := &Client{opts: Options{Content: ContentOptions{AuthorizeContent: contentTestAllow}}}
-	projected, err := c.projectContent(context.Background(), map[string]any{"items": []any{item}}, map[string]any{"content": map[string]any{"default": "body"}}, "receiver")
+	projected, err := c.projectContent(context.Background(), contentTestEvent(map[string]any{"items": []any{item}}), map[string]any{"content": map[string]any{"default": "body"}}, "receiver")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,10 +120,11 @@ func TestContentPreservesExplicitUnavailableGap(t *testing.T) {
 
 func TestCompositionEffectiveValueKeepsSnapshotLocal(t *testing.T) {
 	event, bodies := elicitationFixture("request", "form", elicitationForm)
+	event["time"] = "2026-01-01T00:00:00Z"
 	owners := elicitationOwners(event, bodies)
 	defer func() {
 		for _, owner := range owners {
-			_ = owner.Retire()
+			_ = ownedcontent.Retire(owner)
 		}
 	}()
 	item := preparedAt(event, "/elicitation/request")
@@ -132,11 +135,11 @@ func TestCompositionEffectiveValueKeepsSnapshotLocal(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := &preparedBoundary{sources: owners, snapshot: snapshot, limit: 4 << 20}
-	c := &Composition{Event: sdkJSON(event), prepared: p}
+	c := &composition{Event: sdkJSON(event), prepared: p}
 	done := make(chan bool, 16)
 	for i := 0; i < cap(done); i++ {
 		go func() {
-			_, err := c.EffectiveValue("missing")
+			_, err := c.effectiveValue("missing")
 			done <- err != nil
 		}()
 	}
@@ -152,6 +155,7 @@ func TestCompositionEffectiveValueKeepsSnapshotLocal(t *testing.T) {
 
 func TestElicitationStructuredEditPinnedValidationAtomic(t *testing.T) {
 	request, _ := elicitationFixture("request", "form", elicitationForm)
+	request["time"] = "2026-01-01T00:00:00Z"
 	snapshot, err := prepareElicitation(request, nil, nil)
 	if err != nil {
 		t.Fatal(err)

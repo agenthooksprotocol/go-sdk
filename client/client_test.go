@@ -33,6 +33,9 @@ func (t *testTransport) Exchange(ctx context.Context, b []byte, note bool) ([]by
 	effects := []any{}
 	if t.reply != nil {
 		effects = t.reply(req)
+		if effects == nil {
+			effects = []any{}
+		}
 	}
 	return sdkJSON(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{"protocolVersion": "draft", "effects": effects}}), nil
 }
@@ -129,7 +132,7 @@ func TestTypedDecodeFailurePreservesProtocolAcceptance(t *testing.T) {
 	if !errors.As(err, &decode) || r == nil || r.InputAvailable {
 		t.Fatalf("decode contract: %+v %v", r, err)
 	}
-	if r.State.Permission != "allow" || len(r.Response.Effects) != 2 || len(r.Errors) != 0 {
+	if r.State.Permission != "allow" || len(r.Response.Effects.Value) != 2 || len(r.Errors) != 0 {
 		t.Fatalf("accepted effects lost: %+v", r)
 	}
 	if string(r.EffectiveInput) != `{"count":"not-an-integer"}` {
@@ -182,7 +185,7 @@ func TestFailClosedKeepsEarlierEffectsAndAuditsFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.State.Permission != "deny" || len(r.Errors) != 1 || !r.Errors[0].FailClosed || len(r.Response.Effects) != 1 {
+	if r.State.Permission != "deny" || len(r.Errors) != 1 || !r.Errors[0].FailClosed || len(r.Response.Effects.Value) != 1 {
 		t.Fatalf("bad prefix: %+v", r)
 	}
 	var input map[string]any

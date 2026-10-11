@@ -50,11 +50,11 @@ func compileOwnedAttachmentHostExample(ctx context.Context, hooks *Hooks, source
 			}},
 		},
 	}}
-	_, _ = hooks.ContextCompactBefore(ctx, event.ContextCompactBeforeInput{ItemsHost: &messages})
+	_, _ = hooks.ContextCompactBefore(ctx, event.ContextCompactBeforeInput{ItemsInput: &messages})
 	parts := messages[0].Parts
 	type arguments struct{ Count int }
 	result, _ := hooks.ToolBefore(ctx, event.ToolBeforeInput[arguments]{
-		Name: "inspect", Origin: "native", CallID: "call", Path: "/inspect", Input: arguments{Count: 1}, ItemsHost: &parts,
+		Name: "inspect", Origin: "native", CallID: "call", Path: "/inspect", Input: arguments{Count: 1}, ItemsInput: &parts,
 	})
 	if result != nil {
 		var _ arguments = result.Input

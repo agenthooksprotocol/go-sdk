@@ -3,6 +3,7 @@ package client
 
 import "context"
 import "github.com/agenthooksprotocol/go-sdk/event"
+import "github.com/agenthooksprotocol/go-sdk/internal/inputsources"
 
 func (c *Hooks) ConfigChangeAfter(ctx context.Context, input event.ConfigChangeAfterInput) (*Result, error) {
 	return c.intercept(ctx, "config.change.after", input)
@@ -56,7 +57,7 @@ func (c *Hooks) ToolBatchAfter(ctx context.Context, input event.ToolBatchAfterIn
 	return c.intercept(ctx, "tool.batch.after", input, opts...)
 }
 func (c *Hooks) ToolBefore[T any](ctx context.Context, input event.ToolBeforeInput[T], opts ...InterceptOption) (*ToolBeforeResult[T], error) {
-	return decodeToolBefore[T](c.intercept(ctx, "tool.before", input, opts...))
+	return decodeToolBefore[T](c.intercept(ctx, "tool.before", inputsources.PrepareToolBefore(input), opts...))
 }
 func (c *Hooks) ToolPermissionRequest(ctx context.Context, input event.ToolPermissionRequestInput, opts ...InterceptOption) (*Result, error) {
 	return c.intercept(ctx, "tool.permission.request", input, opts...)
