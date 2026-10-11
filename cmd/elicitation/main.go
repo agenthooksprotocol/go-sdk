@@ -161,8 +161,8 @@ func main() {
 			} else if c["op"] == "apply" {
 				effects, _ := c["effects"].([]any)
 				summary, err = sdk.ApplyElicitationEffects(obj(c["request"]), obj(c["result"]), resolve, validate, principal, effects)
-			} else if _, obsolete := c["effect"]; obsolete {
-				err = fmt.Errorf("single-effect validation is unsupported; use apply with effects")
+			} else if effect, guard := c["effect"]; guard {
+				summary, err = checkElicitationGuard(obj(c["request"]), obj(c["result"]), obj(effect), resolve, validate, principal)
 			} else {
 				summary, err = sdk.ValidateElicitationExchange(obj(c["request"]), obj(c["result"]), resolve, validate, principal)
 			}
@@ -301,4 +301,23 @@ func (t elicitationUploadTransport) RoundTrip(r *http.Request) (*http.Response, 
 	r = r.Clone(r.Context())
 	r.Header.Set("Authorization", "Bearer "+t.token)
 	return http.DefaultTransport.RoundTrip(r)
+}
+
+// checkElicitationGuard is an offline admission probe, not a settlement adapter.
+// Validate the complete exchange, then use atomic runtime admission at the
+// candidate's boundary. Report the original result, even for return/deny.
+func checkElicitationGuard(request, result, effect O, resolve func(O) ([]byte, error), validate func(string, any) error, principal string) (O, error) {
+	summary, err := sdk.ValidateElicitationExchange(request, result, resolve, validate, principal)
+	if err != nil {
+		return nil, err
+	}
+	boundaryResult := result
+	if effect["type"] == "return" || effect["type"] == "deny" {
+		boundaryResult = nil
+	}
+	if _, err = sdk.ApplyElicitationEffects(request, boundaryResult, resolve, validate, principal, []any{effect}); err != nil {
+		return nil, err
+	}
+	summary["provenance"] = O{"kind": "hook", "authenticatedSource": principal, "effect": effect["type"]}
+	return summary, nil
 }
