@@ -9,6 +9,7 @@ import (
 	"github.com/agenthooksprotocol/go-sdk/diagnostic"
 	"github.com/agenthooksprotocol/go-sdk/effect"
 	"github.com/agenthooksprotocol/go-sdk/event"
+	"github.com/agenthooksprotocol/go-sdk/internal/inputsources"
 	"github.com/agenthooksprotocol/go-sdk/permission"
 	"github.com/agenthooksprotocol/go-sdk/registration"
 	"github.com/agenthooksprotocol/go-sdk/state"
@@ -122,7 +123,7 @@ func TestGeneratedToolInputConstructor(t *testing.T) {
 	kind := tool.WithInputKind("")
 	typed := tool.NewInput("read", "native", arguments{Path: "file.txt"}, nil, kind)
 	var _ arguments = typed.Input
-	if !typed.Kind.Present || typed.Kind.Value != "" || typed.Mcp.Present {
+	if !typed.Kind.Present || typed.Kind.Value != "" || typed.MCP.Present {
 		t.Fatal("optional metadata presence lost")
 	}
 	raw := tool.NewInput("read", "native", json.RawMessage(`{"path":"file.txt"}`), kind)
@@ -135,12 +136,12 @@ func TestGeneratedToolInputConstructor(t *testing.T) {
 		t.Fatalf("typed/raw mismatch: %s %s %v", a, b, err)
 	}
 	absent := tool.NewInput("read", "native", arguments{})
-	if absent.Kind.Present || absent.Mcp.Present {
+	if absent.Kind.Present || absent.MCP.Present {
 		t.Fatal("absent options materialized")
 	}
 	mcp := &ahp.ExecutionEventMcp{}
-	withMcp := tool.NewInput("read", "mcp", arguments{}, tool.WithInputMcp(mcp))
-	if !withMcp.Mcp.Present || withMcp.Mcp.Value != mcp {
+	withMcp := tool.NewInput("read", "mcp", arguments{}, tool.WithInputMCP(mcp))
+	if !withMcp.MCP.Present || withMcp.MCP.Value != mcp {
 		t.Fatal("typed MCP metadata lost")
 	}
 }
@@ -397,13 +398,13 @@ func TestNamedContentSourceBindingsAreOutOfBand(t *testing.T) {
 			{Attachment: &event.AttachmentBodyInput{AttachmentBodyPart: ahp.AttachmentBodyPart{MediaType: "image/png"}, Body: source}},
 		}},
 	}
-	input := event.ContextCompactBeforeInput{ItemsHost: &messages}
-	sources := input.AHPContentSources()
+	input := event.ContextCompactBeforeInput{ItemsInput: &messages}
+	sources := inputsources.Extract(input)
 	if len(sources) != 3 || sources["/items/1/parts/1"] != source || sources["/items/2/parts/0"] != source || sources["/items/2/parts/5"] != source {
 		t.Fatal(sources)
 	}
 	delete(sources, "/items/2/parts/5")
-	if input.AHPContentSources()["/items/2/parts/5"] != source {
+	if inputsources.Extract(input)["/items/2/parts/5"] != source {
 		t.Fatal("binding map aliases caller state")
 	}
 	raw, err := json.Marshal(input)
@@ -415,9 +416,9 @@ func TestNamedContentSourceBindingsAreOutOfBand(t *testing.T) {
 	}
 	before := event.ToolBeforeInput[map[string]int]{
 		CallID: "call", Name: "run", Origin: "native", Path: "/tool", Input: map[string]int{"count": 1},
-		ItemsSources: []*content.Source{source},
+		ItemsInput: &[]*event.ContentPartInput{{Attachment: &event.AttachmentBodyInput{AttachmentBodyPart: ahp.AttachmentBodyPart{MediaType: "image/png"}, Body: source}}},
 	}
-	if before.AHPContentSources()["/items/0"] != source {
+	if inputsources.ExtractToolBefore(before)["/items/0"] != source {
 		t.Fatal("generic input lost source binding")
 	}
 	raw, err = json.Marshal(before)
@@ -476,13 +477,13 @@ func TestDirectOwnedAttachmentHostInput(t *testing.T) {
 			}},
 		},
 	}}
-	input := event.ContextCompactBeforeInput{ItemsHost: &messages}
-	sources := input.AHPContentSources()
+	input := event.ContextCompactBeforeInput{ItemsInput: &messages}
+	sources := inputsources.Extract(input)
 	if len(sources) != 1 || sources["/items/0/parts/1"] != source {
 		t.Fatal(sources)
 	}
 	delete(sources, "/items/0/parts/1")
-	if input.AHPContentSources()["/items/0/parts/1"] != source {
+	if inputsources.Extract(input)["/items/0/parts/1"] != source {
 		t.Fatal("source map aliases host state")
 	}
 	raw, err := json.Marshal(input)
@@ -528,7 +529,7 @@ func TestDirectOwnedAttachmentHostInput(t *testing.T) {
 	if messages[0].Parts[0].Text.ID != text["id"] || messages[0].Parts[1].Attachment.Selection != "" {
 		t.Fatal("host projection did not retain identity or mutated metadata")
 	}
-	input.AHPContentSources()
+	inputsources.Extract(input)
 	rawAgain, err := json.Marshal(input)
 	if err != nil || string(rawAgain) != string(raw) {
 		t.Fatalf("encoding changed identities: %s / %s: %v", raw, rawAgain, err)
@@ -547,16 +548,19 @@ func TestOwnedHostNestedMessageAndScope(t *testing.T) {
 		AttachmentBodyPart: ahp.AttachmentBodyPart{MediaType: "application/octet-stream", Selection: "body"},
 		Body:               source, Descriptor: &ahp.ContentReference{Ref: "content://supplied"},
 	}}
-	input := event.UserMessageInboundInput{MessageHost: &event.UserMessageInboundEventMessageInput{
+	input := event.UserMessageInboundInput{MessageInput: &event.InboundMessageInput{
 		UserMessageInboundEventMessage: ahp.UserMessageInboundEventMessage{Channel: "chat", Sender: "human"},
-		Messages: []event.UserMessageInboundEventMessageMessagesItemInput{
+		Messages: []event.InboundMessageItemInput{
 			{UserMessageInboundEventMessageMessagesItem: ahp.UserMessageInboundEventMessageMessagesItem{Role: "user"}, Parts: []*event.ContentPartInput{{Text: &ahp.TextBodyPart{ID: "text-id", Text: "hello"}}, part}},
 		},
 	}}
-	if input.AHPContentSources()["/message/messages/0/parts/1"] != source {
-		t.Fatal(input.AHPContentSources())
+	if inputsources.Extract(input)["/message/messages/0/parts/1"] != source {
+		t.Fatal(inputsources.Extract(input))
 	}
-	plannedMessageID := input.MessageHost.Messages[0].ID
+	if _, err := json.Marshal(input); err != nil {
+		t.Fatal(err)
+	}
+	plannedMessageID := input.MessageInput.Messages[0].ID
 	plannedPartID := part.Attachment.ID
 	if plannedMessageID == "" || plannedPartID == "" {
 		t.Fatal("planning did not retain generated identities")
@@ -581,27 +585,27 @@ func TestOwnedHostNestedMessageAndScope(t *testing.T) {
 	if attachment["id"] == "" || attachment["synthesized"] != true || attachment["body"].(map[string]any)["ref"] != "content://supplied" {
 		t.Fatal(attachment)
 	}
-	input.AHPContentSources()
+	inputsources.Extract(input)
 	again, err := json.Marshal(input)
 	if err != nil || string(again) != string(raw) || part.Attachment.ID != plannedPartID {
 		t.Fatalf("unstable nested identity: %s / %s: %v", raw, again, err)
 	}
 	// The generic tool payload is not a declared content slot.
 	outside := event.ToolBeforeInput[*event.ContentPartInput]{Input: part}
-	if len(outside.AHPContentSources()) != 0 {
+	if len(inputsources.ExtractToolBefore(outside)) != 0 {
 		t.Fatal("scanned arbitrary tool payload")
 	}
 	parts := []*event.ContentPartInput{nil, part}
-	outside.ItemsHost = &parts
-	if outside.AHPContentSources()["/items/1"] != source || len(outside.AHPContentSources()) != 1 {
-		t.Fatal(outside.AHPContentSources())
+	outside.ItemsInput = &parts
+	if inputsources.ExtractToolBefore(outside)["/items/1"] != source || len(inputsources.ExtractToolBefore(outside)) != 1 {
+		t.Fatal(inputsources.ExtractToolBefore(outside))
 	}
-	// Explicit empty host collections override wire collections and advanced bindings.
+	// Explicit empty owned collections override raw wire collections.
 	empty := []*event.ContentPartInput{}
-	outside.ItemsHost = &empty
-	outside.ItemsSources = []*content.Source{source}
-	if len(outside.AHPContentSources()) != 0 {
-		t.Fatal("stale advanced binding survived host override")
+	outside.ItemsInput = &empty
+
+	if len(inputsources.ExtractToolBefore(outside)) != 0 {
+		t.Fatal("empty owned collection acquired sources")
 	}
 	raw, err = json.Marshal(outside)
 	if err != nil {
@@ -663,8 +667,8 @@ func TestOwnedAttachmentValidationAndIdentity(t *testing.T) {
 		t.Fatal("inconsistent identity was mutated")
 	}
 	messages := []*event.ModelVisibleItemInput{{ModelVisibleItem: ahp.ModelVisibleItem{Role: "user", Synthesized: ahp.Some(false)}, Parts: []*event.ContentPartInput{{Text: &ahp.TextBodyPart{ID: "text", Text: "inline"}}}}}
-	input := event.ContextCompactBeforeInput{ItemsHost: &messages}
-	input.AHPContentSources()
+	input := event.ContextCompactBeforeInput{ItemsInput: &messages}
+	inputsources.Extract(input)
 	if _, err := json.Marshal(input); err == nil {
 		t.Fatal("missing message id silently replaced synthesized=false")
 	}
@@ -777,14 +781,14 @@ func TestHostContainerValidation(t *testing.T) {
 		name  string
 		input any
 	}{
-		{"nil-root-messages", event.ContextCompactBeforeInput{ItemsHost: &nilMessages}},
-		{"null-message-entry", event.ContextCompactBeforeInput{ItemsHost: &nullMessage}},
-		{"nil-root-parts", event.ToolBeforeInput[int]{ItemsHost: &nilParts}},
-		{"null-root-part-entry", event.ToolBeforeInput[int]{ItemsHost: &nullParts}},
+		{"nil-root-messages", event.ContextCompactBeforeInput{ItemsInput: &nilMessages}},
+		{"null-message-entry", event.ContextCompactBeforeInput{ItemsInput: &nullMessage}},
+		{"nil-root-parts", event.ToolBeforeInput[int]{ItemsInput: &nilParts}},
+		{"null-root-part-entry", event.ToolBeforeInput[int]{ItemsInput: &nullParts}},
 		{"nil-message-parts", &event.ModelVisibleItemInput{ModelVisibleItem: ahp.ModelVisibleItem{Role: "user"}}},
 		{"null-message-part-entry", &event.ModelVisibleItemInput{ModelVisibleItem: ahp.ModelVisibleItem{Role: "user"}, Parts: nullParts}},
-		{"nil-nested-messages", event.UserMessageInboundInput{MessageHost: &event.UserMessageInboundEventMessageInput{UserMessageInboundEventMessage: ahp.UserMessageInboundEventMessage{Channel: "chat", Sender: "human"}}}},
-		{"nil-nested-parts", event.UserMessageInboundInput{MessageHost: &event.UserMessageInboundEventMessageInput{UserMessageInboundEventMessage: ahp.UserMessageInboundEventMessage{Channel: "chat", Sender: "human"}, Messages: []event.UserMessageInboundEventMessageMessagesItemInput{{UserMessageInboundEventMessageMessagesItem: ahp.UserMessageInboundEventMessageMessagesItem{Role: "user"}}}}}},
+		{"nil-nested-messages", event.UserMessageInboundInput{MessageInput: &event.InboundMessageInput{UserMessageInboundEventMessage: ahp.UserMessageInboundEventMessage{Channel: "chat", Sender: "human"}}}},
+		{"nil-nested-parts", event.UserMessageInboundInput{MessageInput: &event.InboundMessageInput{UserMessageInboundEventMessage: ahp.UserMessageInboundEventMessage{Channel: "chat", Sender: "human"}, Messages: []event.InboundMessageItemInput{{UserMessageInboundEventMessageMessagesItem: ahp.UserMessageInboundEventMessageMessagesItem{Role: "user"}}}}}},
 	}
 	for _, tc := range invalid {
 		t.Run(tc.name, func(t *testing.T) {
@@ -799,7 +803,7 @@ func TestHostContainerValidation(t *testing.T) {
 			t.Fatalf("accepted noncanonical role %q", role)
 		}
 	}
-	nested := &event.UserMessageInboundEventMessageInput{UserMessageInboundEventMessage: ahp.UserMessageInboundEventMessage{Channel: "chat", Sender: "human"}, Messages: []event.UserMessageInboundEventMessageMessagesItemInput{{UserMessageInboundEventMessageMessagesItem: ahp.UserMessageInboundEventMessageMessagesItem{Role: "future"}, Parts: []*event.ContentPartInput{owned}}}}
+	nested := &event.InboundMessageInput{UserMessageInboundEventMessage: ahp.UserMessageInboundEventMessage{Channel: "chat", Sender: "human"}, Messages: []event.InboundMessageItemInput{{UserMessageInboundEventMessageMessagesItem: ahp.UserMessageInboundEventMessageMessagesItem{Role: "future"}, Parts: []*event.ContentPartInput{owned}}}}
 	if _, err := json.Marshal(nested); err == nil {
 		t.Fatal("accepted noncanonical nested role")
 	}
@@ -811,18 +815,57 @@ func TestHostContainerValidation(t *testing.T) {
 		}
 	}
 	valid := []*event.ModelVisibleItemInput{{ModelVisibleItem: ahp.ModelVisibleItem{Role: "user"}, Parts: []*event.ContentPartInput{owned}}}
-	input := event.ContextCompactBeforeInput{ItemsHost: &valid}
-	input.AHPContentSources()
+	input := event.ContextCompactBeforeInput{ItemsInput: &valid}
+	inputsources.Extract(input)
 	if _, err := json.Marshal(input); err != nil {
 		t.Fatal(err)
 	}
-	// Parallel advanced source bindings intentionally remain sparse. Wire-only
-	// encoding keeps its prior behavior and does not acquire host validation.
-	advanced := event.ToolBeforeInput[any]{ItemsSources: []*content.Source{nil, source}}
-	if advanced.AHPContentSources()["/items/1"] != source {
-		t.Fatal("sparse advanced binding lost")
+	// Raw wire collections remain available without acquiring owned sources.
+	advanced := event.ToolBeforeInput[any]{Items: ahp.Some([]*ahp.ContentItem{})}
+	if len(inputsources.ExtractToolBefore(advanced)) != 0 {
+		t.Fatal("raw input acquired sources")
 	}
 	if _, err := json.Marshal(advanced); err != nil {
 		t.Fatal("wire-only behavior changed", err)
+	}
+}
+
+// A matching method name does not confer access to the owned-source seam.
+type externalSourceProvider struct {
+	source *content.Source
+	called *bool
+}
+
+func (v externalSourceProvider) AHPContentSources() map[string]*content.Source {
+	*v.called = true
+	return map[string]*content.Source{"/items/0": v.source}
+}
+func TestNominalInputSourceExtraction(t *testing.T) {
+	source := content.NewSource(io.NopCloser(strings.NewReader("owned")))
+	parts := []*event.ContentPartInput{{Attachment: &event.AttachmentBodyInput{AttachmentBodyPart: ahp.AttachmentBodyPart{MediaType: "image/png"}, Body: source}}}
+	input := event.ToolBeforeInput[struct{ Count int }]{Name: "read", Origin: "native", Input: struct{ Count int }{Count: 7}, ItemsInput: &parts}
+	prepared := inputsources.PrepareToolBefore(input)
+	if inputsources.Extract(prepared)["/items/0"] != source {
+		t.Fatal("generic input lost owned source")
+	}
+	original, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapped, err := json.Marshal(prepared)
+	if err != nil || string(wrapped) != string(original) {
+		t.Fatal("generic envelope changed wire payload", err)
+	}
+	normal := event.ContextCompactBeforeInput{}
+	for _, value := range []any{normal, &normal, (*event.ContextCompactBeforeInput)(nil), nil} {
+		if len(inputsources.Extract(value)) != 0 {
+			t.Fatal("empty nominal input acquired sources")
+		}
+	}
+	called := false
+	for _, value := range []any{externalSourceProvider{source, &called}, &externalSourceProvider{source, &called}} {
+		if len(inputsources.Extract(value)) != 0 || called {
+			t.Fatal("external duck-typed provider was admitted")
+		}
 	}
 }

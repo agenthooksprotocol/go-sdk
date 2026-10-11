@@ -29,7 +29,7 @@ func TestElicitationSnapshotAndAnswers(t *testing.T) {
 	}
 	// The semantic contract remains valid after its attachment owner is retired.
 	for _, owner := range owners {
-		if err := owner.Retire(); err != nil {
+		if err := ownedcontent.Retire(owner); err != nil {
 			t.Fatal(err)
 		}
 	}

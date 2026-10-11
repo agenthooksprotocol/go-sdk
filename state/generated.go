@@ -13,9 +13,9 @@ func WithFlow(value ahp.InterceptRequestParamsStateFlow) Option {
 		v.Flow = ahp.Optional[ahp.InterceptRequestParamsStateFlow]{Present: true, Value: value}
 	}
 }
-func WithInjections(value []json.RawMessage) Option {
+func WithInjections(value []*ahp.InjectEffect) Option {
 	return func(v *ahp.InterceptRequestParamsState) {
-		v.Injections = ahp.Optional[[]json.RawMessage]{Present: true, Value: value}
+		v.Injections = ahp.Optional[[]*ahp.InjectEffect]{Present: true, Value: value}
 	}
 }
 func WithInstructions(value []string) Option {

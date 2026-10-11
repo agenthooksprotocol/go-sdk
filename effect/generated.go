@@ -4,6 +4,69 @@ package effect
 import ahp "github.com/agenthooksprotocol/go-sdk"
 import "encoding/json"
 
+type AllowOption func(*ahp.AllowEffect)
+
+func NewAllow(opts ...AllowOption) *ahp.Effect {
+	v := &ahp.AllowEffect{Type: "allow"}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return &ahp.Effect{AllowEffect: ahp.Optional[*ahp.AllowEffect]{Present: true, Value: v}}
+}
+
+type AskOption func(*ahp.AskEffect)
+
+func NewAsk(opts ...AskOption) *ahp.Effect {
+	v := &ahp.AskEffect{Type: "ask"}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return &ahp.Effect{AskEffect: ahp.Optional[*ahp.AskEffect]{Present: true, Value: v}}
+}
+
+type ContextCompactAfterModifyOption func(*ahp.ContextCompactAfterModifyEffect)
+
+func NewContextCompactAfterModify(argOperation ahp.ContextCompactAfterModifyEffectOperation, argValue *ahp.TextParts, opts ...ContextCompactAfterModifyOption) *ahp.ContextCompactAfterModifyEffect {
+	v := &ahp.ContextCompactAfterModifyEffect{Operation: argOperation, Target: "summary", Type: "modify", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return v
+}
+
+type ContextCompactBeforeModifyOption func(*ahp.ContextCompactBeforeModifyEffect)
+
+func NewContextCompactBeforeModify(argOperation ahp.ContextCompactBeforeModifyEffectOperation, argValue *ahp.TextParts, opts ...ContextCompactBeforeModifyOption) *ahp.ContextCompactBeforeModifyEffect {
+	v := &ahp.ContextCompactBeforeModifyEffect{Operation: argOperation, Target: "instructions", Type: "modify", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return v
+}
+
+type ContinueFlowOption func(*ahp.ContinueFlowEffect)
+
+func WithContinueFlowInstruction(value string) ContinueFlowOption {
+	return func(v *ahp.ContinueFlowEffect) { v.Instruction = ahp.Optional[string]{Present: true, Value: value} }
+}
+func NewContinueFlow(opts ...ContinueFlowOption) *ahp.Effect {
+	v := &ahp.ContinueFlowEffect{Operation: "continue", Type: "flow"}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return &ahp.Effect{ContinueFlowEffect: ahp.Optional[*ahp.ContinueFlowEffect]{Present: true, Value: v}}
+}
+
 type DenyOption func(*ahp.DenyEffect)
 
 func WithDenyCode(value string) DenyOption {
@@ -21,146 +84,448 @@ func NewDeny(argReason string, opts ...DenyOption) *ahp.Effect {
 	}
 	return &ahp.Effect{DenyEffect: ahp.Optional[*ahp.DenyEffect]{Present: true, Value: v}}
 }
-func ModifyContentMerge[T any](value T) (*ahp.Effect, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
+
+type InjectOption func(*ahp.InjectEffect)
+
+func NewInject(argDeliverAt ahp.InjectEffectDeliverAt, argValue *ahp.CanonicalMessages, opts ...InjectOption) *ahp.Effect {
+	v := &ahp.InjectEffect{DeliverAt: argDeliverAt, Operation: "append", Target: "context", Type: "inject", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
 	}
-	return &ahp.Effect{Modify: ahp.Some(ahp.EffectModify{Type: "modify", Target: "content", Operation: "merge", Value: raw})}, nil
+	return &ahp.Effect{InjectEffect: ahp.Optional[*ahp.InjectEffect]{Present: true, Value: v}}
 }
-func ModifyContentReplace[T any](value T) (*ahp.Effect, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
+
+type MessageOption func(*ahp.MessageEffect)
+
+func NewMessage(argText string, opts ...MessageOption) *ahp.Effect {
+	v := &ahp.MessageEffect{Text: argText, Type: "message"}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
 	}
-	return &ahp.Effect{Modify: ahp.Some(ahp.EffectModify{Type: "modify", Target: "content", Operation: "replace", Value: raw})}, nil
+	return &ahp.Effect{MessageEffect: ahp.Optional[*ahp.MessageEffect]{Present: true, Value: v}}
+}
+
+type ModelRequestBeforeModifyOption func(*ahp.ModelRequestBeforeModifyEffect)
+
+func NewModelRequestBeforeModify(argOperation ahp.ModelRequestBeforeModifyEffectOperation, argValue *ahp.CanonicalMessages, opts ...ModelRequestBeforeModifyOption) *ahp.ModelRequestBeforeModifyEffect {
+	v := &ahp.ModelRequestBeforeModifyEffect{Operation: argOperation, Target: "request", Type: "modify", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return v
+}
+
+type ModelResponseAfterModifyOption func(*ahp.ModelResponseAfterModifyEffect)
+
+func NewModelResponseAfterModify(argOperation ahp.ModelResponseAfterModifyEffectOperation, argValue *ahp.CanonicalMessages, opts ...ModelResponseAfterModifyOption) *ahp.ModelResponseAfterModifyEffect {
+	v := &ahp.ModelResponseAfterModifyEffect{Operation: argOperation, Target: "response", Type: "modify", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return v
+}
+
+type ModifyFormOption func(*ahp.ModifyFormEffect)
+
+func NewModifyForm(argOperation ahp.ModifyFormEffectOperation, argValue *ahp.FormAnswers, opts ...ModifyFormOption) *ahp.Effect {
+	v := &ahp.ModifyFormEffect{Operation: argOperation, Target: "content", Type: "modify", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return &ahp.Effect{ModifyFormEffect: ahp.Optional[*ahp.ModifyFormEffect]{Present: true, Value: v}}
+}
+
+type ModifyInputOption func(*ahp.ModifyInputEffect)
+
+func NewModifyInput(argOperation ahp.ModifyInputEffectOperation, argValue ahp.ModifyInputEffectValue, opts ...ModifyInputOption) *ahp.Effect {
+	v := &ahp.ModifyInputEffect{Operation: argOperation, Target: "input", Type: "modify", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return &ahp.Effect{ModifyInputEffect: ahp.Optional[*ahp.ModifyInputEffect]{Present: true, Value: v}}
+}
+
+type ModifyMessagesOption func(*ahp.ModifyMessagesEffect)
+
+func NewModifyMessages(argOperation ahp.ModifyMessagesEffectOperation, argTarget ahp.ModifyMessagesEffectTarget, argValue *ahp.CanonicalMessages, opts ...ModifyMessagesOption) *ahp.Effect {
+	v := &ahp.ModifyMessagesEffect{Operation: argOperation, Target: argTarget, Type: "modify", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return &ahp.Effect{ModifyMessagesEffect: ahp.Optional[*ahp.ModifyMessagesEffect]{Present: true, Value: v}}
+}
+
+type ModifyTextOption func(*ahp.ModifyTextEffect)
+
+func NewModifyText(argOperation ahp.ModifyTextEffectOperation, argTarget ahp.ModifyTextEffectTarget, argValue *ahp.TextParts, opts ...ModifyTextOption) *ahp.Effect {
+	v := &ahp.ModifyTextEffect{Operation: argOperation, Target: argTarget, Type: "modify", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return &ahp.Effect{ModifyTextEffect: ahp.Optional[*ahp.ModifyTextEffect]{Present: true, Value: v}}
+}
+
+type ModifyWorkspaceOption func(*ahp.ModifyWorkspaceEffect)
+
+func NewModifyWorkspace(argOperation ahp.ModifyWorkspaceEffectOperation, argValue *ahp.WorkspaceChange, opts ...ModifyWorkspaceOption) *ahp.Effect {
+	v := &ahp.ModifyWorkspaceEffect{Operation: argOperation, Target: "workspace", Type: "modify", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return &ahp.Effect{ModifyWorkspaceEffect: ahp.Optional[*ahp.ModifyWorkspaceEffect]{Present: true, Value: v}}
+}
+
+type ReturnElicitResultOption func(*ahp.ReturnElicitResultEffect)
+
+func NewReturnElicitResult(argValue *ahp.McpElicitationElicitResult, opts ...ReturnElicitResultOption) *ahp.ReturnElicitResultEffect {
+	v := &ahp.ReturnElicitResultEffect{Type: "return", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return v
+}
+
+type ReturnMessagesOption func(*ahp.ReturnMessagesEffect)
+
+func NewReturnMessages(argValue *ahp.CanonicalMessages, opts ...ReturnMessagesOption) *ahp.ReturnMessagesEffect {
+	v := &ahp.ReturnMessagesEffect{Type: "return", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return v
+}
+
+type ReturnTextOption func(*ahp.ReturnTextEffect)
+
+func NewReturnText(argValue *ahp.TextParts, opts ...ReturnTextOption) *ahp.ReturnTextEffect {
+	v := &ahp.ReturnTextEffect{Type: "return", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return v
+}
+
+type ReturnToolOption func(*ahp.ReturnToolEffect)
+
+func NewReturnTool(argValue json.RawMessage, opts ...ReturnToolOption) *ahp.Effect {
+	v := &ahp.ReturnToolEffect{Type: "return", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return &ahp.Effect{ReturnToolEffect: ahp.Optional[*ahp.ReturnToolEffect]{Present: true, Value: v}}
+}
+
+type StopFlowOption func(*ahp.StopFlowEffect)
+
+func NewStopFlow(argReason string, opts ...StopFlowOption) *ahp.Effect {
+	v := &ahp.StopFlowEffect{Operation: "stop", Reason: argReason, Type: "flow"}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return &ahp.Effect{StopFlowEffect: ahp.Optional[*ahp.StopFlowEffect]{Present: true, Value: v}}
+}
+
+type ToolAfterModifyOption func(*ahp.ToolAfterModifyEffect)
+
+func NewToolAfterModify(argOperation ahp.ToolAfterModifyEffectOperation, argValue *ahp.CanonicalMessages, opts ...ToolAfterModifyOption) *ahp.ToolAfterModifyEffect {
+	v := &ahp.ToolAfterModifyEffect{Operation: argOperation, Target: "output", Type: "modify", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return v
+}
+
+type ToolBeforeModifyOption func(*ahp.ToolBeforeModifyEffect)
+
+func NewToolBeforeModify(argOperation ahp.ToolBeforeModifyEffectOperation, argValue ahp.ToolBeforeModifyEffectValue, opts ...ToolBeforeModifyOption) *ahp.ToolBeforeModifyEffect {
+	v := &ahp.ToolBeforeModifyEffect{Operation: argOperation, Target: "input", Type: "modify", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return v
+}
+
+type ToolPermissionRequestModifyOption func(*ahp.ToolPermissionRequestModifyEffect)
+
+func NewToolPermissionRequestModify(argOperation ahp.ToolPermissionRequestModifyEffectOperation, argValue ahp.ToolPermissionRequestModifyEffectValue, opts ...ToolPermissionRequestModifyOption) *ahp.ToolPermissionRequestModifyEffect {
+	v := &ahp.ToolPermissionRequestModifyEffect{Operation: argOperation, Target: "input", Type: "modify", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return v
+}
+
+type TurnFinishBeforeModifyOption func(*ahp.TurnFinishBeforeModifyEffect)
+
+func NewTurnFinishBeforeModify(argOperation ahp.TurnFinishBeforeModifyEffectOperation, argValue *ahp.CanonicalMessages, opts ...TurnFinishBeforeModifyOption) *ahp.TurnFinishBeforeModifyEffect {
+	v := &ahp.TurnFinishBeforeModifyEffect{Operation: argOperation, Target: "response", Type: "modify", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return v
+}
+
+type TurnStartModifyOption func(*ahp.TurnStartModifyEffect)
+
+func NewTurnStartModify(argOperation ahp.TurnStartModifyEffectOperation, argValue *ahp.CanonicalMessages, opts ...TurnStartModifyOption) *ahp.TurnStartModifyEffect {
+	v := &ahp.TurnStartModifyEffect{Operation: argOperation, Target: "prompt", Type: "modify", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return v
+}
+
+type UserElicitationResultModifyOption func(*ahp.UserElicitationResultModifyEffect)
+
+func NewUserElicitationResultModify(argOperation ahp.UserElicitationResultModifyEffectOperation, argValue *ahp.FormAnswers, opts ...UserElicitationResultModifyOption) *ahp.UserElicitationResultModifyEffect {
+	v := &ahp.UserElicitationResultModifyEffect{Operation: argOperation, Target: "content", Type: "modify", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return v
+}
+
+type UserMessageInboundModifyOption func(*ahp.UserMessageInboundModifyEffect)
+
+func NewUserMessageInboundModify(argOperation ahp.UserMessageInboundModifyEffectOperation, argValue *ahp.CanonicalMessages, opts ...UserMessageInboundModifyOption) *ahp.UserMessageInboundModifyEffect {
+	v := &ahp.UserMessageInboundModifyEffect{Operation: argOperation, Target: "prompt", Type: "modify", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return v
+}
+
+type UserMessageOutboundModifyOption func(*ahp.UserMessageOutboundModifyEffect)
+
+func NewUserMessageOutboundModify(argOperation ahp.UserMessageOutboundModifyEffectOperation, argValue *ahp.CanonicalMessages, opts ...UserMessageOutboundModifyOption) *ahp.UserMessageOutboundModifyEffect {
+	v := &ahp.UserMessageOutboundModifyEffect{Operation: argOperation, Target: "content", Type: "modify", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return v
+}
+
+type WorkspaceChangeBeforeModifyOption func(*ahp.WorkspaceChangeBeforeModifyEffect)
+
+func NewWorkspaceChangeBeforeModify(argOperation ahp.WorkspaceChangeBeforeModifyEffectOperation, argValue *ahp.WorkspaceChange, opts ...WorkspaceChangeBeforeModifyOption) *ahp.WorkspaceChangeBeforeModifyEffect {
+	v := &ahp.WorkspaceChangeBeforeModifyEffect{Operation: argOperation, Target: "workspace", Type: "modify", Value: argValue}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return v
+}
+func ModifyContentMerge(value *ahp.CanonicalMessages) (*ahp.Effect, error) {
+	return &ahp.Effect{ModifyMessagesEffect: ahp.Some(&ahp.ModifyMessagesEffect{Type: "modify", Target: ahp.ModifyMessagesEffectTarget{Content: ahp.Some(ahp.ModifyMessagesEffectTargetContent("content"))}, Operation: ahp.ModifyMessagesEffectOperation{Merge: ahp.Some(ahp.ModifyMessagesEffectOperationMerge("merge"))}, Value: value})}, nil
+}
+func ModifyContentMergeValue(value *ahp.CanonicalMessages) *ahp.ModifyMessagesEffect {
+	return &ahp.ModifyMessagesEffect{Type: "modify", Target: ahp.ModifyMessagesEffectTarget{Content: ahp.Some(ahp.ModifyMessagesEffectTargetContent("content"))}, Operation: ahp.ModifyMessagesEffectOperation{Merge: ahp.Some(ahp.ModifyMessagesEffectOperationMerge("merge"))}, Value: value}
+}
+func ModifyContentReplace(value *ahp.CanonicalMessages) (*ahp.Effect, error) {
+	return &ahp.Effect{ModifyMessagesEffect: ahp.Some(&ahp.ModifyMessagesEffect{Type: "modify", Target: ahp.ModifyMessagesEffectTarget{Content: ahp.Some(ahp.ModifyMessagesEffectTargetContent("content"))}, Operation: ahp.ModifyMessagesEffectOperation{Replace: ahp.Some(ahp.ModifyMessagesEffectOperationReplace("replace"))}, Value: value})}, nil
+}
+func ModifyContentReplaceValue(value *ahp.CanonicalMessages) *ahp.ModifyMessagesEffect {
+	return &ahp.ModifyMessagesEffect{Type: "modify", Target: ahp.ModifyMessagesEffectTarget{Content: ahp.Some(ahp.ModifyMessagesEffectTargetContent("content"))}, Operation: ahp.ModifyMessagesEffectOperation{Replace: ahp.Some(ahp.ModifyMessagesEffectOperationReplace("replace"))}, Value: value}
+}
+func ModifyOutputMerge(value *ahp.CanonicalMessages) (*ahp.Effect, error) {
+	return &ahp.Effect{ModifyMessagesEffect: ahp.Some(&ahp.ModifyMessagesEffect{Type: "modify", Target: ahp.ModifyMessagesEffectTarget{Output: ahp.Some(ahp.ModifyMessagesEffectTargetOutput("output"))}, Operation: ahp.ModifyMessagesEffectOperation{Merge: ahp.Some(ahp.ModifyMessagesEffectOperationMerge("merge"))}, Value: value})}, nil
+}
+func ModifyOutputMergeValue(value *ahp.CanonicalMessages) *ahp.ModifyMessagesEffect {
+	return &ahp.ModifyMessagesEffect{Type: "modify", Target: ahp.ModifyMessagesEffectTarget{Output: ahp.Some(ahp.ModifyMessagesEffectTargetOutput("output"))}, Operation: ahp.ModifyMessagesEffectOperation{Merge: ahp.Some(ahp.ModifyMessagesEffectOperationMerge("merge"))}, Value: value}
+}
+func ModifyOutputReplace(value *ahp.CanonicalMessages) (*ahp.Effect, error) {
+	return &ahp.Effect{ModifyMessagesEffect: ahp.Some(&ahp.ModifyMessagesEffect{Type: "modify", Target: ahp.ModifyMessagesEffectTarget{Output: ahp.Some(ahp.ModifyMessagesEffectTargetOutput("output"))}, Operation: ahp.ModifyMessagesEffectOperation{Replace: ahp.Some(ahp.ModifyMessagesEffectOperationReplace("replace"))}, Value: value})}, nil
+}
+func ModifyOutputReplaceValue(value *ahp.CanonicalMessages) *ahp.ModifyMessagesEffect {
+	return &ahp.ModifyMessagesEffect{Type: "modify", Target: ahp.ModifyMessagesEffectTarget{Output: ahp.Some(ahp.ModifyMessagesEffectTargetOutput("output"))}, Operation: ahp.ModifyMessagesEffectOperation{Replace: ahp.Some(ahp.ModifyMessagesEffectOperationReplace("replace"))}, Value: value}
+}
+func ModifyPromptMerge(value *ahp.CanonicalMessages) (*ahp.Effect, error) {
+	return &ahp.Effect{ModifyMessagesEffect: ahp.Some(&ahp.ModifyMessagesEffect{Type: "modify", Target: ahp.ModifyMessagesEffectTarget{Prompt: ahp.Some(ahp.ModifyMessagesEffectTargetPrompt("prompt"))}, Operation: ahp.ModifyMessagesEffectOperation{Merge: ahp.Some(ahp.ModifyMessagesEffectOperationMerge("merge"))}, Value: value})}, nil
+}
+func ModifyPromptMergeValue(value *ahp.CanonicalMessages) *ahp.ModifyMessagesEffect {
+	return &ahp.ModifyMessagesEffect{Type: "modify", Target: ahp.ModifyMessagesEffectTarget{Prompt: ahp.Some(ahp.ModifyMessagesEffectTargetPrompt("prompt"))}, Operation: ahp.ModifyMessagesEffectOperation{Merge: ahp.Some(ahp.ModifyMessagesEffectOperationMerge("merge"))}, Value: value}
+}
+func ModifyPromptReplace(value *ahp.CanonicalMessages) (*ahp.Effect, error) {
+	return &ahp.Effect{ModifyMessagesEffect: ahp.Some(&ahp.ModifyMessagesEffect{Type: "modify", Target: ahp.ModifyMessagesEffectTarget{Prompt: ahp.Some(ahp.ModifyMessagesEffectTargetPrompt("prompt"))}, Operation: ahp.ModifyMessagesEffectOperation{Replace: ahp.Some(ahp.ModifyMessagesEffectOperationReplace("replace"))}, Value: value})}, nil
+}
+func ModifyPromptReplaceValue(value *ahp.CanonicalMessages) *ahp.ModifyMessagesEffect {
+	return &ahp.ModifyMessagesEffect{Type: "modify", Target: ahp.ModifyMessagesEffectTarget{Prompt: ahp.Some(ahp.ModifyMessagesEffectTargetPrompt("prompt"))}, Operation: ahp.ModifyMessagesEffectOperation{Replace: ahp.Some(ahp.ModifyMessagesEffectOperationReplace("replace"))}, Value: value}
+}
+func ModifyRequestMerge(value *ahp.CanonicalMessages) (*ahp.Effect, error) {
+	return &ahp.Effect{ModifyMessagesEffect: ahp.Some(&ahp.ModifyMessagesEffect{Type: "modify", Target: ahp.ModifyMessagesEffectTarget{Request: ahp.Some(ahp.ModifyMessagesEffectTargetRequest("request"))}, Operation: ahp.ModifyMessagesEffectOperation{Merge: ahp.Some(ahp.ModifyMessagesEffectOperationMerge("merge"))}, Value: value})}, nil
+}
+func ModifyRequestMergeValue(value *ahp.CanonicalMessages) *ahp.ModifyMessagesEffect {
+	return &ahp.ModifyMessagesEffect{Type: "modify", Target: ahp.ModifyMessagesEffectTarget{Request: ahp.Some(ahp.ModifyMessagesEffectTargetRequest("request"))}, Operation: ahp.ModifyMessagesEffectOperation{Merge: ahp.Some(ahp.ModifyMessagesEffectOperationMerge("merge"))}, Value: value}
+}
+func ModifyRequestReplace(value *ahp.CanonicalMessages) (*ahp.Effect, error) {
+	return &ahp.Effect{ModifyMessagesEffect: ahp.Some(&ahp.ModifyMessagesEffect{Type: "modify", Target: ahp.ModifyMessagesEffectTarget{Request: ahp.Some(ahp.ModifyMessagesEffectTargetRequest("request"))}, Operation: ahp.ModifyMessagesEffectOperation{Replace: ahp.Some(ahp.ModifyMessagesEffectOperationReplace("replace"))}, Value: value})}, nil
+}
+func ModifyRequestReplaceValue(value *ahp.CanonicalMessages) *ahp.ModifyMessagesEffect {
+	return &ahp.ModifyMessagesEffect{Type: "modify", Target: ahp.ModifyMessagesEffectTarget{Request: ahp.Some(ahp.ModifyMessagesEffectTargetRequest("request"))}, Operation: ahp.ModifyMessagesEffectOperation{Replace: ahp.Some(ahp.ModifyMessagesEffectOperationReplace("replace"))}, Value: value}
+}
+func ModifyResponseMerge(value *ahp.CanonicalMessages) (*ahp.Effect, error) {
+	return &ahp.Effect{ModifyMessagesEffect: ahp.Some(&ahp.ModifyMessagesEffect{Type: "modify", Target: ahp.ModifyMessagesEffectTarget{Response: ahp.Some(ahp.ModifyMessagesEffectTargetResponse("response"))}, Operation: ahp.ModifyMessagesEffectOperation{Merge: ahp.Some(ahp.ModifyMessagesEffectOperationMerge("merge"))}, Value: value})}, nil
+}
+func ModifyResponseMergeValue(value *ahp.CanonicalMessages) *ahp.ModifyMessagesEffect {
+	return &ahp.ModifyMessagesEffect{Type: "modify", Target: ahp.ModifyMessagesEffectTarget{Response: ahp.Some(ahp.ModifyMessagesEffectTargetResponse("response"))}, Operation: ahp.ModifyMessagesEffectOperation{Merge: ahp.Some(ahp.ModifyMessagesEffectOperationMerge("merge"))}, Value: value}
+}
+func ModifyResponseReplace(value *ahp.CanonicalMessages) (*ahp.Effect, error) {
+	return &ahp.Effect{ModifyMessagesEffect: ahp.Some(&ahp.ModifyMessagesEffect{Type: "modify", Target: ahp.ModifyMessagesEffectTarget{Response: ahp.Some(ahp.ModifyMessagesEffectTargetResponse("response"))}, Operation: ahp.ModifyMessagesEffectOperation{Replace: ahp.Some(ahp.ModifyMessagesEffectOperationReplace("replace"))}, Value: value})}, nil
+}
+func ModifyResponseReplaceValue(value *ahp.CanonicalMessages) *ahp.ModifyMessagesEffect {
+	return &ahp.ModifyMessagesEffect{Type: "modify", Target: ahp.ModifyMessagesEffectTarget{Response: ahp.Some(ahp.ModifyMessagesEffectTargetResponse("response"))}, Operation: ahp.ModifyMessagesEffectOperation{Replace: ahp.Some(ahp.ModifyMessagesEffectOperationReplace("replace"))}, Value: value}
+}
+func ModifyInstructionsMerge(value *ahp.TextParts) (*ahp.Effect, error) {
+	return &ahp.Effect{ModifyTextEffect: ahp.Some(&ahp.ModifyTextEffect{Type: "modify", Target: ahp.ModifyTextEffectTarget{Instructions: ahp.Some(ahp.ModifyTextEffectTargetInstructions("instructions"))}, Operation: ahp.ModifyTextEffectOperation{Merge: ahp.Some(ahp.ModifyTextEffectOperationMerge("merge"))}, Value: value})}, nil
+}
+func ModifyInstructionsMergeValue(value *ahp.TextParts) *ahp.ModifyTextEffect {
+	return &ahp.ModifyTextEffect{Type: "modify", Target: ahp.ModifyTextEffectTarget{Instructions: ahp.Some(ahp.ModifyTextEffectTargetInstructions("instructions"))}, Operation: ahp.ModifyTextEffectOperation{Merge: ahp.Some(ahp.ModifyTextEffectOperationMerge("merge"))}, Value: value}
+}
+func ModifyInstructionsReplace(value *ahp.TextParts) (*ahp.Effect, error) {
+	return &ahp.Effect{ModifyTextEffect: ahp.Some(&ahp.ModifyTextEffect{Type: "modify", Target: ahp.ModifyTextEffectTarget{Instructions: ahp.Some(ahp.ModifyTextEffectTargetInstructions("instructions"))}, Operation: ahp.ModifyTextEffectOperation{Replace: ahp.Some(ahp.ModifyTextEffectOperationReplace("replace"))}, Value: value})}, nil
+}
+func ModifyInstructionsReplaceValue(value *ahp.TextParts) *ahp.ModifyTextEffect {
+	return &ahp.ModifyTextEffect{Type: "modify", Target: ahp.ModifyTextEffectTarget{Instructions: ahp.Some(ahp.ModifyTextEffectTargetInstructions("instructions"))}, Operation: ahp.ModifyTextEffectOperation{Replace: ahp.Some(ahp.ModifyTextEffectOperationReplace("replace"))}, Value: value}
+}
+func ModifySummaryMerge(value *ahp.TextParts) (*ahp.Effect, error) {
+	return &ahp.Effect{ModifyTextEffect: ahp.Some(&ahp.ModifyTextEffect{Type: "modify", Target: ahp.ModifyTextEffectTarget{Summary: ahp.Some(ahp.ModifyTextEffectTargetSummary("summary"))}, Operation: ahp.ModifyTextEffectOperation{Merge: ahp.Some(ahp.ModifyTextEffectOperationMerge("merge"))}, Value: value})}, nil
+}
+func ModifySummaryMergeValue(value *ahp.TextParts) *ahp.ModifyTextEffect {
+	return &ahp.ModifyTextEffect{Type: "modify", Target: ahp.ModifyTextEffectTarget{Summary: ahp.Some(ahp.ModifyTextEffectTargetSummary("summary"))}, Operation: ahp.ModifyTextEffectOperation{Merge: ahp.Some(ahp.ModifyTextEffectOperationMerge("merge"))}, Value: value}
+}
+func ModifySummaryReplace(value *ahp.TextParts) (*ahp.Effect, error) {
+	return &ahp.Effect{ModifyTextEffect: ahp.Some(&ahp.ModifyTextEffect{Type: "modify", Target: ahp.ModifyTextEffectTarget{Summary: ahp.Some(ahp.ModifyTextEffectTargetSummary("summary"))}, Operation: ahp.ModifyTextEffectOperation{Replace: ahp.Some(ahp.ModifyTextEffectOperationReplace("replace"))}, Value: value})}, nil
+}
+func ModifySummaryReplaceValue(value *ahp.TextParts) *ahp.ModifyTextEffect {
+	return &ahp.ModifyTextEffect{Type: "modify", Target: ahp.ModifyTextEffectTarget{Summary: ahp.Some(ahp.ModifyTextEffectTargetSummary("summary"))}, Operation: ahp.ModifyTextEffectOperation{Replace: ahp.Some(ahp.ModifyTextEffectOperationReplace("replace"))}, Value: value}
+}
+func ModifyWorkspaceMerge(value *ahp.WorkspaceChange) (*ahp.Effect, error) {
+	return &ahp.Effect{ModifyWorkspaceEffect: ahp.Some(&ahp.ModifyWorkspaceEffect{Type: "modify", Target: ahp.ModifyWorkspaceEffectTarget("workspace"), Operation: ahp.ModifyWorkspaceEffectOperation{Merge: ahp.Some(ahp.ModifyWorkspaceEffectOperationMerge("merge"))}, Value: value})}, nil
+}
+func ModifyWorkspaceMergeValue(value *ahp.WorkspaceChange) *ahp.ModifyWorkspaceEffect {
+	return &ahp.ModifyWorkspaceEffect{Type: "modify", Target: ahp.ModifyWorkspaceEffectTarget("workspace"), Operation: ahp.ModifyWorkspaceEffectOperation{Merge: ahp.Some(ahp.ModifyWorkspaceEffectOperationMerge("merge"))}, Value: value}
+}
+func ModifyWorkspaceReplace(value *ahp.WorkspaceChange) (*ahp.Effect, error) {
+	return &ahp.Effect{ModifyWorkspaceEffect: ahp.Some(&ahp.ModifyWorkspaceEffect{Type: "modify", Target: ahp.ModifyWorkspaceEffectTarget("workspace"), Operation: ahp.ModifyWorkspaceEffectOperation{Replace: ahp.Some(ahp.ModifyWorkspaceEffectOperationReplace("replace"))}, Value: value})}, nil
+}
+func ModifyWorkspaceReplaceValue(value *ahp.WorkspaceChange) *ahp.ModifyWorkspaceEffect {
+	return &ahp.ModifyWorkspaceEffect{Type: "modify", Target: ahp.ModifyWorkspaceEffectTarget("workspace"), Operation: ahp.ModifyWorkspaceEffectOperation{Replace: ahp.Some(ahp.ModifyWorkspaceEffectOperationReplace("replace"))}, Value: value}
+}
+func ModifyContentFormMerge(value *ahp.FormAnswers) (*ahp.Effect, error) {
+	return &ahp.Effect{ModifyFormEffect: ahp.Some(&ahp.ModifyFormEffect{Type: "modify", Target: ahp.ModifyFormEffectTarget("content"), Operation: ahp.ModifyFormEffectOperation{Merge: ahp.Some(ahp.ModifyFormEffectOperationMerge("merge"))}, Value: value})}, nil
+}
+func ModifyContentFormMergeValue(value *ahp.FormAnswers) *ahp.ModifyFormEffect {
+	return &ahp.ModifyFormEffect{Type: "modify", Target: ahp.ModifyFormEffectTarget("content"), Operation: ahp.ModifyFormEffectOperation{Merge: ahp.Some(ahp.ModifyFormEffectOperationMerge("merge"))}, Value: value}
+}
+func ModifyContentFormReplace(value *ahp.FormAnswers) (*ahp.Effect, error) {
+	return &ahp.Effect{ModifyFormEffect: ahp.Some(&ahp.ModifyFormEffect{Type: "modify", Target: ahp.ModifyFormEffectTarget("content"), Operation: ahp.ModifyFormEffectOperation{Replace: ahp.Some(ahp.ModifyFormEffectOperationReplace("replace"))}, Value: value})}, nil
+}
+func ModifyContentFormReplaceValue(value *ahp.FormAnswers) *ahp.ModifyFormEffect {
+	return &ahp.ModifyFormEffect{Type: "modify", Target: ahp.ModifyFormEffectTarget("content"), Operation: ahp.ModifyFormEffectOperation{Replace: ahp.Some(ahp.ModifyFormEffectOperationReplace("replace"))}, Value: value}
 }
 func ModifyInputMerge[T any](value T) (*ahp.Effect, error) {
 	raw, err := json.Marshal(value)
 	if err != nil {
 		return nil, err
 	}
-	return &ahp.Effect{Modify: ahp.Some(ahp.EffectModify{Type: "modify", Target: "input", Operation: "merge", Value: raw})}, nil
+	var canonical ahp.ModifyInputEffectValue
+	if err := json.Unmarshal(raw, &canonical); err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(ModifyInputMergeValue(canonical))
+	if err != nil {
+		return nil, err
+	}
+	var validated ahp.ModifyInputEffect
+	if err := json.Unmarshal(encoded, &validated); err != nil {
+		return nil, err
+	}
+	return &ahp.Effect{ModifyInputEffect: ahp.Some(&validated)}, nil
+}
+func ModifyInputMergeValue(value ahp.ModifyInputEffectValue) *ahp.ModifyInputEffect {
+	return &ahp.ModifyInputEffect{Type: "modify", Target: ahp.ModifyInputEffectTarget("input"), Operation: ahp.ModifyInputEffectOperation{Merge: ahp.Some(ahp.ModifyInputEffectOperationMerge("merge"))}, Value: value}
 }
 func ModifyInputReplace[T any](value T) (*ahp.Effect, error) {
 	raw, err := json.Marshal(value)
 	if err != nil {
 		return nil, err
 	}
-	return &ahp.Effect{Modify: ahp.Some(ahp.EffectModify{Type: "modify", Target: "input", Operation: "replace", Value: raw})}, nil
+	var canonical ahp.ModifyInputEffectValue
+	if err := json.Unmarshal(raw, &canonical); err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(ModifyInputReplaceValue(canonical))
+	if err != nil {
+		return nil, err
+	}
+	var validated ahp.ModifyInputEffect
+	if err := json.Unmarshal(encoded, &validated); err != nil {
+		return nil, err
+	}
+	return &ahp.Effect{ModifyInputEffect: ahp.Some(&validated)}, nil
 }
-func ModifyInstructionsMerge[T any](value T) (*ahp.Effect, error) {
+func ModifyInputReplaceValue(value ahp.ModifyInputEffectValue) *ahp.ModifyInputEffect {
+	return &ahp.ModifyInputEffect{Type: "modify", Target: ahp.ModifyInputEffectTarget("input"), Operation: ahp.ModifyInputEffectOperation{Replace: ahp.Some(ahp.ModifyInputEffectOperationReplace("replace"))}, Value: value}
+}
+func Return[T any](value T, opts ...ReturnToolOption) (*ahp.Effect, error) {
 	raw, err := json.Marshal(value)
 	if err != nil {
 		return nil, err
 	}
-	return &ahp.Effect{Modify: ahp.Some(ahp.EffectModify{Type: "modify", Target: "instructions", Operation: "merge", Value: raw})}, nil
-}
-func ModifyInstructionsReplace[T any](value T) (*ahp.Effect, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return &ahp.Effect{Modify: ahp.Some(ahp.EffectModify{Type: "modify", Target: "instructions", Operation: "replace", Value: raw})}, nil
-}
-func ModifyOutputMerge[T any](value T) (*ahp.Effect, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return &ahp.Effect{Modify: ahp.Some(ahp.EffectModify{Type: "modify", Target: "output", Operation: "merge", Value: raw})}, nil
-}
-func ModifyOutputReplace[T any](value T) (*ahp.Effect, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return &ahp.Effect{Modify: ahp.Some(ahp.EffectModify{Type: "modify", Target: "output", Operation: "replace", Value: raw})}, nil
-}
-func ModifyPromptMerge[T any](value T) (*ahp.Effect, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return &ahp.Effect{Modify: ahp.Some(ahp.EffectModify{Type: "modify", Target: "prompt", Operation: "merge", Value: raw})}, nil
-}
-func ModifyPromptReplace[T any](value T) (*ahp.Effect, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return &ahp.Effect{Modify: ahp.Some(ahp.EffectModify{Type: "modify", Target: "prompt", Operation: "replace", Value: raw})}, nil
-}
-func ModifyRequestMerge[T any](value T) (*ahp.Effect, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return &ahp.Effect{Modify: ahp.Some(ahp.EffectModify{Type: "modify", Target: "request", Operation: "merge", Value: raw})}, nil
-}
-func ModifyRequestReplace[T any](value T) (*ahp.Effect, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return &ahp.Effect{Modify: ahp.Some(ahp.EffectModify{Type: "modify", Target: "request", Operation: "replace", Value: raw})}, nil
-}
-func ModifyResponseMerge[T any](value T) (*ahp.Effect, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return &ahp.Effect{Modify: ahp.Some(ahp.EffectModify{Type: "modify", Target: "response", Operation: "merge", Value: raw})}, nil
-}
-func ModifyResponseReplace[T any](value T) (*ahp.Effect, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return &ahp.Effect{Modify: ahp.Some(ahp.EffectModify{Type: "modify", Target: "response", Operation: "replace", Value: raw})}, nil
-}
-func ModifySummaryMerge[T any](value T) (*ahp.Effect, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return &ahp.Effect{Modify: ahp.Some(ahp.EffectModify{Type: "modify", Target: "summary", Operation: "merge", Value: raw})}, nil
-}
-func ModifySummaryReplace[T any](value T) (*ahp.Effect, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return &ahp.Effect{Modify: ahp.Some(ahp.EffectModify{Type: "modify", Target: "summary", Operation: "replace", Value: raw})}, nil
-}
-func ModifyWorkspaceMerge[T any](value T) (*ahp.Effect, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return &ahp.Effect{Modify: ahp.Some(ahp.EffectModify{Type: "modify", Target: "workspace", Operation: "merge", Value: raw})}, nil
-}
-func ModifyWorkspaceReplace[T any](value T) (*ahp.Effect, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return &ahp.Effect{Modify: ahp.Some(ahp.EffectModify{Type: "modify", Target: "workspace", Operation: "replace", Value: raw})}, nil
-}
-func Return[T any](value T, opts ...ReturnOption) (*ahp.Effect, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return NewReturn(raw, opts...), nil
+	return NewReturnTool(raw, opts...), nil
 }
 
-type DeliverAt = ahp.EffectInjectAppendContextDeliverAt
+type DeliverAt = ahp.InjectEffectDeliverAt
 
 const NextTurn DeliverAt = "next_turn"
 const Now DeliverAt = "now"
 
-func InjectContextAppend[T any](deliverAt DeliverAt, value T, opts ...InjectAppendOption) (*ahp.Effect, error) {
+func InjectContextAppend[T any](deliverAt DeliverAt, value T, opts ...InjectOption) (*ahp.Effect, error) {
 	raw, err := json.Marshal(value)
 	if err != nil {
 		return nil, err
@@ -169,104 +534,5 @@ func InjectContextAppend[T any](deliverAt DeliverAt, value T, opts ...InjectAppe
 	if err := json.Unmarshal(raw, &canonical); err != nil {
 		return nil, err
 	}
-	return NewInjectAppend(deliverAt, canonical, opts...), nil
-}
-
-type AllowOption func(*ahp.EffectAllow)
-
-func NewAllow(opts ...AllowOption) *ahp.Effect {
-	v := &ahp.EffectAllow{Type: "allow"}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(v)
-		}
-	}
-	return &ahp.Effect{Allow: ahp.Optional[ahp.EffectAllow]{Present: true, Value: *v}}
-}
-
-type AskOption func(*ahp.EffectAsk)
-
-func NewAsk(opts ...AskOption) *ahp.Effect {
-	v := &ahp.EffectAsk{Type: "ask"}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(v)
-		}
-	}
-	return &ahp.Effect{Ask: ahp.Optional[ahp.EffectAsk]{Present: true, Value: *v}}
-}
-
-type ModifyOption func(*ahp.EffectModify)
-
-func NewModify(argOperation ahp.EffectModifyOperation, argTarget ahp.EffectModifyTarget, argValue json.RawMessage, opts ...ModifyOption) *ahp.Effect {
-	v := &ahp.EffectModify{Operation: argOperation, Target: argTarget, Type: "modify", Value: argValue}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(v)
-		}
-	}
-	return &ahp.Effect{Modify: ahp.Optional[ahp.EffectModify]{Present: true, Value: *v}}
-}
-
-type MessageOption func(*ahp.EffectMessage)
-
-func NewMessage(argText string, opts ...MessageOption) *ahp.Effect {
-	v := &ahp.EffectMessage{Text: argText, Type: "message"}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(v)
-		}
-	}
-	return &ahp.Effect{Message: ahp.Optional[ahp.EffectMessage]{Present: true, Value: *v}}
-}
-
-type ReturnOption func(*ahp.EffectReturn)
-
-func NewReturn(argValue json.RawMessage, opts ...ReturnOption) *ahp.Effect {
-	v := &ahp.EffectReturn{Type: "return", Value: argValue}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(v)
-		}
-	}
-	return &ahp.Effect{Return: ahp.Optional[ahp.EffectReturn]{Present: true, Value: *v}}
-}
-
-type FlowStopOption func(*ahp.EffectFlowStop)
-
-func NewFlowStop(argReason string, opts ...FlowStopOption) *ahp.Effect {
-	v := &ahp.EffectFlowStop{Operation: "stop", Reason: argReason, Type: "flow"}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(v)
-		}
-	}
-	return &ahp.Effect{FlowStop: ahp.Optional[ahp.EffectFlowStop]{Present: true, Value: *v}}
-}
-
-type FlowContinueOption func(*ahp.EffectFlowContinue)
-
-func WithFlowContinueInstruction(value string) FlowContinueOption {
-	return func(v *ahp.EffectFlowContinue) { v.Instruction = ahp.Optional[string]{Present: true, Value: value} }
-}
-func NewFlowContinue(opts ...FlowContinueOption) *ahp.Effect {
-	v := &ahp.EffectFlowContinue{Operation: "continue", Type: "flow"}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(v)
-		}
-	}
-	return &ahp.Effect{FlowContinue: ahp.Optional[ahp.EffectFlowContinue]{Present: true, Value: *v}}
-}
-
-type InjectAppendOption func(*ahp.EffectInjectAppendContext)
-
-func NewInjectAppend(argDeliverAt ahp.EffectInjectAppendContextDeliverAt, argValue *ahp.CanonicalMessages, opts ...InjectAppendOption) *ahp.Effect {
-	v := &ahp.EffectInjectAppendContext{DeliverAt: argDeliverAt, Operation: "append", Target: "context", Type: "inject", Value: argValue}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(v)
-		}
-	}
-	return &ahp.Effect{InjectAppendContext: ahp.Optional[ahp.EffectInjectAppendContext]{Present: true, Value: *v}}
+	return NewInject(deliverAt, canonical, opts...), nil
 }

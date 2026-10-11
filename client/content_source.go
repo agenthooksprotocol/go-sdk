@@ -56,18 +56,22 @@ func contentSourceConfig(options []InterceptOption) interceptConfig {
 
 func (cfg interceptConfig) closeSources() {
 	for _, source := range cfg.ownedSources {
-		if cfg.transferredSources[source] || (source.Claimed() && !cfg.claimedSources[source]) {
+		if cfg.transferredSources[source] || (ownedcontent.Claimed(source) && !cfg.claimedSources[source]) {
 			continue
 		}
-		_ = source.Retire()
+		_ = ownedcontent.Retire(source)
 	}
 }
 
 func (cfg interceptConfig) bindSources(ctx context.Context, event map[string]any) (context.Context, error) {
 	seen := map[*ContentSource]bool{}
+	slots, err := schemaSourceSlots(event)
+	if err != nil {
+		return ctx, err
+	}
 	for path, source := range cfg.sources {
 		item := preparedAt(event, path)
-		if !canonicalPartPath(event, path) || item == nil {
+		if !slots[path] || item == nil {
 			return ctx, errors.New("content source requires an existing canonical content item")
 		}
 		if item["kind"] != "attachment" {
@@ -79,7 +83,7 @@ func (cfg interceptConfig) bindSources(ctx context.Context, event map[string]any
 		if source == nil {
 			return ctx, errors.New("content source requires a reader")
 		}
-		if !seen[source] && !source.Claim() {
+		if !seen[source] && !ownedcontent.Claim(source) {
 			return ctx, errors.New("content source already belongs to an occurrence")
 		}
 		cfg.claimedSources[source] = true

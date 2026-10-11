@@ -91,13 +91,13 @@ func TestPublicResolvedInstructionsAcrossReceivers(t *testing.T) {
 			version := ahp.ProtocolVersion("draft")
 			effects := []*ahp.Effect{}
 			if receiver == "a" {
-				modification, err := effect.ModifyInstructionsReplace([]any{map[string]any{"id": "instructions-1", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": "accepted instructions\n"}})
+				modification, err := effect.ModifyInstructionsReplace(&ahp.TextParts{&ahp.TextPart{TextBodyPart: ahp.Some(&ahp.TextBodyPart{ID: "instructions-1", Kind: ahp.TextBodyPartKindText, MediaType: ahp.TextBodyPartMediaTypeTextPlain, Selection: ahp.TextBodyPartSelectionBody, Text: "accepted instructions\n"})}})
 				if err != nil {
 					return ahp.InterceptResponseResult{}, err
 				}
 				effects = append(effects, modification)
 			}
-			return ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: effects}, nil
+			return ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: ahp.Some(effects)}, nil
 		}}, server.Options{})
 		if err != nil {
 			t.Fatal(err)

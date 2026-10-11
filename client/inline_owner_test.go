@@ -34,7 +34,7 @@ func TestInlineDirectHostOwnedAttachment(t *testing.T) {
 	}}
 	result, err := c.ModelRequestBefore(context.Background(), event.ModelRequestBeforeInput{
 		Attempt: &ahp.ExecutionEventAttempt{ID: "attempt", Number: json.Number("1")},
-		Model:   &ahp.ExecutionEventModel{ID: "model", Provider: "provider"}, ItemsHost: &messages,
+		Model:   &ahp.ExecutionEventModel{ID: "model", Provider: "provider"}, ItemsInput: &messages,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -119,7 +119,7 @@ func TestInlineDirectHostSelectedUploadUsesExactOwner(t *testing.T) {
 		{Text: &ahp.TextBodyPart{Text: "review"}},
 		{Attachment: &event.AttachmentBodyInput{AttachmentBodyPart: ahp.AttachmentBodyPart{MediaType: "application/pdf"}, Body: owner, Descriptor: &ahp.ContentReference{Ref: "unrelated-host-descriptor"}}},
 	}}}
-	input := event.ModelRequestBeforeInput{Attempt: &ahp.ExecutionEventAttempt{ID: "attempt", Number: json.Number("1")}, Model: &ahp.ExecutionEventModel{ID: "model", Provider: "provider"}, ItemsHost: &messages}
+	input := event.ModelRequestBeforeInput{Attempt: &ahp.ExecutionEventAttempt{ID: "attempt", Number: json.Number("1")}, Model: &ahp.ExecutionEventModel{ID: "model", Provider: "provider"}, ItemsInput: &messages}
 	if _, err := json.Marshal(input); err != nil {
 		t.Fatal(err)
 	}

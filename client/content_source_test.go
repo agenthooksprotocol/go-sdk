@@ -24,7 +24,7 @@ func sourceTestBinding(t *testing.T, source *ContentSource) (context.Context, ma
 	item := contentTestItem(nil)
 	delete(item, "body")
 	item["selection"] = "metadata"
-	event := map[string]any{"items": []any{item}}
+	event := contentTestEvent(map[string]any{"items": []any{item}})
 	cfg := contentSourceConfig([]InterceptOption{WithContentSource("/items/0", source)})
 	ctx, err := cfg.bindSources(context.Background(), event)
 	if err != nil {
@@ -221,6 +221,7 @@ func TestContentSourceFailureAndUnusedBoundaryClose(t *testing.T) {
 func TestContentSourceElicitationLazyPinnedContract(t *testing.T) {
 	// JSON is inline text. Its pinned contract is independent of lazy attachment lifetimes.
 	event, _ := elicitationFixture("request", "form", elicitationForm)
+	event["time"] = "2026-01-01T00:00:00Z"
 	c := &Hooks{opts: Options{Content: ContentOptions{Resolver: func(context.Context, string) (io.ReadCloser, error) {
 		t.Error("inline JSON reached resolver")
 		return nil, io.ErrUnexpectedEOF
@@ -246,6 +247,7 @@ func TestContentSourceElicitationInvalidBodyNeverUploads(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { uploads.Add(1) }))
 	defer server.Close()
 	event, _ := elicitationFixture("request", "form", `{"message":"no schema"}`)
+	event["time"] = "2026-01-01T00:00:00Z"
 	c := &Hooks{opts: Options{Content: ContentOptions{AuthorizeContent: contentTestAllow, AllowLoopbackHTTP: true}}}
 	if _, err := c.prepareBoundary(context.Background(), event, map[string]any{}, interceptConfig{}); err == nil {
 		t.Fatal("invalid inline elicitation accepted")

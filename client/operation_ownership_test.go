@@ -3,7 +3,9 @@ package client
 import (
 	"context"
 	"errors"
+	ahp "github.com/agenthooksprotocol/go-sdk"
 	"github.com/agenthooksprotocol/go-sdk/content"
+	"github.com/agenthooksprotocol/go-sdk/event"
 	"strings"
 	"sync"
 	"testing"
@@ -168,7 +170,7 @@ func TestCloseIncludesUnusedSourceCleanup(t *testing.T) {
 	}
 }
 
-// Mirrors the generated input-source interface without hand-writing wire models.
+// A custom lookalike source-provider method must not confer ownership.
 type generatedSourceInput struct {
 	value  map[string]any
 	source *content.Source
@@ -179,12 +181,34 @@ func (i generatedSourceInput) AHPContentSources() map[string]*content.Source {
 	return map[string]*content.Source{"/items/0": i.source}
 }
 
-func TestGeneratedSourceBindingClosesOnAdmissionFailure(t *testing.T) {
+func TestCustomSourceProviderCannotClaimOwnership(t *testing.T) {
 	c, _ := testClient(t, "fail-open")
 	reader := &sourceTestReader{Reader: strings.NewReader("never read")}
 	source := content.NewSource(reader)
+	defer source.Close()
 	_, err := c.intercept(nil, "tool.before", generatedSourceInput{value: testInput(), source: source})
-	if err == nil || reader.reads.Load() != 0 || reader.closes.Load() != 1 {
+	if err == nil || reader.reads.Load() != 0 || reader.closes.Load() != 0 {
 		t.Fatalf("error=%v reads=%d closes=%d", err, reader.reads.Load(), reader.closes.Load())
+	}
+}
+
+func TestNominalSourceBindingClosesOnAdmissionFailure(t *testing.T) {
+	for _, declared := range []bool{false, true} {
+		t.Run(map[bool]string{false: "convenience", true: "declared"}[declared], func(t *testing.T) {
+			c, _ := testClient(t, "fail-open")
+			reader := &sourceTestReader{Reader: strings.NewReader("never read")}
+			source := content.NewSource(reader)
+			parts := []*event.ContentPartInput{{Attachment: &event.AttachmentBodyInput{AttachmentBodyPart: ahp.AttachmentBodyPart{MediaType: "application/pdf"}, Body: source}}}
+			input := event.ToolBeforeInput[map[string]int]{CallID: "call", Name: "tool", Origin: "native", Path: "execute", Input: map[string]int{}, ItemsInput: &parts}
+			var err error
+			if declared {
+				_, err = ToolBefore(nil, c, input, ToolContract[map[string]int, string]{Arguments: JSONCodec[map[string]int](nil), Result: JSONCodec[string](nil)})
+			} else {
+				_, err = c.ToolBefore(nil, input)
+			}
+			if err == nil || reader.reads.Load() != 0 || reader.closes.Load() != 1 {
+				t.Fatalf("error=%v reads=%d closes=%d", err, reader.reads.Load(), reader.closes.Load())
+			}
+		})
 	}
 }

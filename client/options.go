@@ -9,6 +9,7 @@ import (
 )
 
 type interceptConfig struct {
+	declared           *declaredContracts
 	sources            map[string]*ContentSource
 	hostSources        map[string]bool
 	ownedSources       []*ContentSource

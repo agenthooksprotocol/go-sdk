@@ -66,7 +66,7 @@ func targetTestEvent(t *testing.T, items []any) map[string]any {
 	event["type"], event["outcome"], event["execution"], event["items"] = "tool.after", "ok", map[string]any{"status": "executed"}, items
 	return event
 }
-func targetTestCompose(t *testing.T, event map[string]any, target string, p *preparedBoundary, effects string) *Composition {
+func targetTestCompose(t *testing.T, event map[string]any, target string, p *preparedBoundary, effects string) *composition {
 	t.Helper()
 	out, err := composePrepared(targetTestRequest(t, event, target), compositionTestResponse(t, effects), p)
 	if err != nil {
@@ -179,7 +179,7 @@ func TestTargetCollectionAddRemoveAndRollback(t *testing.T) {
 	if owner == nil {
 		t.Fatal("binary owner missing")
 	}
-	defer owner.Retire()
+	defer ownedcontent.Retire(owner)
 	replacement := []any{binaryMessage, targetInlineMessage("new", targetInlineText("new-part", "new text"))}
 	out := targetTestCompose(t, event, "request", p, string(sdkJSON([]any{map[string]any{"type": "modify", "target": "request", "operation": "replace", "value": replacement}})))
 	if out.prepared.sources["/items/0/parts/0"] != owner || len(out.prepared.sources) != 1 || len(out.prepared.owned) != 1 {
@@ -258,7 +258,7 @@ func TestTargetParamsAndWorkspaceMappings(t *testing.T) {
 	if _, err := targetTestClient(nil).prepareBoundary(context.Background(), event, targetTestCaps("request"), cfg); err == nil {
 		t.Fatal("native params accepted descriptor templates")
 	}
-	workspace := map[string]any{"type": "workspace.change.before", "workspace": map[string]any{"kind": "cwd", "change": map[string]any{"cwd": "/old"}, "prior": map[string]any{"cwd": "/prior"}}}
+	workspace := map[string]any{"id": "workspace-event", "source": "urn:test:host", "time": "2026-01-01T00:00:00Z", "type": "workspace.change.before", "workspace": map[string]any{"kind": "cwd", "change": map[string]any{"cwd": "/old"}, "prior": map[string]any{"cwd": "/prior"}}}
 	wp, err := targetTestClient(nil).prepareBoundary(context.Background(), workspace, targetTestCaps("workspace"), interceptConfig{})
 	if err != nil {
 		t.Fatal(err)
@@ -331,9 +331,9 @@ func TestTargetParamsCompositionMergeAndReplace(t *testing.T) {
 	}
 }
 
-func compositionTestEffectiveValue(t *testing.T, c *Composition, target string) []byte {
+func compositionTestEffectiveValue(t *testing.T, c *composition, target string) []byte {
 	t.Helper()
-	raw, err := c.EffectiveValue(target)
+	raw, err := c.effectiveValue(target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,10 +354,10 @@ func TestCompositionEffectiveValueUsesOwnerOnDemand(t *testing.T) {
 	if len(p.sources) != 0 || len(p.owned) != 0 {
 		t.Fatal("inline accessor created content owners")
 	}
-	if _, err := result.EffectiveValue("missing"); err == nil {
+	if _, err := result.effectiveValue("missing"); err == nil {
 		t.Fatal("unknown target available")
 	}
-	if _, err := result.EffectiveValue("input"); err == nil {
+	if _, err := result.effectiveValue("input"); err == nil {
 		t.Fatal("non-input accessor exposed input")
 	}
 }
@@ -376,11 +376,11 @@ func TestCompositionEffectiveValueDoesNotOpenLazyOwner(t *testing.T) {
 	}
 	defer func() {
 		for owner := range p.owned {
-			_ = owner.Retire()
+			_ = ownedcontent.Retire(owner)
 		}
 	}()
-	result := &Composition{Event: sdkJSON(event), prepared: p}
-	raw, err := result.EffectiveValue("request")
+	result := &composition{Event: sdkJSON(event), prepared: p}
+	raw, err := result.effectiveValue("request")
 	if err != nil || !compositionEqual(sdkArray(jsonMustDecode(t, raw)), event["items"]) {
 		t.Fatalf("canonical value unavailable: %s %v", raw, err)
 	}
@@ -440,7 +440,7 @@ func TestToolAfterOutputCanonicalLists(t *testing.T) {
 			if owner == nil {
 				t.Fatal("existing binary owner missing")
 			}
-			defer owner.Retire()
+			defer ownedcontent.Retire(owner)
 			request := ahp.ParseInterceptRequest(sdkJSON(map[string]any{"jsonrpc": "2.0", "id": "test", "method": "hooks/intercept", "params": map[string]any{"protocolVersion": "draft", "event": event, "capabilities": caps}}))
 			if !request.OK {
 				t.Fatal(request.Diagnostics)

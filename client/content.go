@@ -38,6 +38,20 @@ func (c *Hooks) projectContent(ctx context.Context, event map[string]any, subscr
 			return nil, errors.New("invalid content selection")
 		}
 	}
+	declared, err := convertWire[ahp.Event](event)
+	if err != nil {
+		return nil, err
+	}
+	knownSlots, opaqueSlots := schemaGraphPaths(declared, "")
+	return c.projectContentSlots(ctx, event, subscription, backendID, knownSlots, opaqueSlots)
+}
+
+func (c *Hooks) projectContentSlots(ctx context.Context, event, subscription map[string]any, backendID string, knownSlots map[string]bool, opaqueMaps ...map[string]bool) (map[string]any, error) {
+	opaqueSlots := map[string]bool{}
+	if len(opaqueMaps) != 0 {
+		opaqueSlots = opaqueMaps[0]
+	}
+	selection, _ := subscription["content"].(map[string]any)
 	scope := ContentAuthorization{Operation: "read", BackendID: backendID, Subscription: contentClone(subscription).(map[string]any)}
 	scope.SubscriptionID, _ = subscription["id"].(string)
 	var project func(any, string) (any, error)
@@ -50,7 +64,7 @@ func (c *Hooks) projectContent(ctx context.Context, event map[string]any, subscr
 			_, id := v["id"].(string)
 			_, kind := v["kind"].(string)
 			_, media := v["mediaType"].(string)
-			if canonicalPartPath(event, path) {
+			if knownSlots[path] {
 				if !id || !kind || !media {
 					return nil, errors.New("malformed normalized content item")
 				}
@@ -76,23 +90,7 @@ func (c *Hooks) projectContent(ctx context.Context, event map[string]any, subscr
 			out := make(map[string]any, len(v))
 			for key, child := range v {
 				childPath := path + "/" + strings.ReplaceAll(strings.ReplaceAll(key, "~", "~0"), "/", "~1")
-				if event["type"] == "file.changed" && fileChangeReferencePath(childPath) {
-					// Bare file references are not normalized items on the wire. Prepare them
-					// through a private descriptor, emitting only an authorized confirmed body.
-					item := map[string]any{"id": childPath, "kind": "file", "category": "files", "mediaType": "application/octet-stream", "synthesized": true, "body": child}
-					if p, ok := ctx.Value(preparedContextKey{}).(*preparedBoundary); ok && p.sources[childPath] != nil {
-						item["body"] = p.sources[childPath]
-					}
-					prepared, err := c.projectContentItem(ctx, item, selection, subscription, scope)
-					if err != nil {
-						return nil, err
-					}
-					if body, ok := prepared["body"]; ok {
-						out[key] = body
-					}
-					continue
-				}
-				if key == "native" || key == "input" || key == "output" || key == "params" || key == "extensions" {
+				if opaqueSlots[childPath] {
 					if key == "native" && subscription["includeNative"] != true {
 						continue
 					}
@@ -104,6 +102,25 @@ func (c *Hooks) projectContent(ctx context.Context, event map[string]any, subscr
 						return nil, err
 					}
 					out[key] = contentClone(safe)
+					continue
+				}
+				known := false
+				for slot := range knownSlots {
+					if slot == childPath || strings.HasPrefix(slot, childPath+"/") {
+						known = true
+						break
+					}
+				}
+				if !known {
+					for slot := range opaqueSlots {
+						if slot == childPath || strings.HasPrefix(slot, childPath+"/") {
+							known = true
+							break
+						}
+					}
+				}
+				if !known {
+					out[key] = contentClone(child)
 					continue
 				}
 				safe, err := project(child, childPath)
@@ -163,16 +180,8 @@ func contentItemPath(path string) bool {
 
 // Message containers are not parts; schema-owned ordered parts are projected separately.
 func canonicalPartPath(event map[string]any, path string) bool {
-	if !contentItemPath(path) {
-		return false
-	}
-	if strings.HasPrefix(path, "/items/") && strings.Count(path, "/") == 2 {
-		switch event["type"] {
-		case "session.start", "context.compact.before", "context.compact.after", "model.request.before", "model.response.after", "tool.after", "turn.start", "turn.finish.before":
-			return false
-		}
-	}
-	return true
+	slots, err := schemaSourceSlots(event)
+	return err == nil && slots[path]
 }
 
 func contentMode(s string) bool { return s == "body" || s == "metadata" || s == "omit" }
@@ -201,11 +210,50 @@ func contentCategory(item map[string]any) string {
 
 func (c *Hooks) projectContentItem(ctx context.Context, item, selection, subscription map[string]any, scope ContentAuthorization, validators ...func([]byte) error) (map[string]any, error) {
 	out := map[string]any{}
-	// Only canonical descriptor fields survive. Payload permission flags, inline
-	// aliases and arbitrary duplicate bytes are never forwarded as metadata.
+	var knownDescriptor ahp.ContentItem
+	descriptorItem := item
+	if _, owned := item["body"].(*ContentSource); owned {
+		descriptorItem = contentClone(item).(map[string]any)
+		delete(descriptorItem, "body")
+		descriptorItem["selection"] = "metadata"
+	}
+	if err := json.Unmarshal(sdkJSON(descriptorItem), &knownDescriptor); err != nil {
+		return nil, err
+	}
+	// Preserve the generator-owned opaque extension bag, without interpreting any
+	// member as a body, owner claim, or permission grant.
+	var extras map[string]json.RawMessage
+	switch {
+	case knownDescriptor.TextBodyPart.Present:
+		extras = knownDescriptor.TextBodyPart.Value.AdditionalProperties
+	case knownDescriptor.TextGapPart.Present:
+		extras = knownDescriptor.TextGapPart.Value.AdditionalProperties
+	case knownDescriptor.TextMetadataPart.Present:
+		extras = knownDescriptor.TextMetadataPart.Value.AdditionalProperties
+	case knownDescriptor.TextOmittedPart.Present:
+		extras = knownDescriptor.TextOmittedPart.Value.AdditionalProperties
+	case knownDescriptor.AttachmentBodyPart.Present:
+		extras = knownDescriptor.AttachmentBodyPart.Value.AdditionalProperties
+	case knownDescriptor.AttachmentGapPart.Present:
+		extras = knownDescriptor.AttachmentGapPart.Value.AdditionalProperties
+	case knownDescriptor.AttachmentMetadataPart.Present:
+		extras = knownDescriptor.AttachmentMetadataPart.Value.AdditionalProperties
+	case knownDescriptor.AttachmentOmittedPart.Present:
+		extras = knownDescriptor.AttachmentOmittedPart.Value.AdditionalProperties
+	}
+	for key, raw := range extras {
+		if key == "body" || key == "text" || key == "gap" || key == "selection" {
+			continue
+		}
+		value, err := contractJSON(raw)
+		if err != nil {
+			return nil, err
+		}
+		out[key] = value
+	}
 	for _, key := range []string{"id", "kind", "mediaType", "category", "size", "sha256", "synthesized"} {
-		if v, ok := item[key]; ok {
-			out[key] = contentClone(v)
+		if value, exists := item[key]; exists {
+			out[key] = contentClone(value)
 		}
 	}
 	mode := selection["default"].(string)

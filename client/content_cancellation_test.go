@@ -54,7 +54,7 @@ func TestContentProjectionDeadlineClosesOwnedReader(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, err := c.projectContent(ctx, cancellationInput(), contentTestSubscription("https://unused.invalid/upload"), "receiver")
+		_, err := c.projectContent(ctx, contentTestEvent(cancellationInput()), contentTestSubscription("https://unused.invalid/upload"), "receiver")
 		done <- err
 	}()
 	select {

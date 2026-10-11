@@ -1,8 +1,10 @@
 package client
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	ahp "github.com/agenthooksprotocol/go-sdk"
 	"github.com/agenthooksprotocol/go-sdk/internal/canonical"
 	"reflect"
 	"strings"
@@ -55,15 +57,27 @@ func inlineSet(event map[string]any, path string, value any) {
 // descriptor-shaped opaque application objects.
 func inlineAttachments(value any, path string) map[string]map[string]any {
 	found := map[string]map[string]any{}
-	for i, raw := range sdkArray(value) {
-		message := sdkObj(raw)
-		if message["kind"] == "attachment" {
-			found[fmt.Sprintf("%s/%d", path, i)] = message
+	// TextParts contain no attachments. Decode the declared container instead of
+	// traversing opaque additional-properties members that happen to name parts.
+	if path == "/instructions" || path == "/summary" {
+		return found
+	}
+	var messages ahp.CanonicalMessages
+	if json.Unmarshal(sdkJSON(value), &messages) != nil {
+		return found
+	}
+	rawMessages := sdkArray(value)
+	for i, message := range messages {
+		if message == nil {
+			continue
 		}
-		for j, rawPart := range sdkArray(message["parts"]) {
-			part := sdkObj(rawPart)
-			if part["kind"] == "attachment" {
-				found[fmt.Sprintf("%s/%d/parts/%d", path, i, j)] = part
+		rawParts := sdkArray(sdkObj(rawMessages[i])["parts"])
+		for j, part := range message.Parts {
+			if part == nil {
+				continue
+			}
+			if part.AttachmentBodyPart.Present || part.AttachmentGapPart.Present || part.AttachmentMetadataPart.Present || part.AttachmentOmittedPart.Present {
+				found[fmt.Sprintf("%s/%d/parts/%d", path, i, j)] = sdkObj(rawParts[j])
 			}
 		}
 	}

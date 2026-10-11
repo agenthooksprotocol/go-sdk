@@ -37,9 +37,19 @@ func Apply(request, response Object) (Object, error) {
 	}
 	flow := priorFlow
 	continuationInstructions := append([]any{}, array(clone(state["instructions"]))...)
-	effects, ok := obj(response["result"])["effects"].([]any)
-	if !ok {
-		return nil, fmt.Errorf("effects must be an array")
+	responseResult := obj(response["result"])
+	if responseResult == nil {
+		return nil, fmt.Errorf("response result must be an object")
+	}
+	// The typed contract permits omitted effects as a neutral response, but
+	// explicitly supplied effects must still be an array (not null).
+	effects := []any{}
+	if raw, present := responseResult["effects"]; present {
+		var ok bool
+		effects, ok = raw.([]any)
+		if !ok {
+			return nil, fmt.Errorf("effects must be an array")
+		}
 	}
 	// Capability-check all effects before applying any.
 	for _, raw := range effects {

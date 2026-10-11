@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"github.com/agenthooksprotocol/go-sdk/content"
+	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -54,7 +55,7 @@ func TestPublicDispatchRetainedResultsAndSources(t *testing.T) {
 		if string(again) != "original" {
 			t.Fatal("result body aliased")
 		}
-		if sources[i].Claim() {
+		if ownedcontent.Claim(sources[i]) {
 			t.Fatal("retained source reusable")
 		}
 		_ = result.Close()

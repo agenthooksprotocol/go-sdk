@@ -180,13 +180,9 @@ func TestNamedSourcesReachAuthorizedReceiverReferences(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer hooks.Close()
-				var descriptor ahp.ContentItem
-				if err := json.Unmarshal([]byte(`{"id":"original-item","kind":"attachment","mediaType":"application/octet-stream","selection":"metadata"}`), &descriptor); err != nil {
-					t.Fatal(err)
-				}
 				reader := &sourceTestReader{Reader: strings.NewReader("owned bytes")}
 				source := content.NewSource(reader)
-				input := event.ToolBeforeInput[map[string]int]{CallID: "flat-call", Name: "tool", Input: map[string]int{"count": 1}, Path: "execute", Origin: "native", Items: ahp.Some([]*ahp.ContentItem{&descriptor}), ItemsSources: []*content.Source{source}}
+				input := event.ToolBeforeInput[map[string]int]{CallID: "flat-call", Name: "tool", Input: map[string]int{"count": 1}, Path: "execute", Origin: "native", ItemsInput: &[]*event.ContentPartInput{{Attachment: &event.AttachmentBodyInput{AttachmentBodyPart: ahp.AttachmentBodyPart{ID: "original-item", MediaType: "application/octet-stream"}, Body: source}}}}
 				encoded, err := json.Marshal(input)
 				if err != nil || strings.Contains(string(encoded), "Source") {
 					t.Fatalf("stream serialized: %s %v", encoded, err)

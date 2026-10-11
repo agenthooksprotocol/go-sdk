@@ -56,7 +56,7 @@ func TestElicitationDispatchSnapshotAndAtomicAnswers(t *testing.T) {
 	if result.Snapshot == nil || !result.Snapshot.requestValid || !compositionEqual(result.Snapshot.requestedSchema, compositionObject(original)["requestedSchema"]) {
 		t.Fatal("original form contract not snapshotted")
 	}
-	if len(result.Errors) != 1 || len(result.Response.Effects) != 1 {
+	if len(result.Errors) != 1 || len(result.Response.Effects.Value) != 1 {
 		t.Fatalf("non-atomic acceptance: %+v", result)
 	}
 	var state map[string]any
@@ -277,7 +277,7 @@ func TestElicitationStructuredEditPrivacy(t *testing.T) {
 				}
 				effectiveItem := preparedAt(compositionObject(result.Event), "/elicitation/result")
 				if tc.accepted {
-					if len(result.Errors) != 0 || len(result.Response.Effects) != 2 || !visibleBody || writes != 1 {
+					if len(result.Errors) != 0 || len(result.Response.Effects.Value) != 2 || !visibleBody || writes != 1 {
 						t.Fatalf("authorized answer rejected: errors=%v visible=%v writes=%d reads=%d", result.Errors, visibleBody, writes, reads)
 					}
 					answer := compositionObject([]byte(compositionString(effectiveItem["text"])))
@@ -287,7 +287,7 @@ func TestElicitationStructuredEditPrivacy(t *testing.T) {
 						t.Fatal("structured edit changed wrapper or used wrong object operation", answer)
 					}
 				} else {
-					if len(result.Errors) == 0 || len(result.Response.Effects) != 0 {
+					if len(result.Errors) == 0 || len(result.Response.Effects.Value) != 0 {
 						t.Fatal("unauthorized/invalid edit published atomic prefix", result.Errors, result.Response.Effects)
 					}
 					if effectiveItem["text"] != item["text"] || effectiveItem["selection"] != item["selection"] {

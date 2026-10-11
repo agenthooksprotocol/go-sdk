@@ -4,107 +4,137 @@ import (
 	"context"
 	"errors"
 	ahp "github.com/agenthooksprotocol/go-sdk"
-	"reflect"
 )
 
-// authorizeInlineEffects checks write authority against the receiver's delivery
-// view. Accepted effects are then composed atomically against complete host state.
+// authorizeInlineEffects visits only generated contextual payload variants.
+// Opaque tool values and additional-property bags cannot name attachment owners
+// or acquire text-write authority merely by resembling protocol JSON.
 func (c *Hooks) authorizeInlineEffects(ctx context.Context, event, projected, sub map[string]any, backendID string, response ahp.InterceptResponse) (ahp.InterceptResponse, error) {
-	raw, err := ahp.EncodeInterceptResponse(response)
+	kind := compositionString(event["type"])
+	decoded := ahp.ResponseForRequest(kind, sdkJSON(response))
+	if !decoded.OK {
+		return ahp.InterceptResponse{}, errors.New("invalid correlated response")
+	}
+	effects, err := contextualEffects(decoded.Value)
 	if err != nil {
 		return ahp.InterceptResponse{}, err
 	}
-	envelope := compositionObject(raw)
-	for _, rawEffect := range sdkArray(sdkObj(envelope["result"])["effects"]) {
-		effect := sdkObj(rawEffect)
-		target, _ := effect["target"].(string)
-		if effect["type"] == "modify" && event["type"] == "user.elicitation.result" && target == "content" {
-			item := preparedAt(projected, "/elicitation/result")
-			if item == nil || item["selection"] != "body" || item["text"] == nil || item["gap"] != nil {
+	for _, effect := range effects {
+		if effect.kind == "modify" && kind == "user.elicitation.result" {
+			delivered, err := convertWire[ahp.Event](projected)
+			if err != nil {
+				return ahp.InterceptResponse{}, err
+			}
+			descriptor := delivered.UserElicitationResultEvent.Value.Elicitation.Result
+			if !descriptor.Present || descriptor.Value == nil || !descriptor.Value.TextBodyPart.Present || descriptor.Value.TextBodyPart.Value == nil {
 				return ahp.InterceptResponse{}, errors.New("elicitation answer edit requires authorized body disclosure")
 			}
-			writeItem := contentClone(item).(map[string]any)
-			writeItem["text"] = string(sdkJSON(effect["value"]))
-			if err := c.authorizeInlineWrite(ctx, writeItem, sub, backendID); err != nil {
+			body := *descriptor.Value.TextBodyPart.Value
+			body.Text = string(sdkJSON(effect.value))
+			if err := c.authorizeInlineWrite(ctx, compositionObject(sdkJSON(body)), sub, backendID); err != nil {
 				return ahp.InterceptResponse{}, err
 			}
 			continue
 		}
-
-		path, list := inlineTargetPath(event, target)
-		typ := effect["type"]
-		if typ == "inject" {
+		path, list := inlineTargetPath(event, effect.target)
+		if effect.kind == "inject" {
 			path, list = "/items", true
 		}
-		if typ == "return" {
-			switch event["type"] {
-			case "model.request.before":
+		if effect.kind == "return" {
+			switch effect.value.(type) {
+			case *ahp.CanonicalMessages:
 				path, list = "/items", true
-			case "context.compact.before":
+			case *ahp.TextParts:
 				path, list = "/instructions", true
 			}
 		}
-		if !list || (typ != "modify" && typ != "inject" && typ != "return") || (typ == "modify" && !inlineListTarget(compositionString(event["type"]), target)) {
+		if !list || (effect.kind != "modify" && effect.kind != "inject" && effect.kind != "return") {
 			continue
 		}
-
-		delivered := inlineAt(projected, path)
-		if typ == "modify" && effect["operation"] == "replace" && inlineHasHiddenText(delivered) {
+		if effect.kind == "modify" && !effect.merge && inlineHasHiddenText(inlineAt(projected, path)) {
 			return ahp.InterceptResponse{}, errors.New("cannot replace a list containing withheld text")
 		}
-		incoming := effect["value"]
-		// Unchanged receiver-visible attachment receipts name the original owner,
-		// not a new attachment. Preserve that owner's canonical descriptor locally.
-		oldAttachments := inlineAttachments(inlineAt(event, path), path)
-		projectedAttachments := inlineAttachments(delivered, path)
-		for _, part := range inlineAttachments(incoming, path) {
-			found := false
-			for oldPath, visible := range projectedAttachments {
-				if reflect.DeepEqual(part, visible) && visible["selection"] == "body" && visible["gap"] == nil {
-					original := oldAttachments[oldPath]
-					for key := range part {
-						delete(part, key)
-					}
-					for key, value := range original {
-						part[key] = contentClone(value)
-					}
-					found = true
-					break
-				}
-			}
-			if !found {
-				return ahp.InterceptResponse{}, errors.New("attachment edit is not an authorized existing owner")
-			}
-		}
-		var parts []map[string]any
-		for _, raw := range sdkArray(incoming) {
-			item := sdkObj(raw)
-			if item["kind"] == "text" {
-				parts = append(parts, item)
-			}
-			for _, rawPart := range sdkArray(item["parts"]) {
-				part := sdkObj(rawPart)
-				if part["kind"] == "text" {
-					parts = append(parts, part)
-				}
-			}
-		}
-		for _, part := range parts {
-			if err := c.authorizeInlineWrite(ctx, part, sub, backendID); err != nil {
+		switch value := effect.value.(type) {
+		case *ahp.CanonicalMessages:
+			originalAttachments, err := eventAttachments(event)
+			if err != nil {
 				return ahp.InterceptResponse{}, err
 			}
+			visibleAttachments, err := eventAttachments(projected)
+			if err != nil {
+				return ahp.InterceptResponse{}, err
+			}
+			for _, part := range canonicalAttachments(value, path) {
+				matched := false
+				for oldPath, shown := range visibleAttachments {
+					if !attachmentBodyAvailable(shown) || !wireEqual(part, shown) {
+						continue
+					}
+					restored, err := convertWire[ahp.ContentItem](originalAttachments[oldPath])
+					if err != nil {
+						return ahp.InterceptResponse{}, err
+					}
+					*part = restored
+					matched = true
+					break
+				}
+				if !matched {
+					return ahp.InterceptResponse{}, errors.New("attachment edit is not an authorized existing owner")
+				}
+			}
+			for _, message := range *value {
+				if message == nil {
+					continue
+				}
+				for _, part := range message.Parts {
+					if err := c.authorizeCanonicalText(ctx, part, sub, backendID); err != nil {
+						return ahp.InterceptResponse{}, err
+					}
+				}
+			}
+		case *ahp.TextParts:
+			for _, part := range *value {
+				if part == nil {
+					continue
+				}
+				content := ahp.ContentItem{TextBodyPart: part.TextBodyPart, TextGapPart: part.TextGapPart, TextMetadataPart: part.TextMetadataPart, TextOmittedPart: part.TextOmittedPart, Unknown: part.Unknown}
+				if err := c.authorizeCanonicalText(ctx, &content, sub, backendID); err != nil {
+					return ahp.InterceptResponse{}, err
+				}
+			}
 		}
-
 	}
-	parsed := ahp.ParseInterceptResponse(sdkJSON(envelope))
-	if !parsed.OK {
+	accepted := ahp.ParseInterceptResponse(sdkJSON(decoded.Value))
+	if !accepted.OK {
 		return ahp.InterceptResponse{}, errors.New("invalid authorized effects")
 	}
-	return parsed.Value, nil
+	return accepted.Value, nil
 }
 
-// authorizeInlineWrite grants no authority from the receiver's content shape.
-// Both category selection and a host-local write decision are required.
+func (c *Hooks) authorizeCanonicalText(ctx context.Context, part *ahp.ContentItem, sub map[string]any, backendID string) error {
+	if part == nil {
+		return nil
+	}
+	if part.TextBodyPart.Present {
+		return c.authorizeInlineWrite(ctx, compositionObject(sdkJSON(part.TextBodyPart.Value)), sub, backendID)
+	}
+	if part.TextGapPart.Present || part.TextMetadataPart.Present || part.TextOmittedPart.Present {
+		return errors.New("inline text write requires an authorized body")
+	}
+	return nil
+}
+
+func attachmentBodyAvailable(part *ahp.ContentItem) bool {
+	return part != nil && part.AttachmentBodyPart.Present && part.AttachmentBodyPart.Value != nil
+}
+func wireEqual(a, b any) bool {
+	left, _ := contractJSON(sdkJSON(a))
+	right, _ := contractJSON(sdkJSON(b))
+	return compositionEqual(left, right)
+}
+
+// authorizeInlineWrite is a host-local authorization callback boundary. Serialized
+// Item is a generated known text-body variant, never an opaque field traversal.
 func (c *Hooks) authorizeInlineWrite(ctx context.Context, part, sub map[string]any, backendID string) error {
 	selection := sdkObj(sub["content"])
 	mode, _ := selection["default"].(string)
@@ -124,4 +154,22 @@ func (c *Hooks) authorizeInlineWrite(ctx context.Context, part, sub map[string]a
 		return errors.New("inline text write is not authorized")
 	}
 	return nil
+}
+
+func eventAttachments(event map[string]any) (map[string]*ahp.ContentItem, error) {
+	slots, err := schemaSourceSlots(event)
+	if err != nil {
+		return nil, err
+	}
+	attachments := map[string]*ahp.ContentItem{}
+	for path := range slots {
+		part, err := convertWire[ahp.ContentItem](preparedAt(event, path))
+		if err != nil {
+			return nil, err
+		}
+		if part.AttachmentBodyPart.Present || part.AttachmentGapPart.Present || part.AttachmentMetadataPart.Present || part.AttachmentOmittedPart.Present {
+			attachments[path] = &part
+		}
+	}
+	return attachments, nil
 }

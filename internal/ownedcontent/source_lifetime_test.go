@@ -16,7 +16,7 @@ func TestRetireReleasesRetainedSource(t *testing.T) {
 	if again, err := s.Snapshot(context.Background(), 64); err != nil || string(again) != "original" {
 		t.Fatal("close broke fan-out", err)
 	}
-	if err := s.Retire(); err != nil {
+	if err := Retire(s); err != nil {
 		t.Fatal(err)
 	}
 	if s.raw != nil || s.reader != nil {
@@ -28,13 +28,13 @@ func TestRetireReleasesRetainedSource(t *testing.T) {
 	if _, err := s.Snapshot(context.Background(), 64); err == nil {
 		t.Fatal("retired source readable")
 	}
-	if s.Claim() {
+	if Claim(s) {
 		t.Fatal("retired source reusable")
 	}
 	if string(raw) != "original" {
 		t.Fatal("detached snapshot invalidated")
 	}
-	if err := s.Retire(); err != nil {
+	if err := Retire(s); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -49,7 +49,7 @@ func TestRetireInterruptsActiveSnapshot(t *testing.T) {
 	if _, err := w.Write([]byte("x")); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Retire(); err != nil {
+	if err := Retire(s); err != nil {
 		t.Fatal(err)
 	}
 	if err := <-done; err == nil {

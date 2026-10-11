@@ -39,7 +39,7 @@ func preparedOwnerPrepare(t *testing.T, event map[string]any, target string, cfg
 	}
 	return p
 }
-func preparedOwnerCompose(t *testing.T, event map[string]any, target string, p *preparedBoundary, values ...any) (*Composition, error) {
+func preparedOwnerCompose(t *testing.T, event map[string]any, target string, p *preparedBoundary, values ...any) (*composition, error) {
 	t.Helper()
 	req := ahp.ParseInterceptRequest(sdkJSON(map[string]any{"jsonrpc": "2.0", "id": "test", "method": "hooks/intercept", "params": map[string]any{"protocolVersion": "draft", "event": event, "capabilities": preparedOwnerCaps(target)}}))
 	if !req.OK {
@@ -134,7 +134,7 @@ func TestPreparedIntegrityLimitsAndOwnership(t *testing.T) {
 			owner := ownedcontent.NewLazyAttachment(func(context.Context) (io.ReadCloser, error) {
 				return &preparedTestReader{Reader: bytes.NewReader(raw), closes: &closes, closeError: closeErr}, nil
 			}, nil)
-			defer owner.Retire()
+			defer ownedcontent.Retire(owner)
 			cfg := interceptConfig{}
 			WithContentSource("/items/0/parts/0", owner)(&cfg)
 			p := preparedOwnerPrepare(t, preparedOwnerEvent(preparedOwnerMessage("one", preparedOwnerAttachment("binary"))), "response", cfg)
@@ -167,7 +167,7 @@ func TestPreparedIntegrityLimitsAndOwnership(t *testing.T) {
 func TestPreparedCancellationClosesReaderOnce(t *testing.T) {
 	reader := &preparedBlockingReader{started: make(chan struct{}), done: make(chan struct{})}
 	source := ownedcontent.NewLazyAttachment(func(context.Context) (io.ReadCloser, error) { return reader, nil }, nil)
-	defer source.Retire()
+	defer ownedcontent.Retire(source)
 	cfg := interceptConfig{}
 	WithContentSource("/items/0/parts/0", source)(&cfg)
 	event := preparedOwnerEvent(preparedOwnerMessage("one", preparedOwnerAttachment("binary")))
@@ -217,7 +217,7 @@ func TestPreparedAbsentInstructionsTemplate(t *testing.T) {
 }
 func TestPreparedCanonicalOwnerIndex(t *testing.T) {
 	source := ownedcontent.NewAttachment([]byte("immutable"))
-	defer source.Retire()
+	defer ownedcontent.Retire(source)
 	part := preparedOwnerAttachment("binary")
 	event := preparedOwnerEvent(preparedOwnerMessage("one", part, preparedOwnerText("text", ` {"n":1} `)))
 	cfg := interceptConfig{}
@@ -260,7 +260,7 @@ func TestPreparedReferenceOwnersRemainLazy(t *testing.T) {
 	if owner == nil || !p.owned[owner] || opens.Load() != 0 {
 		t.Fatal("reference not lazy")
 	}
-	defer owner.Retire()
+	defer ownedcontent.Retire(owner)
 	for _, source := range []*ContentSource{owner, p.clone().sources["/items/0/parts/0"]} {
 		raw, err := ownedcontent.Borrow(source, context.Background(), p.limit)
 		if err != nil || string(raw) != "original" {
@@ -282,7 +282,7 @@ func TestPreparedEagerAttachmentsEnforceLimitsWithoutProjection(t *testing.T) {
 			items := []any{}
 			for i, raw := range tc.payloads {
 				source := ownedcontent.NewAttachment([]byte(raw))
-				defer source.Retire()
+				defer ownedcontent.Retire(source)
 				WithContentSource(fmt.Sprintf("/items/%d/parts/0", i), source)(&cfg)
 				items = append(items, preparedOwnerMessage(fmt.Sprint(i), preparedOwnerAttachment(fmt.Sprint(i))))
 			}
@@ -305,7 +305,7 @@ func TestPreparedValuesCheckLimitsBeforeDecoding(t *testing.T) {
 		items := []any{}
 		for i, raw := range payloads {
 			source := ownedcontent.NewAttachment([]byte(raw))
-			defer source.Retire()
+			defer ownedcontent.Retire(source)
 			p.sources[fmt.Sprintf("/items/%d/parts/0", i)] = source
 			items = append(items, preparedOwnerMessage(fmt.Sprint(i), preparedOwnerAttachment(fmt.Sprint(i))))
 		}

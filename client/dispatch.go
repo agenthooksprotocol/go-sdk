@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	ahp "github.com/agenthooksprotocol/go-sdk"
-	"github.com/agenthooksprotocol/go-sdk/content"
 	"github.com/agenthooksprotocol/go-sdk/internal/canonical"
+	"github.com/agenthooksprotocol/go-sdk/internal/inputsources"
+	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 	"time"
 )
 
@@ -27,16 +28,13 @@ func (c *Hooks) intercept(ctx context.Context, name string, input any, options .
 }
 
 func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ...InterceptOption) (out *Result, dispatchErr error) {
-	// Generated inputs expose named source slots without serializing streams.
-	if bound, ok := input.(interface {
-		AHPContentSources() map[string]*content.Source
-	}); ok {
-		var bindings []InterceptOption
-		for path, source := range bound.AHPContentSources() {
-			bindings = append(bindings, withHostContentSource(path, source))
-		}
-		options = append(bindings, options...)
+	// Only generated nominal inputs and the internal generic carrier can bind
+	// owned sources. Host-defined source-provider methods confer no authority.
+	var bindings []InterceptOption
+	for path, source := range inputsources.Extract(input) {
+		bindings = append(bindings, withHostContentSource(path, source))
 	}
+	options = append(bindings, options...)
 	cfg := contentSourceConfig(options)
 	admitted := false
 	var prepared *preparedBoundary
@@ -48,7 +46,7 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 		if prepared != nil {
 			for source := range prepared.owned {
 				if !cfg.transferredSources[source] {
-					_ = source.Retire()
+					_ = ownedcontent.Retire(source)
 				}
 			}
 		}
@@ -160,7 +158,7 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 		}
 
 	} else {
-		if cfg.initial != nil || cfg.capabilities != nil || cfg.instructions != nil || cfg.elicitation != nil || len(cfg.targets) != 0 {
+		if cfg.initial != nil || cfg.capabilities != nil || cfg.instructions != nil || cfg.elicitation != nil || len(cfg.targets) != 0 || (cfg.declared != nil && (len(cfg.declared.targets) != 0 || cfg.declared.result != nil || cfg.declared.provenance != nil)) {
 			return nil, errors.New("intercept options on observation-only boundary")
 		}
 		note := map[string]any{"jsonrpc": "2.0", "method": "hooks/observe", "params": map[string]any{"protocolVersion": "draft", "event": event}}
@@ -180,6 +178,12 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 	}
 	version := ahp.ProtocolVersion("draft")
 	if err := validateElicitationMetadata(event, cfg.elicitation); err != nil {
+		return nil, err
+	}
+	if err := cfg.declared.validateDeclaration(name); err != nil {
+		return nil, err
+	}
+	if err := cfg.declared.validateHost(event); err != nil {
 		return nil, err
 	}
 	ctx, err = cfg.bindSources(ctx, event)
@@ -207,7 +211,7 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 	ctx = context.WithValue(ctx, preparedContextKey{}, prepared)
 	uploads := c.planUploads(ctx, event, prepared)
 	ctx = context.WithValue(ctx, uploadPlanContextKey{}, uploads)
-	result := &Result{Response: ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: []*ahp.Effect{}}}
+	result := &Result{Response: ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: ahp.Some([]*ahp.Effect{})}}
 	settled := state["permission"] == "deny" || state["flow"] == "stop"
 	pending := []observationDelivery{}
 	for _, backend := range c.backends {
@@ -273,7 +277,8 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 					if e == nil {
 						stage = "acceptance"
 						response := ahp.ParseInterceptResponse(raw)
-						if canonical.Validate("intercept-response", raw) != nil || !response.OK {
+						contextual := ahp.ResponseForRequest(name, raw)
+						if canonical.Validate("intercept-response", raw) != nil || !response.OK || !contextual.OK {
 							e = interceptResponseFailure(raw, request["id"])
 						} else {
 							// Compose against the complete host event, not a subscriber's redacted
@@ -304,7 +309,7 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 									if len(accepted.Event) > 0 {
 										event, _ = sdkMap(accepted.Event)
 									}
-									result.Response.Effects = append(result.Response.Effects, accepted.Response.Effects...)
+									result.Response.Effects.Value = append(result.Response.Effects.Value, accepted.Response.Effects.Value...)
 								}
 								prepared.releaseUnused(budget)
 							}
