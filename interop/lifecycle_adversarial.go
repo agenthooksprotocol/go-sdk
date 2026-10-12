@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 
-	ahp "github.com/agenthooksprotocol/go-sdk"
 	"github.com/agenthooksprotocol/go-sdk/server"
 )
 
@@ -33,12 +32,10 @@ func (s *lifecycleReceiver) withAdversarialLifecycleReply(ordinary http.Handler)
 		// A request-only public acceptance probe. Its empty success is never sent:
 		// the separately scheduled raw response below is the adversarial wire data.
 		accepted := false
-		ingress, err := server.NewHandler(server.Handlers{Intercept: func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
+		ingress, err := newFixtureHandler(server.Handlers{Intercept: fixtureInterceptHandlers(func(context.Context, Object) (Object, error) {
 			accepted = true
-			var empty ahp.InterceptResponseResult
-			err := json.Unmarshal([]byte(`{"protocolVersion":"draft","effects":[]}`), &empty)
-			return empty, err
-		}}, server.Options{})
+			return Object{"result": Object{"protocolVersion": "draft", "effects": []any{}}}, nil
+		})})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

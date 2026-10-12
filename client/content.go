@@ -53,8 +53,10 @@ func (c *Hooks) projectContentSlots(ctx context.Context, event, subscription map
 		opaqueSlots = opaqueMaps[0]
 	}
 	selection, _ := subscription["content"].(map[string]any)
-	scope := ContentAuthorization{Operation: "read", BackendID: backendID, Subscription: contentClone(subscription).(map[string]any)}
-	scope.SubscriptionID, _ = subscription["id"].(string)
+	scope, err := contentAuthorization("read", backendID, subscription)
+	if err != nil {
+		return nil, err
+	}
 	var project func(any, string) (any, error)
 	project = func(value any, path string) (any, error) {
 		if err := ctx.Err(); err != nil {
@@ -265,7 +267,11 @@ func (c *Hooks) projectContentItem(ctx context.Context, item, selection, subscri
 	if mode != "body" {
 		return out, nil
 	}
-	scope.Item = contentClone(out).(map[string]any)
+	itemDescriptor, err := contentDescriptor(out, mode)
+	if err != nil {
+		return nil, err
+	}
+	scope.Item = itemDescriptor
 	authorized := false
 	if preparing, _ := ctx.Value(uploadPreparationContextKey{}).(bool); preparing {
 		authorized = true

@@ -91,8 +91,12 @@ func PublicBoundary(ctx context.Context, request Object, exchange func(context.C
 		return nil, false, fmt.Errorf("invalid fixture registration")
 	}
 	manifest := Object{"events": []any{Object{"event": name, "modes": []any{mode}, "capabilities": caps}}, "gaps": []any{}, "transports": []any{"http", "stdio"}, "authentication": []any{}, "toolPaths": []any{"execute"}, "contentCategories": []any{"text"}, "limits": Object{"maxContinuations": 4}, "managedPolicy": Object{"scopes": []any{"user"}, "disableable": true}, "correlationIdentityFields": []any{"event.id", "call.id"}}
-	var typedManifest ahp.StaticCapabilityManifest
-	if err := json.Unmarshal(jsonBytes(manifest), &typedManifest); err != nil {
+	metadata, err := fixtureManifestMetadata(manifest)
+	if err != nil {
+		return nil, false, err
+	}
+	host, err := fixtureHost(array(manifest["events"]))
+	if err != nil {
 		return nil, false, err
 	}
 	transport := &fixtureTransport{exchange: exchange}
@@ -103,12 +107,19 @@ func PublicBoundary(ctx context.Context, request Object, exchange func(context.C
 	if content.AuthorizeContent == nil {
 		content.AuthorizeContent = func(context.Context, hooks.ContentAuthorization) (bool, error) { return true, nil }
 	}
-	c, err := hooks.New(registration.Value, hooks.Options{Source: str(ev["source"]), Manifest: typedManifest, EventClient: &http.Client{Transport: transport}, UploadClient: config.UploadClient, Content: content})
+	c, err := hooks.New(registration.Value, hooks.Options{Source: str(ev["source"]), Events: host, Metadata: metadata, EventClient: &http.Client{Transport: transport}, UploadClient: config.UploadClient, Content: content})
 	if err != nil {
 		return nil, false, err
 	}
 	defer c.Close()
 	var opts []hooks.InterceptOption
+	if mode == "intercept" {
+		narrow, err := fixtureOccurrenceCapabilities(params)
+		if err != nil {
+			return nil, false, err
+		}
+		opts = append(opts, narrow)
+	}
 	if state, present := params["state"]; present {
 		var initial ahp.InterceptRequestParamsState
 		if err := json.Unmarshal(jsonBytes(state), &initial); err != nil {

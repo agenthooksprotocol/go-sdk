@@ -315,8 +315,12 @@ func acceptElicitationEffectsObserved(request, result Object, resolve func(Objec
 	if !reg.OK {
 		return fmt.Errorf("invalid elicitation fixture registration")
 	}
-	var manifest ahp.StaticCapabilityManifest
-	if err := json.Unmarshal(jsonBytes(Object{"events": events, "gaps": []any{}, "transports": []any{"http"}, "authentication": []any{}, "toolPaths": []any{"execute"}, "contentCategories": []any{"text"}, "limits": Object{"maxContinuations": 4}, "managedPolicy": Object{"scopes": []any{"user"}, "disableable": true}, "correlationIdentityFields": []any{"event.id"}}), &manifest); err != nil {
+	metadata, err := fixtureManifestMetadata(Object{"events": events, "gaps": []any{}, "transports": []any{"http"}, "authentication": []any{}, "toolPaths": []any{"execute"}, "contentCategories": []any{"text"}, "limits": Object{"maxContinuations": 4}, "managedPolicy": Object{"scopes": []any{"user"}, "disableable": true}, "correlationIdentityFields": []any{"event.id"}})
+	if err != nil {
+		return err
+	}
+	host, err := fixtureHost(events)
+	if err != nil {
 		return err
 	}
 	transport := &fixtureTransport{exchange: func(_ context.Context, _ string, raw []byte) ([]byte, error) {
@@ -333,15 +337,18 @@ func acceptElicitationEffectsObserved(request, result Object, resolve func(Objec
 		}
 		return jsonBytes(Object{"jsonrpc": "2.0", "id": req["id"], "result": Object{"protocolVersion": "draft", "effects": selected}}), nil
 	}}
-	c, err := hooks.New(reg.Value, hooks.Options{Source: str(obj(obj(request["params"])["event"])["source"]), Manifest: manifest, EventClient: &http.Client{Transport: transport}, Content: hooks.ContentOptions{
+	c, err := hooks.New(reg.Value, hooks.Options{Source: str(obj(obj(request["params"])["event"])["source"]), Events: host, Metadata: metadata, EventClient: &http.Client{Transport: transport}, Content: hooks.ContentOptions{
 		// This isolated host grants body disclosure and structured answer edits only
 		// to its registered elicitation receiver. Metadata/omit parts do not acquire
 		// body authority, and no resolver or upload is involved.
 		AuthorizeContent: func(_ context.Context, scope hooks.ContentAuthorization) (bool, error) {
 			return scope.BackendID == "org.agenthooks.elicitation-fixture" &&
 				(scope.Operation == "read" || scope.Operation == "write") &&
-				obj(scope.Subscription["content"])["default"] == "body" &&
-				scope.Item["kind"] == "text" && scope.Item["selection"] == "body", nil
+				scope.Subscription.InterceptSubscription.Present &&
+				scope.Subscription.InterceptSubscription.Value != nil &&
+				scope.Subscription.InterceptSubscription.Value.Content != nil &&
+				scope.Subscription.InterceptSubscription.Value.Content.Default == "body" &&
+				scope.Item.Kind == "text" && scope.Item.Selection == "body", nil
 		},
 	}})
 	if err != nil {
@@ -351,7 +358,11 @@ func acceptElicitationEffectsObserved(request, result Object, resolve func(Objec
 	var snapshot *hooks.ElicitationRequest
 	for _, req := range boundaries {
 		e := obj(obj(req["params"])["event"])
-		var opts []hooks.InterceptOption
+		narrow, err := fixtureOccurrenceCapabilities(obj(req["params"]))
+		if err != nil {
+			return err
+		}
+		opts := []hooks.InterceptOption{narrow}
 		if snapshot != nil {
 			opts = append(opts, hooks.WithElicitationRequest(snapshot))
 		}

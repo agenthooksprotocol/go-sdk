@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -17,27 +16,23 @@ import (
 // only for adversarial stdio fixtures: those must bypass the stdio shim's own
 // output-envelope validation, not merely callback-output validation.
 func (s *serverState) publicHandler(rawOutput io.Writer) (http.Handler, error) {
-	handler, err := server.NewHandler(server.Handlers{
-		Intercept: func(ctx context.Context, request ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
+	handler, err := newFixtureHandler(server.Handlers{
+		Intercept: fixtureInterceptHandlers(func(ctx context.Context, request Object) (Object, error) {
 			encoded, err := json.Marshal(request)
 			if err != nil {
-				return ahp.InterceptResponseResult{}, err
+				return nil, err
 			}
 			reply, err := s.fixtureIntercept(ctx, encoded)
 			if err != nil {
-				return ahp.InterceptResponseResult{}, err
+				return nil, err
 			}
-			parsed := ahp.ParseInterceptResponse(reply)
-			if !parsed.OK {
-				return ahp.InterceptResponseResult{}, fmt.Errorf("invalid fixture response")
+			var response Object
+			if err := json.Unmarshal(reply, &response); err != nil {
+				return nil, err
 			}
-			return parsed.Value.Result, nil
-		},
-		Observe: func(ctx context.Context, notification ahp.ObserveNotification) error {
-			var message Object
-			if err := json.Unmarshal(jsonBytes(notification), &message); err != nil {
-				return err
-			}
+			return response, nil
+		}),
+		Observe: fixtureObserveHandlers(func(ctx context.Context, message Object) error {
 			event := obj(obj(message["params"])["event"])
 			if err := checkContent(event, "", nil); err != nil {
 				return err
@@ -46,13 +41,13 @@ func (s *serverState) publicHandler(rawOutput io.Writer) (http.Handler, error) {
 			defer s.mu.Unlock()
 			s.requests = append(s.requests, Object{"id": event["id"], "method": "hooks/observe", "accepted": true, "message": message})
 			return nil
-		},
+		}),
 		Capabilities: func(context.Context, ahp.CapabilitiesRequest) (ahp.CapabilitiesResponseResult, error) {
 			var result ahp.CapabilitiesResponseResult
 			err := json.Unmarshal(jsonBytes(Object{"protocolVersion": "draft", "manifest": fixtureManifest()}), &result)
 			return result, err
 		},
-	}, server.Options{})
+	})
 	if err != nil {
 		return nil, err
 	}

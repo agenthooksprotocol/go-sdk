@@ -70,8 +70,9 @@ define application argument schemas, grant native permissions, or commit
 compaction changes. The host remains responsible for those operations.
 
 - Configure `client.Hooks` with JSON registration, stable host `Source`, and
-  explicit event modes/capability grants. A full manifest is an advanced
-  alternative. Registration order, selectors, deadlines, and failure policies
+  explicit event modes/capability grants through `capability.Host`. Optional
+  `Metadata` customizes non-event advertisement fields. Registration order,
+  selectors, deadlines, and failure policies
   govern delivery. Construction performs no network or process I/O.
 - Call the context-first named boundary methods with generated `event` input
   projections. `ToolBefore` preserves the application argument type through its
@@ -123,14 +124,12 @@ if err != nil { return err }
 var reg ahp.Registration
 if err := json.Unmarshal(data, &reg); err != nil { return err }
 
-toolCapabilities, err := capability.Intercept(
-    capability.Deny(), capability.ModifyInput(capability.Replace))
-if err != nil { return err }
-
 hooks, err := client.New(reg, client.Options{
     Source: "urn:example:host",
-    Events: map[string]capability.Event{
-        "tool.before": toolCapabilities,
+    Events: capability.Host{
+        ToolBefore: capability.ToolBefore{
+            Deny: true, ModifyInput: capability.Replace(), Observe: true,
+        },
     },
     Content: hostContentPolicy, // Explicit, receiver-scoped host disclosure policy.
 })
@@ -149,12 +148,40 @@ result, err := hooks.ToolBefore(ctx, event.ToolBeforeInput[Arguments]{
 
 The JSON document uses the `ahp.Registration` wire model: backend
 routes, modes, deadlines, failure policies, content selections, and upload
-endpoints are registration data. The event map grants no effects or elicitation support beyond the supplied
-declaration. `capability.Intercept` deliberately advertises both intercept and
-observe modes; `capability.Observe` advertises only observe. Include
-`capability.ElicitationForm()` explicitly when advertising form decisions.
-`Options.Manifest` is available for advanced full-manifest metadata;
-provide it instead of `Events`, not together with it.
+endpoints are registration data. `capability.Host` grants only the facilities
+explicitly declared for each event. Set an event declaration's `Observe` field
+when both interception and observation are supported; use `capability.Observe{}`
+for observation alone. Set `ElicitationForm: true` on an event that supports
+form decisions to advertise that mode.
+`Options.Events` is the authoritative source of event modes and grants.
+`Options.Metadata` accepts metadata-only customization alongside it:
+
+```go
+client.Options{
+    Source: "urn:example:host",
+    Events: capability.Host{
+        ContextCompactBefore: capability.ContextCompactBefore{
+            ModifyInstructions: capability.Replace(),
+        },
+    },
+    Metadata: &client.ManifestMetadata{
+        ContentCategories: ahp.Some([]string{"text"}),
+        Limits: ahp.Some(ahp.StaticCapabilityManifestLimits{
+            MaxUploadBytes: ahp.Some(json.Number("4096")),
+        }),
+    },
+}
+```
+
+This metadata advertises inline text support and a bounded upload size; it does
+not enable events or grant effects. Metadata fields also cover transports,
+authentication, gaps, tool paths, correlation identity fields, and managed policy.
+Absent fields retain minimal defaults, including registration-derived transports
+and authentication. Explicit empty arrays stay empty. Construction validates
+metadata and detaches its slices, maps, and opaque extras from caller-owned data.
+`AdditionalProperties` carries opaque non-grant metadata only. Keys that collide
+with known manifest fields, including `events`, or known nested limits, managed
+policy, and gap fields are rejected rather than overriding typed values.
 
 See the executable [JSON registration and typed boundary example](client/example_hooks_test.go),
 [generated constructor examples](facade_generated_test.go), and
@@ -282,25 +309,45 @@ Canonical fixture adapters use this path instead of duplicating generated mappin
 The SDK owns the protocol envelope and fills permitted identity fields; callers
 supply required occurrence and application data.
 
-`capability.Event` is the event declaration used by `client.Options.Events`.
-`capability.Intercept(grants...)` returns `(capability.Event, error)` and requires
-explicit grants; always handle its error. Available grants are:
+`client.Options.Events` accepts `capability.Host`, with event-specific fields:
 
-- `Allow`, `Ask`, `Deny`, `Message`, and `Return`.
-- `ModifyContent`, `ModifyInput`, `ModifyInstructions`, `ModifyOutput`,
-  `ModifyPrompt`, `ModifyRequest`, `ModifyResponse`, `ModifySummary`, and
-  `ModifyWorkspace`, each with explicit `capability.Merge` and/or
-  `capability.Replace` operations.
-- `FlowContinue(remaining, count)` and `FlowStop`.
-- `InjectContextAppend`, with explicit `capability.Now` and/or
-  `capability.NextTurn` delivery timing.
-- `ElicitationForm` and `ElicitationURL`, independently granted.
+```go
+capability.Host{
+    SessionStart: capability.Observe{},
+    ToolBefore: capability.ToolBefore{
+        Allow: true, Deny: true, ReturnResult: true,
+        ModifyInput: capability.ReplaceAndMerge(),
+        Flow: capability.Stop(),
+        InjectContext: capability.InjectNow().WithNextTurn(),
+        Observe: true,
+    },
+}
+```
 
-Construction is not event admission or execution authorization. Hooks
-checks event compatibility, host support, and per-call narrowing. Pass a checked
-narrower declaration's dereferenced `Capabilities` to `client.WithCapabilities`.
-The lower-level `capability.New` and event-specific wire constructors are
-available for advanced declarations.
+Each field accepts only its matching event declaration or observation support.
+Only catalogue-supported facilities are available on each declaration. A nil
+field or a zero event declaration grants nothing and is omitted. Interception
+and observation are independent: a nonzero facility enables interception, while
+`Observe: true` explicitly enables observation.
+
+- Boolean fields grant simple controls, including `ReturnResult` and supported
+  `ElicitationForm` or `ElicitationURL` modes.
+- `Replace()`, `Merge()`, and `ReplaceAndMerge()` grant modification operations.
+  Targets restricted to one operation use an event-specific constructor.
+- `Stop()`, `Continue(remaining, count)`, and
+  `ContinueAndStop(remaining, count)` grant supported flow operations. Counters
+  are unsigned. Stop-only and continuation-only event fields accept only their
+  matching concrete flow type.
+- `InjectNow()` and `InjectNextTurn()` grant context append with an explicit
+  delivery timing. Compose supported timings with `WithNextTurn()` or
+  `WithNow()`. Events with restricted timings use event-specific injection
+  constructors.
+
+`Host.Wire()` renders canonical declarations for manifest tooling. Its wire
+output types are not host declaration inputs. Zero modification, flow, and
+injection values grant nothing. Construction is not execution authorization:
+Hooks checks host support and per-call narrowing. `client.WithCapabilities`
+accepts an `ahp.Capabilities` wire value that can only narrow the manifest.
 
 `state.Initial(permission.None)` returns a pointer to state with no candidate.
 `permission.Allow`, `Ask`, `Deny`, and `None` represent native decisions already
@@ -349,7 +396,7 @@ pointed-to model's decoder.
 
 Receiver-side `effect.Modify<Target>Merge(value)` and
 `effect.Modify<Target>Replace(value)` accept typed application values for all
-nine modification targets above. `effect.Return(value)` and
+schema-supported modification targets. `effect.Return(value)` and
 `effect.InjectContextAppend(effect.Now, value)` (or `effect.NextTurn`) likewise
 encode payloads and return `(*ahp.Effect, error)`; check errors before publishing
 a response. Simple effects include `NewAllow`, `NewAsk`, `NewDeny`, `NewMessage`,
@@ -378,17 +425,19 @@ use raw JSON for round-trip preservation.
 
 ### Go capability queries
 
-Go exposes `req.Params.Capabilities.Supports(ahp.EffectNameDeny)` and
-`capabilities.Supports(ahp.EffectName("vendor.custom"))`. The generated
+Root `ahp.Capabilities` and `ahp.InterceptRequestParamsCapabilities` expose
+`Supports(ahp.EffectNameDeny)` and
+`Supports(ahp.EffectName("vendor.custom"))`. Typed server contexts expose the
+matching event-specific capabilities model. The generated
 `EffectNameDeny`, `EffectNameModify`, and the other `EffectName*` constants
 identify effect families. Queries inspect
 typed fields without serialization and accept the known and custom string representations.
-Capability grant builders use the same family membership query for deduplication.
+Host declarations render the supported effect families explicitly.
 
 `Supports` reports only advertised family membership: it does not authorize
 execution or imply a target, operation, delivery mode, or per-call grant. A nested
 modify grant without the `modify` family returns false; a `modify` family alone
-does not grant any modification operation. Use grant builders and host/request
+does not grant any modification operation. Use event-specific host declarations and host/request
 validation for operation constraints.
 
 ### Current composition coverage
@@ -428,13 +477,50 @@ the accepted form MCP answer object and preserve its result wrapper. At
 
 ### Receiving hooks
 
-`server.NewHandler` returns an ordinary `http.Handler` with intercept, observe,
-and capabilities callbacks. Mount it in an application-owned mux and use normal
-HTTP authentication middleware. `server.ServeStdio` adapts owned input/output
-streams to the **same handler**; it is not a second protocol engine or backend
-registry. The application owns listener startup, admission policy, and
-shutdown. Callback errors are redacted; notifications never receive JSON-RPC
-replies.
+`server.NewHandler` returns an ordinary `http.Handler`. Interception and
+observation use separate event-specific callback maps:
+
+```go
+handler, err := server.NewHandler(server.Handlers{
+    Intercept: server.InterceptHandlers{
+        ToolBefore: func(ctx context.Context,
+            request server.InterceptContext[ahp.ToolBeforeEvent, ahp.ToolBeforeCapabilities],
+        ) (server.ToolBeforeReply, error) {
+            return server.ToolBeforeReply{Effects: []*ahp.ToolBeforeEffect{
+                {AllowEffect: ahp.Some(&ahp.AllowEffect{Type: "allow"})},
+            }}, nil
+        },
+    },
+    Observe: server.ObserveHandlers{
+        ToolBefore: func(ctx context.Context,
+            notification server.ObserveContext[ahp.ToolBeforeEvent],
+        ) error { return nil },
+    },
+}, server.Options{})
+if err != nil { return err }
+mux.Handle("/hooks", handler)
+```
+
+Each intercept context supplies the exact `Event` and `Capabilities`, optional
+`State` and `Extensions`, and opaque `AdditionalProperties` (params extras) and
+`EnvelopeExtras` (request extras). Observe contexts supply the event and both
+extra maps; the observation schema has no state or extensions members. Unknown
+params members retain future data without granting authority.
+
+Replies contain ordered event-specific `Effects`, optional `Extensions`, and
+opaque result `AdditionalProperties`. A zero reply is a no-op. The engine supplies
+protocol version and request correlation and validates effects against the
+request's grants. Application payloads remain caller-owned: effect helpers encode
+them losslessly; decode their wire output into the matching `ahp.*Effect` union
+before adding it to a reply. `server.WithToolBeforeArguments(codec, callback)`
+binds a caller-defined `client.Codec[T]` and passes decoded arguments alongside
+the typed tool context without changing the event envelope.
+
+The capabilities discovery callback is independent of the event maps. Mount the
+handler in an application-owned mux and use normal HTTP authentication middleware.
+`server.ServeStdio` adapts owned input/output streams to the same handler. The
+application owns listener startup, admission policy, and shutdown. Callback
+errors are redacted; notifications never receive JSON-RPC replies.
 
 ### Content and authentication
 
@@ -459,6 +545,14 @@ clients are never closed.
 
 Content selection does not grant access. `client.ContentOptions` supplies
 receiver-scoped disclosure decisions and host-owned content resolution.
+`ContentAuthorization.Subscription` is the generated `ahp.BackendSubscriptionsItem`
+registered-subscription union. `Item` is an SDK-owned `client.ContentDescriptor`
+with typed metadata and requested selection, not a full selected wire content
+item: text, body, and gap are absent before disclosure (including write callbacks).
+Optional metadata uses `ahp.Optional`; unknown descriptor members remain opaque
+JSON in `AdditionalProperties`, and cannot override known fields or add payloads.
+For example, callbacks inspect `scope.Item.ID`, `scope.Item.Kind`, and
+`scope.Item.Category.Value` (after checking `Present`), not map compatibility views.
 `ContentAuthorization.Operation` is `"read"` for disclosure and `"write"` for
 new or changed inline text. Authorize these operations explicitly in
 `AuthorizeContent`; permitting a read does not permit a write. Incoming canonical

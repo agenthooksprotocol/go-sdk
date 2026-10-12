@@ -35,6 +35,8 @@ func (t *ownedDeliveryTransport) Close() error { return nil }
 func TestBoundaryOwnsObservationCompletion(t *testing.T) {
 	c, _ := testClient(t, "fail-open")
 	c.backends[0].subscriptions[0]["mode"] = "observe"
+	delete(c.backends[0].subscriptions[0], "failurePolicy")
+	delete(c.backends[0].subscriptions[0], "timeoutMs")
 	tr := &ownedDeliveryTransport{started: make(chan struct{}), release: make(chan struct{}), finished: make(chan struct{})}
 	c.backends[0].transport = tr
 	done := make(chan *Result, 1)
@@ -66,6 +68,8 @@ func TestBoundaryOwnsObservationCompletion(t *testing.T) {
 func TestObservationUsesRemainingOperationBudget(t *testing.T) {
 	c, _ := testClient(t, "fail-open")
 	c.backends[0].subscriptions[0]["mode"] = "observe"
+	delete(c.backends[0].subscriptions[0], "failurePolicy")
+	delete(c.backends[0].subscriptions[0], "timeoutMs")
 	c.opts.ObservationTimeout = time.Hour
 	tr := &ownedDeliveryTransport{started: make(chan struct{}), release: make(chan struct{}), finished: make(chan struct{})}
 	c.backends[0].transport = tr
@@ -91,6 +95,8 @@ func TestObservationUsesRemainingOperationBudget(t *testing.T) {
 func TestCancelledBoundaryDoesNotStartObservers(t *testing.T) {
 	c, transports := testClient(t, "fail-open")
 	c.backends[0].subscriptions[0]["mode"] = "observe"
+	delete(c.backends[0].subscriptions[0], "failurePolicy")
+	delete(c.backends[0].subscriptions[0], "timeoutMs")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	r, err := c.intercept(ctx, "tool.before", testInput())

@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	ahp "github.com/agenthooksprotocol/go-sdk"
 	"github.com/agenthooksprotocol/go-sdk/server"
 	"io"
 	"net/http"
@@ -205,26 +204,13 @@ func RunCompactionParts(instructions []any, itemID string, before, after []Compa
 // admission and response acceptance. Authentication and host effects stay with
 // the adapter. The in-memory HTTP exchange also serves owned stdio fixtures.
 func ReceiveBoundary(ctx context.Context, request Object, callback func(Object) (Object, error)) (Object, error) {
-	h, err := server.NewHandler(server.Handlers{Intercept: func(_ context.Context, req ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
-		var canonical Object
-		raw, err := json.Marshal(req)
-		if err != nil {
-			return ahp.InterceptResponseResult{}, err
-		}
-		if err = json.Unmarshal(raw, &canonical); err != nil {
-			return ahp.InterceptResponseResult{}, err
-		}
+	h, err := newFixtureHandler(server.Handlers{Intercept: fixtureInterceptHandlers(func(_ context.Context, canonical Object) (Object, error) {
 		response, err := callback(canonical)
 		if err != nil {
-			return ahp.InterceptResponseResult{}, err
+			return nil, err
 		}
-		var result ahp.InterceptResponseResult
-		raw, err = json.Marshal(response["result"])
-		if err == nil {
-			err = json.Unmarshal(raw, &result)
-		}
-		return result, err
-	}}, server.Options{})
+		return response, nil
+	})})
 	if err != nil {
 		return nil, err
 	}

@@ -14,14 +14,23 @@ import (
 )
 
 func TestGenericBoundaryThroughPublicHTTPHandler(t *testing.T) {
-	h, err := server.NewHandler(server.Handlers{Intercept: func(_ context.Context, r ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
+	type Args struct {
+		Count int `json:"count"`
+	}
+	h, err := server.NewHandler(server.Handlers{Intercept: server.InterceptHandlers{ToolBefore: server.WithToolBeforeArguments(JSONCodec[Args](nil), func(_ context.Context, _ server.InterceptContext[ahp.ToolBeforeEvent, ahp.ToolBeforeCapabilities], args Args) (server.ToolBeforeReply, error) {
+		if args.Count != 1 {
+			t.Errorf("decoded arguments: %+v", args)
+		}
 		modification, err := effect.ModifyInputMerge(map[string]int{"count": 2})
 		if err != nil {
-			return ahp.InterceptResponseResult{}, err
+			return server.ToolBeforeReply{}, err
 		}
-		version := ahp.ProtocolVersion("draft")
-		return ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: ahp.Some([]*ahp.Effect{modification, effect.NewAllow()})}, nil
-	}}, server.Options{})
+		typed, err := publicHTTPToolEffect(modification)
+		if err != nil {
+			return server.ToolBeforeReply{}, err
+		}
+		return server.ToolBeforeReply{Effects: []*ahp.ToolBeforeEffect{typed, {AllowEffect: effect.NewAllow().AllowEffect}}}, nil
+	})}}, server.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,9 +42,6 @@ func TestGenericBoundaryThroughPublicHTTPHandler(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.backends[0].transport = tr
-	type Args struct {
-		Count int `json:"count"`
-	}
 	result, err := c.ToolBefore(context.Background(), event.ToolBeforeInput[Args]{CallID: "call-public", Path: "execute", Name: "task", Origin: "native", Input: Args{Count: 1}})
 	if err != nil {
 		t.Fatal(err)
@@ -46,14 +52,17 @@ func TestGenericBoundaryThroughPublicHTTPHandler(t *testing.T) {
 }
 
 func TestGenericContractRejectsInvalidEditThroughPublicHTTPHandler(t *testing.T) {
-	h, err := server.NewHandler(server.Handlers{Intercept: func(_ context.Context, _ ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
+	h, err := server.NewHandler(server.Handlers{Intercept: server.InterceptHandlers{ToolBefore: func(_ context.Context, _ server.InterceptContext[ahp.ToolBeforeEvent, ahp.ToolBeforeCapabilities]) (server.ToolBeforeReply, error) {
 		modification, err := effect.ModifyInputReplace(map[string]string{"count": "host-refuses"})
 		if err != nil {
-			return ahp.InterceptResponseResult{}, err
+			return server.ToolBeforeReply{}, err
 		}
-		version := ahp.ProtocolVersion("draft")
-		return ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: ahp.Some([]*ahp.Effect{modification})}, nil
-	}}, server.Options{})
+		typed, err := publicHTTPToolEffect(modification)
+		if err != nil {
+			return server.ToolBeforeReply{}, err
+		}
+		return server.ToolBeforeReply{Effects: []*ahp.ToolBeforeEffect{typed}}, nil
+	}}}, server.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,4 +92,16 @@ func TestGenericContractRejectsInvalidEditThroughPublicHTTPHandler(t *testing.T)
 	if err != nil || raw == nil || !raw.InputAvailable || string(raw.Input) != `{"count":"host-refuses"}` {
 		t.Fatalf("raw path: %+v %v", raw, err)
 	}
+}
+
+func publicHTTPToolEffect(value *ahp.Effect) (*ahp.ToolBeforeEffect, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var typed ahp.ToolBeforeEffect
+	if err := json.Unmarshal(raw, &typed); err != nil {
+		return nil, err
+	}
+	return &typed, nil
 }

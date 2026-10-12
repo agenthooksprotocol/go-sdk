@@ -29,9 +29,9 @@ import (
 type Options struct {
 	Source string
 	// Events explicitly advertises boundary modes and capabilities.
-	// Use Events for ordinary configuration or Manifest for advanced metadata, not both.
-	Events   map[string]capability.Event
-	Manifest ahp.StaticCapabilityManifest
+	// Metadata customizes only non-event advertisement fields.
+	Events   capability.Host
+	Metadata *ManifestMetadata
 	// AuthProvider is harness-owned; Hooks never closes it.
 	AuthProvider    auth.Provider
 	EventClient     *http.Client
@@ -163,15 +163,12 @@ func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
 	if err != nil {
 		return nil, err
 	}
-	mb, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": "manifest", "result": map[string]any{"protocolVersion": "draft", "manifest": manifest}})
-	if canonical.Validate("capabilities-response", mb) != nil || !ahp.ParseCapabilitiesResponse(mb).OK {
-		return nil, errors.New("invalid manifest")
-	}
-	if err = json.Unmarshal(sdkJSON(manifest), &opts.Manifest); err != nil {
+	if err := validateManifestMetadata(manifest); err != nil {
 		return nil, err
 	}
 	// Retain only the detached normalized advertisement, not the caller's map.
-	opts.Events = nil
+	opts.Events = capability.Host{}
+	opts.Metadata = nil
 	c := &Hooks{opts: opts, manifest: manifest, observations: make(chan struct{}, opts.MaxPendingObservations), closeDone: make(chan struct{}), uploads: make(chan struct{}, opts.MaxConcurrentUploads)}
 	c.life, c.cancel = context.WithCancel(context.Background())
 	ids := map[string]bool{}

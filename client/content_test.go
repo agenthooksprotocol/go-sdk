@@ -30,9 +30,89 @@ func contentTestItem(body any) map[string]any {
 	return map[string]any{"id": "item-1", "kind": "attachment", "mediaType": "application/octet-stream", "selection": "body", "body": body}
 }
 func contentTestSubscription(endpoint string) map[string]any {
-	return map[string]any{"id": "subscription-1", "content": map[string]any{"default": "body"}, "upload": map[string]any{"endpoint": endpoint, "timeoutMs": 1000, "maxBytes": 128}}
+	return map[string]any{"mode": "observe", "events": []any{"tool.before"}, "id": "subscription-1", "content": map[string]any{"default": "body"}, "upload": map[string]any{"endpoint": endpoint, "timeoutMs": 1000, "maxBytes": 128}}
 }
 func contentTestAllow(context.Context, ContentAuthorization) (bool, error) { return true, nil }
+
+func TestContentAuthorizationTypedDescriptor(t *testing.T) {
+	item := contentTestItem(map[string]any{"ref": "private"})
+	item["category"] = "files"
+	item["size"] = json.Number("9007199254740993")
+	item["synthesized"] = false
+	item["future"] = map[string]any{"kind": "attachment", "body": "opaque", "n": json.Number("9007199254740993")}
+	sub := contentTestSubscription("https://uploads.example/raw")
+	sub["future"] = map[string]any{"body": "subscription extension"}
+	scope, err := contentAuthorization("read", "receiver", sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !scope.Subscription.ObserveSubscription.Present || scope.Subscription.ObserveSubscription.Value.Content == nil {
+		t.Fatal("missing typed registered subscription")
+	}
+	if got := string(scope.Subscription.ObserveSubscription.Value.AdditionalProperties["future"]); got != `{"body":"subscription extension"}` {
+		t.Fatal("subscription extension lost", got)
+	}
+	scope.Item, err = contentDescriptor(item, "body")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scope.Item.ID != "item-1" || scope.Item.Kind != "attachment" || scope.Item.Category.Value != "files" || scope.Item.Size.Value != "9007199254740993" || !scope.Item.Synthesized.Present || scope.Item.Synthesized.Value {
+		t.Fatal("descriptor fields lost", scope.Item)
+	}
+	want := `{"body":"opaque","kind":"attachment","n":9007199254740993}`
+	if got := string(scope.Item.AdditionalProperties["future"]); got != want {
+		t.Fatal("opaque extension changed", got)
+	}
+	// The projection owns its raw bytes, including nested extension objects.
+	item["future"].(map[string]any)["body"] = "changed"
+	if got := string(scope.Item.AdditionalProperties["future"]); got != want {
+		t.Fatal("projection aliases item", got)
+	}
+	scope.Item.AdditionalProperties["id"] = json.RawMessage(`"override"`)
+	scope.Item.AdditionalProperties["category"] = json.RawMessage(`"override"`)
+	scope.Item.AdditionalProperties["body"] = json.RawMessage(`"private"`)
+	scope.Item.AdditionalProperties["text"] = json.RawMessage(`"private"`)
+	scope.Item.AdditionalProperties["gap"] = json.RawMessage(`{}`)
+	raw, err := json.Marshal(scope.Item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if string(fields["id"]) != `"item-1"` || string(fields["category"]) != `"files"` || string(fields["future"]) != want {
+		t.Fatal("extension overrode known fields", string(raw))
+	}
+	for _, key := range []string{"body", "text", "gap"} {
+		if _, ok := fields[key]; ok {
+			t.Fatal("descriptor disclosed payload", string(raw))
+		}
+	}
+}
+
+func TestContentAuthorizationWriteDescriptorOmitsText(t *testing.T) {
+	called := false
+	c := &Hooks{opts: Options{Content: ContentOptions{AuthorizeContent: func(_ context.Context, scope ContentAuthorization) (bool, error) {
+		called = true
+		raw, err := json.Marshal(scope.Item)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if scope.Operation != "write" || scope.Item.Kind != "text" || bytes.Contains(raw, []byte("private text")) {
+			t.Fatal("invalid write descriptor", string(raw))
+		}
+		return true, nil
+	}}}}
+	part := map[string]any{"id": "text-1", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": "private text"}
+	if err := c.authorizeInlineWrite(context.Background(), part, contentTestSubscription("https://uploads.example/raw"), "receiver"); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("write callback not called")
+	}
+}
+
 func contentTestBody(t *testing.T, event map[string]any) map[string]any {
 	t.Helper()
 	items := event["items"].([]any)
@@ -97,7 +177,7 @@ func TestContentCategoryPrecedence(t *testing.T) {
 	d["mediaType"] = "image/png"
 	e := contentTestItem(map[string]any{"ref": "secret"})
 	e["category"] = "unknown"
-	sub := map[string]any{"content": map[string]any{"default": "omit", "text": "body", "reasoning": "metadata", "custom": "omit", "images": "metadata"}}
+	sub := map[string]any{"mode": "observe", "events": []any{"tool.before"}, "content": map[string]any{"default": "omit", "text": "body", "reasoning": "metadata", "custom": "omit", "images": "metadata"}}
 	out, err := c.projectContent(context.Background(), contentTestEvent(map[string]any{"items": []any{a, b, d, e}}), sub, "backend")
 	if err != nil {
 		t.Fatal(err)
@@ -137,7 +217,7 @@ func TestContentRemoteHandlesUploadPerReceiver(t *testing.T) {
 		if scope.BackendID != "backend-A" && scope.BackendID != "backend-B" {
 			t.Error("missing backend scope")
 		}
-		if scope.Subscription["id"] != "subscription-1" || scope.Item["id"] != "item-1" {
+		if scope.SubscriptionID != "subscription-1" || scope.Item.ID != "item-1" {
 			t.Error("missing subscription/item scope")
 		}
 		return true, nil
@@ -285,13 +365,13 @@ func TestContentNativeRequiresExplicitProjection(t *testing.T) {
 	calls := 0
 	c := &Hooks{opts: Options{Content: ContentOptions{ProjectOpaque: func(_ context.Context, scope ContentAuthorization, path string, value any) (any, error) {
 		calls++
-		if scope.BackendID != "backend" || scope.Subscription["content"] == nil {
+		if scope.BackendID != "backend" || !scope.Subscription.ObserveSubscription.Present || scope.Subscription.ObserveSubscription.Value.Content == nil {
 			t.Error("missing opaque scope")
 		}
 		return []any{"approved", path}, nil
 	}}}}
 	event := contentTestEvent(map[string]any{"native": []any{"secret"}, "input": map[string]any{"secret": "x"}})
-	sub := map[string]any{"content": map[string]any{"default": "omit"}}
+	sub := map[string]any{"mode": "observe", "events": []any{"tool.before"}, "content": map[string]any{"default": "omit"}}
 	out, err := c.projectContent(context.Background(), event, sub, "backend")
 	if err != nil {
 		t.Fatal(err)
@@ -313,7 +393,7 @@ func TestContentOnlyProjectsDeclaredDescriptorPositions(t *testing.T) {
 	c := &Hooks{}
 	lookalike := contentTestItem("application-owned")
 	event := contentTestEvent(map[string]any{"custom": lookalike, "items": []any{contentTestItem(map[string]any{"ref": "secret"})}})
-	sub := map[string]any{"content": map[string]any{"default": "metadata"}}
+	sub := map[string]any{"mode": "observe", "events": []any{"tool.before"}, "content": map[string]any{"default": "metadata"}}
 	out, err := c.projectContent(context.Background(), event, sub, "backend")
 	if err != nil {
 		t.Fatal(err)

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/agenthooksprotocol/go-sdk/capability"
 	"io"
 	"net/http"
 	"strconv"
@@ -222,18 +221,27 @@ func runObservationChain(parent context.Context, sc lifecycleScenario, send func
 	if !registration.OK {
 		return nil, nil, fmt.Errorf("chain registration: %v", registration.Diagnostics)
 	}
-	var capabilities ahp.Capabilities
-	if err := json.Unmarshal(jsonBytes(params["capabilities"]), &capabilities); err != nil {
+	manifest := Object{"events": []any{Object{"event": event["type"], "modes": []any{"intercept", "observe"}, "capabilities": params["capabilities"]}}, "transports": []any{"http"}, "authentication": []any{}, "gaps": []any{}, "toolPaths": []any{}, "contentCategories": []any{}, "correlationIdentityFields": []any{}, "limits": Object{}, "managedPolicy": Object{"scopes": []any{"user"}, "disableable": true}}
+	metadata, err := fixtureManifestMetadata(manifest)
+	if err != nil {
 		return nil, nil, err
 	}
-	client, err := hooks.New(registration.Value, hooks.Options{Source: str(event["source"]), Events: map[string]capability.Event{str(event["type"]): {Modes: []capability.Mode{capability.InterceptMode, capability.ObserveMode}, Capabilities: &capabilities}}, EventClient: &http.Client{Transport: transport}, ObservationTimeout: 20 * time.Second, Content: hooks.ContentOptions{ProjectOpaque: func(_ context.Context, _ hooks.ContentAuthorization, _ string, value any) (any, error) {
+	host, err := fixtureHost(array(manifest["events"]))
+	if err != nil {
+		return nil, nil, err
+	}
+	client, err := hooks.New(registration.Value, hooks.Options{Source: str(event["source"]), Events: host, Metadata: metadata, EventClient: &http.Client{Transport: transport}, ObservationTimeout: 20 * time.Second, Content: hooks.ContentOptions{ProjectOpaque: func(_ context.Context, _ hooks.ContentAuthorization, _ string, value any) (any, error) {
 		return value, nil
 	}}})
 	if err != nil {
 		return nil, nil, err
 	}
 	defer client.Close()
-	options := []hooks.InterceptOption{}
+	narrow, err := fixtureOccurrenceCapabilities(params)
+	if err != nil {
+		return nil, nil, err
+	}
+	options := []hooks.InterceptOption{narrow}
 	if initial, exists := params["state"]; exists {
 		var typed ahp.InterceptRequestParamsState
 		if err = json.Unmarshal(jsonBytes(initial), &typed); err != nil {

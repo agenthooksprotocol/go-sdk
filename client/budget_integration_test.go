@@ -208,13 +208,9 @@ func TestNamedSourceOuterBudgetThroughAuthRetryAndOwnedObservation(t *testing.T)
 	if !registration.OK {
 		t.Fatal(registration.Diagnostics)
 	}
-	declaration, err := capability.Intercept(capability.Deny())
-	if err != nil {
-		t.Fatal(err)
-	}
 	transport := &budgetIntegrationTransport{check: checkDeadline}
 	hooks, err := New(registration.Value, Options{
-		Source: "urn:test:budget", Events: map[event.Type]capability.Event{event.ToolBefore: declaration}, AuthProvider: provider,
+		Source: "urn:test:budget", Events: capability.Host{ToolBefore: capability.ToolBefore{Deny: true, Observe: true}}, AuthProvider: provider,
 		EventClient: &http.Client{Transport: transport}, UploadClient: &http.Client{Transport: transport}, ObservationTimeout: time.Minute,
 		Content: ContentOptions{AllowLoopbackHTTP: true,
 			AuthorizeContent: func(ctx context.Context, scope ContentAuthorization) (bool, error) {

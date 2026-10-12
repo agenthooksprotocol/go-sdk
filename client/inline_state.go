@@ -79,8 +79,10 @@ func (c *Hooks) projectReceiverState(ctx context.Context, event, state, sub map[
 			if c.opts.Content.ProjectOpaque == nil {
 				decoded.Candidate = ahp.Null[ahp.InterceptRequestParamsStateCandidateValue]()
 			} else {
-				scope := ContentAuthorization{Operation: "read", BackendID: backendID, Subscription: contentClone(sub).(map[string]any)}
-				scope.SubscriptionID, _ = sub["id"].(string)
+				scope, err := contentAuthorization("read", backendID, sub)
+				if err != nil {
+					return nil, err
+				}
 				opaque, err := contractJSON(decoded.Candidate.Value.Value)
 				if err != nil {
 					return nil, err

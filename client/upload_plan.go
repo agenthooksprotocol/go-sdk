@@ -135,8 +135,16 @@ func (c *Hooks) planUploads(ctx context.Context, event map[string]any, p *prepar
 				if mode != "body" {
 					continue
 				}
-				scope := ContentAuthorization{Operation: "read", BackendID: backend.id, Subscription: contentClone(sub).(map[string]any), Item: contentDescriptor(item, "body")}
-				scope.SubscriptionID, _ = sub["id"].(string)
+				scope, err := contentAuthorization("read", backend.id, sub)
+				if err != nil {
+					r.fail(err)
+					break
+				}
+				scope.Item, err = contentDescriptor(item, "body")
+				if err != nil {
+					r.fail(err)
+					break
+				}
 				if c.opts.Content.AuthorizeContent == nil {
 					continue
 				}
@@ -227,7 +235,12 @@ func (c *Hooks) planUploads(ctx context.Context, event map[string]any, p *prepar
 				ms, _ := contentInt(sdkObj(task.sub["upload"])["timeoutMs"])
 				deadlineCtx, cancel := context.WithDeadline(ctx, d.started.Add(time.Duration(ms)*time.Millisecond))
 				transferCtx := context.WithValue(deadlineCtx, uploadPreparationContextKey{}, true)
-				scope := ContentAuthorization{Operation: "read", BackendID: task.receiver.backendID, Subscription: contentClone(task.sub).(map[string]any)}
+				scope, err := contentAuthorization("read", task.receiver.backendID, task.sub)
+				if err != nil {
+					cancel()
+					r.fail(err)
+					continue
+				}
 				validate := func(raw []byte) error {
 					for _, item := range task.items {
 						if err := contentMatches(item, raw); err != nil {
@@ -290,17 +303,6 @@ func (c *Hooks) planUploads(ctx context.Context, event map[string]any, p *prepar
 	close(work)
 	wg.Wait()
 	return plan
-}
-
-func contentDescriptor(item map[string]any, selection string) map[string]any {
-	out := map[string]any{}
-	for _, key := range []string{"id", "kind", "mediaType", "category", "size", "sha256", "synthesized"} {
-		if v, ok := item[key]; ok {
-			out[key] = contentClone(v)
-		}
-	}
-	out["selection"] = selection
-	return out
 }
 
 // Reject invalid destination configuration before materializing any source.

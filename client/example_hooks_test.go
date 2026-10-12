@@ -21,19 +21,20 @@ import (
 func ExampleHooks_ToolBefore() {
 	// The receiver is an ordinary http.Handler mounted on an owned server.
 	handler, err := server.NewHandler(server.Handlers{
-		Intercept: func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
+		Intercept: server.InterceptHandlers{ToolBefore: func(context.Context, server.InterceptContext[ahp.ToolBeforeEvent, ahp.ToolBeforeCapabilities]) (server.ToolBeforeReply, error) {
 			replacement, err := effect.ModifyInputReplace(struct {
 				Path string `json:"path"`
 			}{Path: "safe.txt"})
 			if err != nil {
-				return ahp.InterceptResponseResult{}, err
+				return server.ToolBeforeReply{}, err
 			}
-			version := ahp.ProtocolVersion("draft")
-			return ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: ahp.Some([]*ahp.Effect{
-				replacement,
-			})}, nil
-		},
-		Observe: func(context.Context, ahp.ObserveNotification) error { return nil },
+			typed, err := exampleToolBeforeEffect(replacement)
+			if err != nil {
+				return server.ToolBeforeReply{}, err
+			}
+			return server.ToolBeforeReply{Effects: []*ahp.ToolBeforeEffect{typed}}, nil
+		}},
+		Observe: server.ObserveHandlers{ToolBefore: func(context.Context, server.ObserveContext[ahp.ToolBeforeEvent]) error { return nil }},
 	}, server.Options{})
 	if err != nil {
 		panic(err)
@@ -53,18 +54,14 @@ func ExampleHooks_ToolBefore() {
 		panic(err)
 	}
 
-	toolCapabilities, err := capability.Intercept(capability.Deny(), capability.ModifyInput(capability.Replace))
-	if err != nil {
-		panic(err)
-	}
-	narrowed, err := capability.Intercept(capability.ModifyInput(capability.Replace))
-	if err != nil {
-		panic(err)
+	narrowed := ahp.Capabilities{
+		Effects: []ahp.CapabilitiesEffectsItem{{Known: ahp.Some(ahp.CapabilitiesEffectsItemKnown("modify"))}},
+		Modify:  ahp.Some(ahp.CapabilitiesModify{Input: ahp.Some(ahp.CapabilitiesModifyInput{Replace: true, Merge: false})}),
 	}
 	hooks, err := client.New(registration, client.Options{
 		Source: "urn:example:host",
-		Events: map[string]capability.Event{
-			"tool.before": toolCapabilities,
+		Events: capability.Host{
+			ToolBefore: capability.ToolBefore{Deny: true, ModifyInput: capability.Replace(), Observe: true},
 		},
 		EventClient: peer.Client(),
 		// Application input disclosure is an explicit host decision, not a grant
@@ -89,7 +86,7 @@ func ExampleHooks_ToolBefore() {
 		Input: Arguments{Path: "original.txt"},
 	},
 		client.WithInitialState(*initial),
-		client.WithCapabilities(*narrowed.Capabilities),
+		client.WithCapabilities(narrowed),
 	)
 	if err != nil {
 		var decode *client.DecodeError
@@ -115,10 +112,9 @@ func ExampleHooks_ToolBefore() {
 
 func ExampleHooks_stdioServer() {
 	handler, err := server.NewHandler(server.Handlers{
-		Intercept: func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
-			version := ahp.ProtocolVersion("draft")
-			return ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: ahp.Some([]*ahp.Effect{})}, nil
-		},
+		Intercept: server.InterceptHandlers{ToolBefore: func(context.Context, server.InterceptContext[ahp.ToolBeforeEvent, ahp.ToolBeforeCapabilities]) (server.ToolBeforeReply, error) {
+			return server.ToolBeforeReply{}, nil
+		}},
 	}, server.Options{})
 	if err != nil {
 		panic(err)
@@ -128,4 +124,17 @@ func ExampleHooks_stdioServer() {
 	if err := server.ServeStdio(context.Background(), os.Stdin, os.Stdout, handler); err != nil {
 		panic(err)
 	}
+}
+
+// Decode the event-specific union without dropping caller-owned payloads or extras.
+func exampleToolBeforeEffect(value *ahp.Effect) (*ahp.ToolBeforeEffect, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var typed ahp.ToolBeforeEffect
+	if err := json.Unmarshal(raw, &typed); err != nil {
+		return nil, err
+	}
+	return &typed, nil
 }

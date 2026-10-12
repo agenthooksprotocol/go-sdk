@@ -225,7 +225,7 @@ func TestElicitationStructuredEditPrivacy(t *testing.T) {
 				reads, writes := 0, 0
 				if !tc.noAuthorizer {
 					c.opts.Content.AuthorizeContent = func(_ context.Context, scope ContentAuthorization) (bool, error) {
-						if scope.Item["kind"] != "text" || scope.Item["mediaType"] != "text/plain" || scope.Item["category"] != "answers" {
+						if scope.Item.Kind != "text" || scope.Item.MediaType != "text/plain" || scope.Item.Category.Value != "answers" {
 							t.Error("wrong answer authorization item", scope.Item)
 						}
 						switch scope.Operation {
@@ -234,7 +234,7 @@ func TestElicitationStructuredEditPrivacy(t *testing.T) {
 							return tc.read, nil
 						case "write":
 							writes++
-							if scope.BackendID != c.backends[0].id || scope.SubscriptionID != compositionString(sub["id"]) || scope.Item["body"] != nil {
+							if scope.BackendID != c.backends[0].id || scope.SubscriptionID != compositionString(sub["id"]) || scope.Item.AdditionalProperties["body"] != nil {
 								t.Error("write authority lost backend scope or became an upload", scope)
 							}
 							if tc.writeError {

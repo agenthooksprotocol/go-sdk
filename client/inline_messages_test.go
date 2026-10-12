@@ -257,7 +257,7 @@ func TestInlineCanonicalMessagesWriteAuthorizationDenied(t *testing.T) {
 					return true, nil
 				case "write":
 					writes++
-					if scope.BackendID != "com.example.backenda" || scope.Item["id"] != "p2" {
+					if scope.BackendID != "com.example.backenda" || scope.Item.ID != "p2" {
 						t.Errorf("write scope: %+v", scope)
 					}
 					return false, nil
@@ -286,7 +286,7 @@ func TestInlineCanonicalReceiverStatePrivacy(t *testing.T) {
 					"inject":  map[string]any{"context": map[string]any{"append": true, "deliverAt": []any{"now"}}},
 				})
 				c.opts.Content.AuthorizeContent = func(_ context.Context, scope ContentAuthorization) (bool, error) {
-					if mode == "denied" && scope.Operation == "read" && scope.BackendID == "com.example.backendb" && scope.Item["category"] == "reasoning" {
+					if mode == "denied" && scope.Operation == "read" && scope.BackendID == "com.example.backendb" && scope.Item.Category.Value == "reasoning" {
 						return false, nil
 					}
 					return true, nil

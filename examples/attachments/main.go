@@ -25,11 +25,8 @@ func run(registrationPath, filePath string) error {
 	if err = json.Unmarshal(data, &registration); err != nil {
 		return err
 	}
-	caps, err := capability.Intercept(capability.Deny())
-	if err != nil {
-		return err
-	}
-	hooks, err := client.New(registration, client.Options{Source: "urn:example:document-review", Events: map[string]capability.Event{"model.request.before": caps}, MaxContentBytes: 8 << 20, MaxConcurrentUploads: 8})
+	caps := capability.Host{ModelRequestBefore: capability.ModelRequestBefore{Deny: true, Observe: true}}
+	hooks, err := client.New(registration, client.Options{Source: "urn:example:document-review", Events: caps, MaxContentBytes: 8 << 20, MaxConcurrentUploads: 8})
 	if err != nil {
 		return err
 	}

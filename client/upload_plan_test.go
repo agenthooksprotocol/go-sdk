@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/capability"
 	"github.com/agenthooksprotocol/go-sdk/content"
 )
 
@@ -23,10 +23,6 @@ func uploadPlanClient(t *testing.T, endpoint string, limit int, policies ...stri
 	caps := targetTestCaps("request")
 	caps["effects"] = []any{"modify", "message", "deny"}
 	setDispatchBoundary(base, "model.request.before", caps)
-	var manifest ahp.StaticCapabilityManifest
-	if err := json.Unmarshal(sdkJSON(base.manifest), &manifest); err != nil {
-		t.Fatal(err)
-	}
 	hooks := []any{}
 	for i, policy := range policies {
 		sub := contentTestSubscription(endpoint)
@@ -38,7 +34,7 @@ func uploadPlanClient(t *testing.T, endpoint string, limit int, policies ...stri
 	if !reg.OK {
 		t.Fatal(reg.Diagnostics)
 	}
-	c, err := New(reg.Value, Options{Source: "urn:test:upload-plan", Manifest: manifest, MaxConcurrentUploads: limit, Content: ContentOptions{AuthorizeContent: contentTestAllow, AllowLoopbackHTTP: true, ProjectOpaque: base.opts.Content.ProjectOpaque}})
+	c, err := New(reg.Value, Options{Source: "urn:test:upload-plan", Events: capability.Host{ModelRequestBefore: capability.ModelRequestBefore{ModifyRequest: capability.ReplaceAndMerge(), Message: true, Deny: true, Observe: true}}, Metadata: testManifestMetadata(), MaxConcurrentUploads: limit, Content: ContentOptions{AuthorizeContent: contentTestAllow, AllowLoopbackHTTP: true, ProjectOpaque: base.opts.Content.ProjectOpaque}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +245,7 @@ func TestUploadPlanNegativeLimitRejected(t *testing.T) {
 	if !reg.OK {
 		t.Fatal(reg.Diagnostics)
 	}
-	c, err := New(reg.Value, Options{Source: "urn:test:upload-plan", Manifest: base.opts.Manifest, MaxConcurrentUploads: -1})
+	c, err := New(reg.Value, Options{Source: "urn:test:upload-plan", Events: base.opts.Events, Metadata: base.opts.Metadata, MaxConcurrentUploads: -1})
 	if c != nil {
 		_ = c.Close()
 	}

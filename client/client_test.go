@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/capability"
 	"reflect"
 	"sync"
 	"testing"
@@ -42,6 +43,20 @@ func (t *testTransport) Close() error { return nil }
 func testCaps() map[string]any {
 	return map[string]any{"effects": []any{"deny", "allow", "ask", "modify", "return"}, "modify": map[string]any{"input": map[string]any{"replace": true, "merge": true}}}
 }
+func testHost() capability.Host {
+	return capability.Host{ToolBefore: capability.ToolBefore{Deny: true, Allow: true, Ask: true, ModifyInput: capability.ReplaceAndMerge(), ReturnResult: true, Observe: true}}
+}
+func testManifestMetadata() *ManifestMetadata {
+	return &ManifestMetadata{
+		Transports:     ahp.Some([]ahp.StaticCapabilityManifestTransportsItem{ahp.StaticCapabilityManifestTransportsItemHTTP, ahp.StaticCapabilityManifestTransportsItemStdio}),
+		Authentication: ahp.Some([]ahp.StaticCapabilityManifestAuthenticationItem{}),
+		Gaps:           ahp.Some([]ahp.StaticCapabilityManifestGapsItem{}),
+		ToolPaths:      ahp.Some([]string{"execute"}), ContentCategories: ahp.Some([]string{"text"}),
+		CorrelationIdentityFields: ahp.Some([]string{"event.id", "call.id"}),
+		Limits:                    ahp.Some(ahp.StaticCapabilityManifestLimits{MaxUploadBytes: ahp.Some(json.Number("4096")), MaxContinuations: ahp.Some(json.Number("0"))}),
+		ManagedPolicy:             ahp.Some(ahp.StaticCapabilityManifestManagedPolicy{Scopes: []ahp.StaticCapabilityManifestManagedPolicyScopesItem{"user"}, Disableable: true}),
+	}
+}
 func testClient(t *testing.T, policies ...string) (*Hooks, []*testTransport) {
 	t.Helper()
 	hooks := []any{}
@@ -52,12 +67,7 @@ func testClient(t *testing.T, policies ...string) (*Hooks, []*testTransport) {
 	if !reg.OK {
 		t.Fatal(reg.Diagnostics)
 	}
-	manifest := map[string]any{"events": []any{map[string]any{"event": "tool.before", "modes": []any{"intercept", "observe"}, "capabilities": testCaps()}}, "gaps": []any{}, "transports": []any{"http", "stdio"}, "authentication": []any{}, "toolPaths": []any{"execute"}, "contentCategories": []any{"text"}, "limits": map[string]any{"maxUploadBytes": 4096, "maxContinuations": 0}, "managedPolicy": map[string]any{"scopes": []any{"user"}, "disableable": true}, "correlationIdentityFields": []any{"event.id", "call.id"}}
-	var typed ahp.StaticCapabilityManifest
-	if err := json.Unmarshal(sdkJSON(manifest), &typed); err != nil {
-		t.Fatal(err)
-	}
-	c, err := New(reg.Value, Options{Source: "urn:test:host", Manifest: typed, Content: ContentOptions{ProjectOpaque: func(_ context.Context, _ ContentAuthorization, _ string, v any) (any, error) { return v, nil }}})
+	c, err := New(reg.Value, Options{Source: "urn:test:host", Events: testHost(), Metadata: testManifestMetadata(), Content: ContentOptions{ProjectOpaque: func(_ context.Context, _ ContentAuthorization, _ string, v any) (any, error) { return v, nil }}})
 	if err != nil {
 		t.Fatal(err)
 	}

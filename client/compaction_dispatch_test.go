@@ -51,6 +51,8 @@ func TestPreparedCompactionSerialAndObservedInlineText(t *testing.T) {
 				}
 			}
 			c.backends[2].subscriptions[0]["mode"] = "observe"
+			delete(c.backends[2].subscriptions[0], "failurePolicy")
+			delete(c.backends[2].subscriptions[0], "timeoutMs")
 			trs[0].reply = func(map[string]any) []any {
 				return []any{map[string]any{"type": "modify", "target": target, "operation": "replace", "value": []any{part("effective " + target)}}}
 			}

@@ -71,34 +71,38 @@ func TestPublicResolvedInstructionsAcrossReceivers(t *testing.T) {
 				t.Error(err)
 			}
 		})
-		handler, err := server.NewHandler(server.Handlers{Intercept: func(_ context.Context, req ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
-			var wire map[string]any
-			_ = json.Unmarshal(completionJSON(req), &wire)
-			ev := wire["params"].(map[string]any)["event"].(map[string]any)
+		handler, err := server.NewHandler(server.Handlers{Intercept: server.InterceptHandlers{ContextCompactBefore: func(_ context.Context, req server.InterceptContext[ahp.ContextCompactBeforeEvent, ahp.ContextCompactBeforeCapabilities]) (server.ContextCompactBeforeReply, error) {
+			var ev map[string]any
+			if err := json.Unmarshal(completionJSON(req.Event), &ev); err != nil {
+				return server.ContextCompactBeforeReply{}, err
+			}
 			instruction := ev["instructions"].([]any)[0].(map[string]any)
 			descriptor := ev["items"].([]any)[0].(map[string]any)["parts"].([]any)[0].(map[string]any)
 			ref := descriptor["body"].(map[string]any)["ref"].(string)
 			if !strings.HasPrefix(ref, "urn:test:receiver:"+receiver+":") {
-				return ahp.InterceptResponseResult{}, fmt.Errorf("wrong receiver ref")
+				return server.ContextCompactBeforeReply{}, fmt.Errorf("wrong receiver ref")
 			}
 			mu.Lock()
 			raw, ok := stored[ref]
 			seen = append(seen, instruction["text"].(string))
 			mu.Unlock()
 			if !ok || !bytes.Equal(raw, original) || descriptor["id"] != "report-1" || instruction["id"] != "instructions-1" {
-				return ahp.InterceptResponseResult{}, fmt.Errorf("unknown bytes or changed logical identity")
+				return server.ContextCompactBeforeReply{}, fmt.Errorf("unknown bytes or changed logical identity")
 			}
-			version := ahp.ProtocolVersion("draft")
-			effects := []*ahp.Effect{}
+			effects := []*ahp.ContextCompactBeforeEffect{}
 			if receiver == "a" {
 				modification, err := effect.ModifyInstructionsReplace(&ahp.TextParts{&ahp.TextPart{TextBodyPart: ahp.Some(&ahp.TextBodyPart{ID: "instructions-1", Kind: ahp.TextBodyPartKindText, MediaType: ahp.TextBodyPartMediaTypeTextPlain, Selection: ahp.TextBodyPartSelectionBody, Text: "accepted instructions\n"})}})
 				if err != nil {
-					return ahp.InterceptResponseResult{}, err
+					return server.ContextCompactBeforeReply{}, err
 				}
-				effects = append(effects, modification)
+				var typed ahp.ContextCompactBeforeEffect
+				if err := json.Unmarshal(completionJSON(modification), &typed); err != nil {
+					return server.ContextCompactBeforeReply{}, err
+				}
+				effects = append(effects, &typed)
 			}
-			return ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: ahp.Some(effects)}, nil
-		}}, server.Options{})
+			return server.ContextCompactBeforeReply{Effects: effects}, nil
+		}}}, server.Options{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -112,20 +116,19 @@ func TestPublicResolvedInstructionsAcrossReceivers(t *testing.T) {
 		sub := subscription.NewIntercept([]string{"context.compact.before"}, time.Second, "fail-closed", content.NewSelection("body"), subscription.WithInterceptUpload(upload))
 		backends = append(backends, registration.NewBackend("com.example."+receiver, transport.NewHttp(endpoint.URL+"/hooks/"+receiver), sub))
 	}
-	compactCapabilities, err := capability.Intercept(capability.ModifyInstructions(capability.Replace))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var manifest ahp.StaticCapabilityManifest
-	if err := json.Unmarshal(completionJSON(map[string]any{"events": []any{map[string]any{"event": "context.compact.before", "modes": []string{"intercept"}, "capabilities": compactCapabilities.Capabilities}}, "gaps": []any{}, "transports": []string{"http"}, "authentication": []any{}, "toolPaths": []any{}, "contentCategories": []string{"text"}, "limits": map[string]any{"maxUploadBytes": 4096}, "managedPolicy": map[string]any{"scopes": []string{"user"}, "disableable": true}, "correlationIdentityFields": []string{"event.id"}}), &manifest); err != nil {
-		t.Fatal(err)
-	}
-	hooks, err := client.New(registration.New(backends...), client.Options{Source: "urn:test:completion", Manifest: manifest, EventClient: endpoint.Client(), UploadClient: endpoint.Client(), Content: client.ContentOptions{AllowLoopbackHTTP: true, AuthorizeContent: func(context.Context, client.ContentAuthorization) (bool, error) { return true, nil }, Resolver: func(_ context.Context, ref string) (io.ReadCloser, error) {
-		if ref != hostRef {
-			return nil, fmt.Errorf("SDK leaked a staged reference to host resolver")
-		}
-		return io.NopCloser(bytes.NewReader(original)), nil
-	}}})
+	hooks, err := client.New(registration.New(backends...), client.Options{Source: "urn:test:completion",
+		Events: capability.Host{ContextCompactBefore: capability.ContextCompactBefore{ModifyInstructions: capability.Replace()}},
+		// Advertise the inline text category and the bounded attachment upload size.
+		Metadata: &client.ManifestMetadata{
+			ContentCategories: ahp.Some([]string{"text"}),
+			Limits:            ahp.Some(ahp.StaticCapabilityManifestLimits{MaxUploadBytes: ahp.Some(json.Number("4096"))}),
+		},
+		EventClient: endpoint.Client(), UploadClient: endpoint.Client(), Content: client.ContentOptions{AllowLoopbackHTTP: true, AuthorizeContent: func(context.Context, client.ContentAuthorization) (bool, error) { return true, nil }, Resolver: func(_ context.Context, ref string) (io.ReadCloser, error) {
+			if ref != hostRef {
+				return nil, fmt.Errorf("SDK leaked a staged reference to host resolver")
+			}
+			return io.NopCloser(bytes.NewReader(original)), nil
+		}}})
 	if err != nil {
 		t.Fatal(err)
 	}

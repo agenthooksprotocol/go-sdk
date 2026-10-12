@@ -120,6 +120,8 @@ func TestContentObservationDeadlineReleasesReaderAndCapacity(t *testing.T) {
 	reader, writer := cancellationPipe(t)
 	cancellationContent(c, reader)
 	c.backends[0].subscriptions[0]["mode"] = "observe"
+	delete(c.backends[0].subscriptions[0], "failurePolicy")
+	delete(c.backends[0].subscriptions[0], "timeoutMs")
 	c.opts.ObservationTimeout = 50 * time.Millisecond
 	result, err := c.intercept(context.Background(), "tool.before", cancellationInput())
 	if err != nil {
