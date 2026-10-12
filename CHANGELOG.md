@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.5.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.4.1...v0.5.0) (2026-10-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* replace draft compatibility surfaces with typed event APIs
+
+### Features
+
+* replace draft compatibility surfaces with typed event APIs ([6ab7699](https://github.com/agenthooksprotocol/go-sdk/commit/6ab7699007726d14bbfa9abd2675acbc8b0cbe3b))
+
+
+### Bug Fixes
+
+* sync merged canonical provenance and pre-major release policy ([f47a035](https://github.com/agenthooksprotocol/go-sdk/commit/f47a03516ed535de28441b84ae7f069864864166))
+
 ## [0.4.1](https://github.com/agenthooksprotocol/go-sdk/compare/v0.4.0...v0.4.1) (2026-10-11)
 
 
