@@ -82,11 +82,11 @@ func fixtureHost(events []any) (capability.Host, error) {
 				return host, fmt.Errorf("fixture event %s is observation-only", name)
 			}
 			if observe {
-				host.ConfigChangeAfter = capability.Observe{}
+				host.ConfigChangeAfter = capability.ConfigChangeAfter{Observe: true}
 			}
 		case "config.change.before":
 			if !intercept {
-				host.ConfigChangeBefore = capability.Observe{}
+				host.ConfigChangeBefore = capability.ConfigChangeBefore{Observe: true}
 				break
 			}
 			host.ConfigChangeBefore = capability.ConfigChangeBefore{
@@ -98,7 +98,7 @@ func fixtureHost(events []any) (capability.Host, error) {
 			}
 		case "context.compact.after":
 			if !intercept {
-				host.ContextCompactAfter = capability.Observe{}
+				host.ContextCompactAfter = capability.ContextCompactAfter{Observe: true}
 				break
 			}
 			host.ContextCompactAfter = capability.ContextCompactAfter{
@@ -111,7 +111,7 @@ func fixtureHost(events []any) (capability.Host, error) {
 			}
 		case "context.compact.before":
 			if !intercept {
-				host.ContextCompactBefore = capability.Observe{}
+				host.ContextCompactBefore = capability.ContextCompactBefore{Observe: true}
 				break
 			}
 			host.ContextCompactBefore = capability.ContextCompactBefore{
@@ -129,25 +129,25 @@ func fixtureHost(events []any) (capability.Host, error) {
 				return host, fmt.Errorf("fixture event %s is observation-only", name)
 			}
 			if observe {
-				host.FileChanged = capability.Observe{}
+				host.FileChanged = capability.FileChanged{Observe: true}
 			}
 		case "hook.failure":
 			if intercept {
 				return host, fmt.Errorf("fixture event %s is observation-only", name)
 			}
 			if observe {
-				host.HookFailure = capability.Observe{}
+				host.HookFailure = capability.HookFailure{Observe: true}
 			}
 		case "model.error":
 			if intercept {
 				return host, fmt.Errorf("fixture event %s is observation-only", name)
 			}
 			if observe {
-				host.ModelError = capability.Observe{}
+				host.ModelError = capability.ModelError{Observe: true}
 			}
 		case "model.request.before":
 			if !intercept {
-				host.ModelRequestBefore = capability.Observe{}
+				host.ModelRequestBefore = capability.ModelRequestBefore{Observe: true}
 				break
 			}
 			host.ModelRequestBefore = capability.ModelRequestBefore{
@@ -163,7 +163,7 @@ func fixtureHost(events []any) (capability.Host, error) {
 			}
 		case "model.response.after":
 			if !intercept {
-				host.ModelResponseAfter = capability.Observe{}
+				host.ModelResponseAfter = capability.ModelResponseAfter{Observe: true}
 				break
 			}
 			host.ModelResponseAfter = capability.ModelResponseAfter{
@@ -179,11 +179,11 @@ func fixtureHost(events []any) (capability.Host, error) {
 				return host, fmt.Errorf("fixture event %s is observation-only", name)
 			}
 			if observe {
-				host.ModelSwitchAfter = capability.Observe{}
+				host.ModelSwitchAfter = capability.ModelSwitchAfter{Observe: true}
 			}
 		case "model.switch.before":
 			if !intercept {
-				host.ModelSwitchBefore = capability.Observe{}
+				host.ModelSwitchBefore = capability.ModelSwitchBefore{Observe: true}
 				break
 			}
 			host.ModelSwitchBefore = capability.ModelSwitchBefore{
@@ -199,11 +199,11 @@ func fixtureHost(events []any) (capability.Host, error) {
 				return host, fmt.Errorf("fixture event %s is observation-only", name)
 			}
 			if observe {
-				host.SessionEnd = capability.Observe{}
+				host.SessionEnd = capability.SessionEnd{Observe: true}
 			}
 		case "session.start":
 			if !intercept {
-				host.SessionStart = capability.Observe{}
+				host.SessionStart = capability.SessionStart{Observe: true}
 				break
 			}
 			host.SessionStart = capability.SessionStart{
@@ -218,11 +218,11 @@ func fixtureHost(events []any) (capability.Host, error) {
 				return host, fmt.Errorf("fixture event %s is observation-only", name)
 			}
 			if observe {
-				host.TaskChangeAfter = capability.Observe{}
+				host.TaskChangeAfter = capability.TaskChangeAfter{Observe: true}
 			}
 		case "task.change.before":
 			if !intercept {
-				host.TaskChangeBefore = capability.Observe{}
+				host.TaskChangeBefore = capability.TaskChangeBefore{Observe: true}
 				break
 			}
 			host.TaskChangeBefore = capability.TaskChangeBefore{
@@ -234,7 +234,7 @@ func fixtureHost(events []any) (capability.Host, error) {
 			}
 		case "tool.after":
 			if !intercept {
-				host.ToolAfter = capability.Observe{}
+				host.ToolAfter = capability.ToolAfter{Observe: true}
 				break
 			}
 			host.ToolAfter = capability.ToolAfter{
@@ -248,7 +248,7 @@ func fixtureHost(events []any) (capability.Host, error) {
 			}
 		case "tool.batch.after":
 			if !intercept {
-				host.ToolBatchAfter = capability.Observe{}
+				host.ToolBatchAfter = capability.ToolBatchAfter{Observe: true}
 				break
 			}
 			host.ToolBatchAfter = capability.ToolBatchAfter{
@@ -261,7 +261,7 @@ func fixtureHost(events []any) (capability.Host, error) {
 			}
 		case "tool.before":
 			if !intercept {
-				host.ToolBefore = capability.Observe{}
+				host.ToolBefore = capability.ToolBefore{Observe: true}
 				break
 			}
 			host.ToolBefore = capability.ToolBefore{
@@ -279,7 +279,7 @@ func fixtureHost(events []any) (capability.Host, error) {
 			}
 		case "tool.permission.request":
 			if !intercept {
-				host.ToolPermissionRequest = capability.Observe{}
+				host.ToolPermissionRequest = capability.ToolPermissionRequest{Observe: true}
 				break
 			}
 			host.ToolPermissionRequest = capability.ToolPermissionRequest{
@@ -297,25 +297,25 @@ func fixtureHost(events []any) (capability.Host, error) {
 				return host, fmt.Errorf("fixture event %s is observation-only", name)
 			}
 			if observe {
-				host.ToolPermissionResolved = capability.Observe{}
+				host.ToolPermissionResolved = capability.ToolPermissionResolved{Observe: true}
 			}
 		case "tool.progress":
 			if intercept {
 				return host, fmt.Errorf("fixture event %s is observation-only", name)
 			}
 			if observe {
-				host.ToolProgress = capability.Observe{}
+				host.ToolProgress = capability.ToolProgress{Observe: true}
 			}
 		case "turn.end":
 			if intercept {
 				return host, fmt.Errorf("fixture event %s is observation-only", name)
 			}
 			if observe {
-				host.TurnEnd = capability.Observe{}
+				host.TurnEnd = capability.TurnEnd{Observe: true}
 			}
 		case "turn.finish.before":
 			if !intercept {
-				host.TurnFinishBefore = capability.Observe{}
+				host.TurnFinishBefore = capability.TurnFinishBefore{Observe: true}
 				break
 			}
 			host.TurnFinishBefore = capability.TurnFinishBefore{
@@ -331,11 +331,11 @@ func fixtureHost(events []any) (capability.Host, error) {
 				return host, fmt.Errorf("fixture event %s is observation-only", name)
 			}
 			if observe {
-				host.TurnProgress = capability.Observe{}
+				host.TurnProgress = capability.TurnProgress{Observe: true}
 			}
 		case "turn.start":
 			if !intercept {
-				host.TurnStart = capability.Observe{}
+				host.TurnStart = capability.TurnStart{Observe: true}
 				break
 			}
 			host.TurnStart = capability.TurnStart{
@@ -353,11 +353,11 @@ func fixtureHost(events []any) (capability.Host, error) {
 				return host, fmt.Errorf("fixture event %s is observation-only", name)
 			}
 			if observe {
-				host.UserAttention = capability.Observe{}
+				host.UserAttention = capability.UserAttention{Observe: true}
 			}
 		case "user.elicitation.request":
 			if !intercept {
-				host.UserElicitationRequest = capability.Observe{}
+				host.UserElicitationRequest = capability.UserElicitationRequest{Observe: true}
 				break
 			}
 			host.UserElicitationRequest = capability.UserElicitationRequest{
@@ -370,7 +370,7 @@ func fixtureHost(events []any) (capability.Host, error) {
 			}
 		case "user.elicitation.result":
 			if !intercept {
-				host.UserElicitationResult = capability.Observe{}
+				host.UserElicitationResult = capability.UserElicitationResult{Observe: true}
 				break
 			}
 			host.UserElicitationResult = capability.UserElicitationResult{
@@ -382,7 +382,7 @@ func fixtureHost(events []any) (capability.Host, error) {
 			}
 		case "user.message.inbound":
 			if !intercept {
-				host.UserMessageInbound = capability.Observe{}
+				host.UserMessageInbound = capability.UserMessageInbound{Observe: true}
 				break
 			}
 			host.UserMessageInbound = capability.UserMessageInbound{
@@ -395,7 +395,7 @@ func fixtureHost(events []any) (capability.Host, error) {
 			}
 		case "user.message.outbound":
 			if !intercept {
-				host.UserMessageOutbound = capability.Observe{}
+				host.UserMessageOutbound = capability.UserMessageOutbound{Observe: true}
 				break
 			}
 			host.UserMessageOutbound = capability.UserMessageOutbound{
@@ -411,11 +411,11 @@ func fixtureHost(events []any) (capability.Host, error) {
 				return host, fmt.Errorf("fixture event %s is observation-only", name)
 			}
 			if observe {
-				host.WorkspaceChangeAfter = capability.Observe{}
+				host.WorkspaceChangeAfter = capability.WorkspaceChangeAfter{Observe: true}
 			}
 		case "workspace.change.before":
 			if !intercept {
-				host.WorkspaceChangeBefore = capability.Observe{}
+				host.WorkspaceChangeBefore = capability.WorkspaceChangeBefore{Observe: true}
 				break
 			}
 			host.WorkspaceChangeBefore = capability.WorkspaceChangeBefore{

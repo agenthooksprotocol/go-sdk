@@ -17,7 +17,7 @@ import (
 // supplies its source/manifest and owns actual backend execution. This checks the
 // complete public expression and generic inference without network or subprocesses.
 func compileGeneratedFacadeExample(ctx context.Context, opts Options) {
-	opts.Events = capability.Host{SessionStart: capability.Observe{}, ToolBefore: capability.ToolBefore{
+	opts.Events = capability.Host{SessionStart: capability.SessionStart{Observe: true}, ToolBefore: capability.ToolBefore{
 		Allow: true, Deny: true, ReturnResult: true, ModifyInput: capability.ReplaceAndMerge(), Observe: true,
 	}}
 	c, err := New(registration.New(registration.NewBackend("dev.example.guard",

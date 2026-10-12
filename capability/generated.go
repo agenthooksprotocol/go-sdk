@@ -3,21 +3,6 @@ package capability
 
 import "github.com/agenthooksprotocol/go-sdk/event"
 
-// Observation is closed: only Observe explicitly grants observation.
-type Observation interface{ observation() }
-type Observe struct{}
-
-func (Observe) observation() {}
-func observes(v Observation) bool {
-	switch observation := v.(type) {
-	case Observe:
-		return true
-	case *Observe:
-		return observation != nil
-	}
-	return false
-}
-
 // Modify has no public representation; its zero value grants nothing.
 type Modify struct{ replace, merge bool }
 
@@ -184,44 +169,44 @@ func InjectNow() Injection                  { return Injection{}.with("now") }
 func (v Injection) WithNow() Injection      { return v.with("now") }
 
 type Host struct {
-	ConfigChangeAfter      Observation
+	ConfigChangeAfter      ConfigChangeAfterDeclaration
 	ConfigChangeBefore     ConfigChangeBeforeDeclaration
 	ContextCompactAfter    ContextCompactAfterDeclaration
 	ContextCompactBefore   ContextCompactBeforeDeclaration
-	FileChanged            Observation
-	HookFailure            Observation
-	ModelError             Observation
+	FileChanged            FileChangedDeclaration
+	HookFailure            HookFailureDeclaration
+	ModelError             ModelErrorDeclaration
 	ModelRequestBefore     ModelRequestBeforeDeclaration
 	ModelResponseAfter     ModelResponseAfterDeclaration
-	ModelSwitchAfter       Observation
+	ModelSwitchAfter       ModelSwitchAfterDeclaration
 	ModelSwitchBefore      ModelSwitchBeforeDeclaration
-	SessionEnd             Observation
+	SessionEnd             SessionEndDeclaration
 	SessionStart           SessionStartDeclaration
-	TaskChangeAfter        Observation
+	TaskChangeAfter        TaskChangeAfterDeclaration
 	TaskChangeBefore       TaskChangeBeforeDeclaration
 	ToolAfter              ToolAfterDeclaration
 	ToolBatchAfter         ToolBatchAfterDeclaration
 	ToolBefore             ToolBeforeDeclaration
 	ToolPermissionRequest  ToolPermissionRequestDeclaration
-	ToolPermissionResolved Observation
-	ToolProgress           Observation
-	TurnEnd                Observation
+	ToolPermissionResolved ToolPermissionResolvedDeclaration
+	ToolProgress           ToolProgressDeclaration
+	TurnEnd                TurnEndDeclaration
 	TurnFinishBefore       TurnFinishBeforeDeclaration
-	TurnProgress           Observation
+	TurnProgress           TurnProgressDeclaration
 	TurnStart              TurnStartDeclaration
-	UserAttention          Observation
+	UserAttention          UserAttentionDeclaration
 	UserElicitationRequest UserElicitationRequestDeclaration
 	UserElicitationResult  UserElicitationResultDeclaration
 	UserMessageInbound     UserMessageInboundDeclaration
 	UserMessageOutbound    UserMessageOutboundDeclaration
-	WorkspaceChangeAfter   Observation
+	WorkspaceChangeAfter   WorkspaceChangeAfterDeclaration
 	WorkspaceChangeBefore  WorkspaceChangeBeforeDeclaration
 }
 
 func (v Host) Wire() map[event.Type]WireDeclaration {
 	out := map[event.Type]WireDeclaration{}
-	if observes(v.ConfigChangeAfter) {
-		out[event.ConfigChangeAfter] = WireDeclaration{Modes: []string{"observe"}}
+	if declaration, ok := wireConfigChangeAfter(v.ConfigChangeAfter); ok {
+		out[event.ConfigChangeAfter] = declaration
 	}
 	if declaration, ok := wireConfigChangeBefore(v.ConfigChangeBefore); ok {
 		out[event.ConfigChangeBefore] = declaration
@@ -232,14 +217,14 @@ func (v Host) Wire() map[event.Type]WireDeclaration {
 	if declaration, ok := wireContextCompactBefore(v.ContextCompactBefore); ok {
 		out[event.ContextCompactBefore] = declaration
 	}
-	if observes(v.FileChanged) {
-		out[event.FileChanged] = WireDeclaration{Modes: []string{"observe"}}
+	if declaration, ok := wireFileChanged(v.FileChanged); ok {
+		out[event.FileChanged] = declaration
 	}
-	if observes(v.HookFailure) {
-		out[event.HookFailure] = WireDeclaration{Modes: []string{"observe"}}
+	if declaration, ok := wireHookFailure(v.HookFailure); ok {
+		out[event.HookFailure] = declaration
 	}
-	if observes(v.ModelError) {
-		out[event.ModelError] = WireDeclaration{Modes: []string{"observe"}}
+	if declaration, ok := wireModelError(v.ModelError); ok {
+		out[event.ModelError] = declaration
 	}
 	if declaration, ok := wireModelRequestBefore(v.ModelRequestBefore); ok {
 		out[event.ModelRequestBefore] = declaration
@@ -247,20 +232,20 @@ func (v Host) Wire() map[event.Type]WireDeclaration {
 	if declaration, ok := wireModelResponseAfter(v.ModelResponseAfter); ok {
 		out[event.ModelResponseAfter] = declaration
 	}
-	if observes(v.ModelSwitchAfter) {
-		out[event.ModelSwitchAfter] = WireDeclaration{Modes: []string{"observe"}}
+	if declaration, ok := wireModelSwitchAfter(v.ModelSwitchAfter); ok {
+		out[event.ModelSwitchAfter] = declaration
 	}
 	if declaration, ok := wireModelSwitchBefore(v.ModelSwitchBefore); ok {
 		out[event.ModelSwitchBefore] = declaration
 	}
-	if observes(v.SessionEnd) {
-		out[event.SessionEnd] = WireDeclaration{Modes: []string{"observe"}}
+	if declaration, ok := wireSessionEnd(v.SessionEnd); ok {
+		out[event.SessionEnd] = declaration
 	}
 	if declaration, ok := wireSessionStart(v.SessionStart); ok {
 		out[event.SessionStart] = declaration
 	}
-	if observes(v.TaskChangeAfter) {
-		out[event.TaskChangeAfter] = WireDeclaration{Modes: []string{"observe"}}
+	if declaration, ok := wireTaskChangeAfter(v.TaskChangeAfter); ok {
+		out[event.TaskChangeAfter] = declaration
 	}
 	if declaration, ok := wireTaskChangeBefore(v.TaskChangeBefore); ok {
 		out[event.TaskChangeBefore] = declaration
@@ -277,26 +262,26 @@ func (v Host) Wire() map[event.Type]WireDeclaration {
 	if declaration, ok := wireToolPermissionRequest(v.ToolPermissionRequest); ok {
 		out[event.ToolPermissionRequest] = declaration
 	}
-	if observes(v.ToolPermissionResolved) {
-		out[event.ToolPermissionResolved] = WireDeclaration{Modes: []string{"observe"}}
+	if declaration, ok := wireToolPermissionResolved(v.ToolPermissionResolved); ok {
+		out[event.ToolPermissionResolved] = declaration
 	}
-	if observes(v.ToolProgress) {
-		out[event.ToolProgress] = WireDeclaration{Modes: []string{"observe"}}
+	if declaration, ok := wireToolProgress(v.ToolProgress); ok {
+		out[event.ToolProgress] = declaration
 	}
-	if observes(v.TurnEnd) {
-		out[event.TurnEnd] = WireDeclaration{Modes: []string{"observe"}}
+	if declaration, ok := wireTurnEnd(v.TurnEnd); ok {
+		out[event.TurnEnd] = declaration
 	}
 	if declaration, ok := wireTurnFinishBefore(v.TurnFinishBefore); ok {
 		out[event.TurnFinishBefore] = declaration
 	}
-	if observes(v.TurnProgress) {
-		out[event.TurnProgress] = WireDeclaration{Modes: []string{"observe"}}
+	if declaration, ok := wireTurnProgress(v.TurnProgress); ok {
+		out[event.TurnProgress] = declaration
 	}
 	if declaration, ok := wireTurnStart(v.TurnStart); ok {
 		out[event.TurnStart] = declaration
 	}
-	if observes(v.UserAttention) {
-		out[event.UserAttention] = WireDeclaration{Modes: []string{"observe"}}
+	if declaration, ok := wireUserAttention(v.UserAttention); ok {
+		out[event.UserAttention] = declaration
 	}
 	if declaration, ok := wireUserElicitationRequest(v.UserElicitationRequest); ok {
 		out[event.UserElicitationRequest] = declaration
@@ -310,8 +295,8 @@ func (v Host) Wire() map[event.Type]WireDeclaration {
 	if declaration, ok := wireUserMessageOutbound(v.UserMessageOutbound); ok {
 		out[event.UserMessageOutbound] = declaration
 	}
-	if observes(v.WorkspaceChangeAfter) {
-		out[event.WorkspaceChangeAfter] = WireDeclaration{Modes: []string{"observe"}}
+	if declaration, ok := wireWorkspaceChangeAfter(v.WorkspaceChangeAfter); ok {
+		out[event.WorkspaceChangeAfter] = declaration
 	}
 	if declaration, ok := wireWorkspaceChangeBefore(v.WorkspaceChangeBefore); ok {
 		out[event.WorkspaceChangeBefore] = declaration
@@ -319,10 +304,35 @@ func (v Host) Wire() map[event.Type]WireDeclaration {
 	return out
 }
 
+type ConfigChangeAfterDeclaration interface{ isConfigChangeAfterDeclaration() }
+
+func (ConfigChangeAfter) isConfigChangeAfterDeclaration() {}
+func wireConfigChangeAfter(value ConfigChangeAfterDeclaration) (WireDeclaration, bool) {
+	switch v := value.(type) {
+	case ConfigChangeAfter:
+		return v.wire()
+	case *ConfigChangeAfter:
+		if v != nil {
+			return v.wire()
+		}
+	}
+	return WireDeclaration{}, false
+}
+
+type ConfigChangeAfter struct {
+	Observe bool
+}
+
+func (v ConfigChangeAfter) wire() (WireDeclaration, bool) {
+	if !v.Observe {
+		return WireDeclaration{}, false
+	}
+	return WireDeclaration{Modes: []string{"observe"}}, true
+}
+
 type ConfigChangeBeforeDeclaration interface{ isConfigChangeBeforeDeclaration() }
 
 func (ConfigChangeBefore) isConfigChangeBeforeDeclaration() {}
-func (Observe) isConfigChangeBeforeDeclaration()            {}
 func wireConfigChangeBefore(value ConfigChangeBeforeDeclaration) (WireDeclaration, bool) {
 	switch v := value.(type) {
 	case ConfigChangeBefore:
@@ -330,12 +340,6 @@ func wireConfigChangeBefore(value ConfigChangeBeforeDeclaration) (WireDeclaratio
 	case *ConfigChangeBefore:
 		if v != nil {
 			return v.wire()
-		}
-	case Observe:
-		return WireDeclaration{Modes: []string{"observe"}}, true
-	case *Observe:
-		if v != nil {
-			return WireDeclaration{Modes: []string{"observe"}}, true
 		}
 	}
 	return WireDeclaration{}, false
@@ -383,7 +387,6 @@ func (v ConfigChangeBefore) wire() (WireDeclaration, bool) {
 type ContextCompactAfterDeclaration interface{ isContextCompactAfterDeclaration() }
 
 func (ContextCompactAfter) isContextCompactAfterDeclaration() {}
-func (Observe) isContextCompactAfterDeclaration()             {}
 func wireContextCompactAfter(value ContextCompactAfterDeclaration) (WireDeclaration, bool) {
 	switch v := value.(type) {
 	case ContextCompactAfter:
@@ -391,12 +394,6 @@ func wireContextCompactAfter(value ContextCompactAfterDeclaration) (WireDeclarat
 	case *ContextCompactAfter:
 		if v != nil {
 			return v.wire()
-		}
-	case Observe:
-		return WireDeclaration{Modes: []string{"observe"}}, true
-	case *Observe:
-		if v != nil {
-			return WireDeclaration{Modes: []string{"observe"}}, true
 		}
 	}
 	return WireDeclaration{}, false
@@ -453,7 +450,6 @@ func (v ContextCompactAfter) wire() (WireDeclaration, bool) {
 type ContextCompactBeforeDeclaration interface{ isContextCompactBeforeDeclaration() }
 
 func (ContextCompactBefore) isContextCompactBeforeDeclaration() {}
-func (Observe) isContextCompactBeforeDeclaration()              {}
 func wireContextCompactBefore(value ContextCompactBeforeDeclaration) (WireDeclaration, bool) {
 	switch v := value.(type) {
 	case ContextCompactBefore:
@@ -461,12 +457,6 @@ func wireContextCompactBefore(value ContextCompactBeforeDeclaration) (WireDeclar
 	case *ContextCompactBefore:
 		if v != nil {
 			return v.wire()
-		}
-	case Observe:
-		return WireDeclaration{Modes: []string{"observe"}}, true
-	case *Observe:
-		if v != nil {
-			return WireDeclaration{Modes: []string{"observe"}}, true
 		}
 	}
 	return WireDeclaration{}, false
@@ -528,10 +518,87 @@ func (v ContextCompactBefore) wire() (WireDeclaration, bool) {
 	return declaration, len(declaration.Modes) > 0
 }
 
+type FileChangedDeclaration interface{ isFileChangedDeclaration() }
+
+func (FileChanged) isFileChangedDeclaration() {}
+func wireFileChanged(value FileChangedDeclaration) (WireDeclaration, bool) {
+	switch v := value.(type) {
+	case FileChanged:
+		return v.wire()
+	case *FileChanged:
+		if v != nil {
+			return v.wire()
+		}
+	}
+	return WireDeclaration{}, false
+}
+
+type FileChanged struct {
+	Observe bool
+}
+
+func (v FileChanged) wire() (WireDeclaration, bool) {
+	if !v.Observe {
+		return WireDeclaration{}, false
+	}
+	return WireDeclaration{Modes: []string{"observe"}}, true
+}
+
+type HookFailureDeclaration interface{ isHookFailureDeclaration() }
+
+func (HookFailure) isHookFailureDeclaration() {}
+func wireHookFailure(value HookFailureDeclaration) (WireDeclaration, bool) {
+	switch v := value.(type) {
+	case HookFailure:
+		return v.wire()
+	case *HookFailure:
+		if v != nil {
+			return v.wire()
+		}
+	}
+	return WireDeclaration{}, false
+}
+
+type HookFailure struct {
+	Observe bool
+}
+
+func (v HookFailure) wire() (WireDeclaration, bool) {
+	if !v.Observe {
+		return WireDeclaration{}, false
+	}
+	return WireDeclaration{Modes: []string{"observe"}}, true
+}
+
+type ModelErrorDeclaration interface{ isModelErrorDeclaration() }
+
+func (ModelError) isModelErrorDeclaration() {}
+func wireModelError(value ModelErrorDeclaration) (WireDeclaration, bool) {
+	switch v := value.(type) {
+	case ModelError:
+		return v.wire()
+	case *ModelError:
+		if v != nil {
+			return v.wire()
+		}
+	}
+	return WireDeclaration{}, false
+}
+
+type ModelError struct {
+	Observe bool
+}
+
+func (v ModelError) wire() (WireDeclaration, bool) {
+	if !v.Observe {
+		return WireDeclaration{}, false
+	}
+	return WireDeclaration{Modes: []string{"observe"}}, true
+}
+
 type ModelRequestBeforeDeclaration interface{ isModelRequestBeforeDeclaration() }
 
 func (ModelRequestBefore) isModelRequestBeforeDeclaration() {}
-func (Observe) isModelRequestBeforeDeclaration()            {}
 func wireModelRequestBefore(value ModelRequestBeforeDeclaration) (WireDeclaration, bool) {
 	switch v := value.(type) {
 	case ModelRequestBefore:
@@ -539,12 +606,6 @@ func wireModelRequestBefore(value ModelRequestBeforeDeclaration) (WireDeclaratio
 	case *ModelRequestBefore:
 		if v != nil {
 			return v.wire()
-		}
-	case Observe:
-		return WireDeclaration{Modes: []string{"observe"}}, true
-	case *Observe:
-		if v != nil {
-			return WireDeclaration{Modes: []string{"observe"}}, true
 		}
 	}
 	return WireDeclaration{}, false
@@ -614,7 +675,6 @@ func (v ModelRequestBefore) wire() (WireDeclaration, bool) {
 type ModelResponseAfterDeclaration interface{ isModelResponseAfterDeclaration() }
 
 func (ModelResponseAfter) isModelResponseAfterDeclaration() {}
-func (Observe) isModelResponseAfterDeclaration()            {}
 func wireModelResponseAfter(value ModelResponseAfterDeclaration) (WireDeclaration, bool) {
 	switch v := value.(type) {
 	case ModelResponseAfter:
@@ -622,12 +682,6 @@ func wireModelResponseAfter(value ModelResponseAfterDeclaration) (WireDeclaratio
 	case *ModelResponseAfter:
 		if v != nil {
 			return v.wire()
-		}
-	case Observe:
-		return WireDeclaration{Modes: []string{"observe"}}, true
-	case *Observe:
-		if v != nil {
-			return WireDeclaration{Modes: []string{"observe"}}, true
 		}
 	}
 	return WireDeclaration{}, false
@@ -681,10 +735,35 @@ func (v ModelResponseAfter) wire() (WireDeclaration, bool) {
 	return declaration, len(declaration.Modes) > 0
 }
 
+type ModelSwitchAfterDeclaration interface{ isModelSwitchAfterDeclaration() }
+
+func (ModelSwitchAfter) isModelSwitchAfterDeclaration() {}
+func wireModelSwitchAfter(value ModelSwitchAfterDeclaration) (WireDeclaration, bool) {
+	switch v := value.(type) {
+	case ModelSwitchAfter:
+		return v.wire()
+	case *ModelSwitchAfter:
+		if v != nil {
+			return v.wire()
+		}
+	}
+	return WireDeclaration{}, false
+}
+
+type ModelSwitchAfter struct {
+	Observe bool
+}
+
+func (v ModelSwitchAfter) wire() (WireDeclaration, bool) {
+	if !v.Observe {
+		return WireDeclaration{}, false
+	}
+	return WireDeclaration{Modes: []string{"observe"}}, true
+}
+
 type ModelSwitchBeforeDeclaration interface{ isModelSwitchBeforeDeclaration() }
 
 func (ModelSwitchBefore) isModelSwitchBeforeDeclaration() {}
-func (Observe) isModelSwitchBeforeDeclaration()           {}
 func wireModelSwitchBefore(value ModelSwitchBeforeDeclaration) (WireDeclaration, bool) {
 	switch v := value.(type) {
 	case ModelSwitchBefore:
@@ -692,12 +771,6 @@ func wireModelSwitchBefore(value ModelSwitchBeforeDeclaration) (WireDeclaration,
 	case *ModelSwitchBefore:
 		if v != nil {
 			return v.wire()
-		}
-	case Observe:
-		return WireDeclaration{Modes: []string{"observe"}}, true
-	case *Observe:
-		if v != nil {
-			return WireDeclaration{Modes: []string{"observe"}}, true
 		}
 	}
 	return WireDeclaration{}, false
@@ -747,10 +820,35 @@ func (v ModelSwitchBefore) wire() (WireDeclaration, bool) {
 	return declaration, len(declaration.Modes) > 0
 }
 
+type SessionEndDeclaration interface{ isSessionEndDeclaration() }
+
+func (SessionEnd) isSessionEndDeclaration() {}
+func wireSessionEnd(value SessionEndDeclaration) (WireDeclaration, bool) {
+	switch v := value.(type) {
+	case SessionEnd:
+		return v.wire()
+	case *SessionEnd:
+		if v != nil {
+			return v.wire()
+		}
+	}
+	return WireDeclaration{}, false
+}
+
+type SessionEnd struct {
+	Observe bool
+}
+
+func (v SessionEnd) wire() (WireDeclaration, bool) {
+	if !v.Observe {
+		return WireDeclaration{}, false
+	}
+	return WireDeclaration{Modes: []string{"observe"}}, true
+}
+
 type SessionStartDeclaration interface{ isSessionStartDeclaration() }
 
 func (SessionStart) isSessionStartDeclaration() {}
-func (Observe) isSessionStartDeclaration()      {}
 func wireSessionStart(value SessionStartDeclaration) (WireDeclaration, bool) {
 	switch v := value.(type) {
 	case SessionStart:
@@ -758,12 +856,6 @@ func wireSessionStart(value SessionStartDeclaration) (WireDeclaration, bool) {
 	case *SessionStart:
 		if v != nil {
 			return v.wire()
-		}
-	case Observe:
-		return WireDeclaration{Modes: []string{"observe"}}, true
-	case *Observe:
-		if v != nil {
-			return WireDeclaration{Modes: []string{"observe"}}, true
 		}
 	}
 	return WireDeclaration{}, false
@@ -809,10 +901,35 @@ func (v SessionStart) wire() (WireDeclaration, bool) {
 	return declaration, len(declaration.Modes) > 0
 }
 
+type TaskChangeAfterDeclaration interface{ isTaskChangeAfterDeclaration() }
+
+func (TaskChangeAfter) isTaskChangeAfterDeclaration() {}
+func wireTaskChangeAfter(value TaskChangeAfterDeclaration) (WireDeclaration, bool) {
+	switch v := value.(type) {
+	case TaskChangeAfter:
+		return v.wire()
+	case *TaskChangeAfter:
+		if v != nil {
+			return v.wire()
+		}
+	}
+	return WireDeclaration{}, false
+}
+
+type TaskChangeAfter struct {
+	Observe bool
+}
+
+func (v TaskChangeAfter) wire() (WireDeclaration, bool) {
+	if !v.Observe {
+		return WireDeclaration{}, false
+	}
+	return WireDeclaration{Modes: []string{"observe"}}, true
+}
+
 type TaskChangeBeforeDeclaration interface{ isTaskChangeBeforeDeclaration() }
 
 func (TaskChangeBefore) isTaskChangeBeforeDeclaration() {}
-func (Observe) isTaskChangeBeforeDeclaration()          {}
 func wireTaskChangeBefore(value TaskChangeBeforeDeclaration) (WireDeclaration, bool) {
 	switch v := value.(type) {
 	case TaskChangeBefore:
@@ -820,12 +937,6 @@ func wireTaskChangeBefore(value TaskChangeBeforeDeclaration) (WireDeclaration, b
 	case *TaskChangeBefore:
 		if v != nil {
 			return v.wire()
-		}
-	case Observe:
-		return WireDeclaration{Modes: []string{"observe"}}, true
-	case *Observe:
-		if v != nil {
-			return WireDeclaration{Modes: []string{"observe"}}, true
 		}
 	}
 	return WireDeclaration{}, false
@@ -873,7 +984,6 @@ func (v TaskChangeBefore) wire() (WireDeclaration, bool) {
 type ToolAfterDeclaration interface{ isToolAfterDeclaration() }
 
 func (ToolAfter) isToolAfterDeclaration() {}
-func (Observe) isToolAfterDeclaration()   {}
 func wireToolAfter(value ToolAfterDeclaration) (WireDeclaration, bool) {
 	switch v := value.(type) {
 	case ToolAfter:
@@ -881,12 +991,6 @@ func wireToolAfter(value ToolAfterDeclaration) (WireDeclaration, bool) {
 	case *ToolAfter:
 		if v != nil {
 			return v.wire()
-		}
-	case Observe:
-		return WireDeclaration{Modes: []string{"observe"}}, true
-	case *Observe:
-		if v != nil {
-			return WireDeclaration{Modes: []string{"observe"}}, true
 		}
 	}
 	return WireDeclaration{}, false
@@ -948,7 +1052,6 @@ func (v ToolAfter) wire() (WireDeclaration, bool) {
 type ToolBatchAfterDeclaration interface{ isToolBatchAfterDeclaration() }
 
 func (ToolBatchAfter) isToolBatchAfterDeclaration() {}
-func (Observe) isToolBatchAfterDeclaration()        {}
 func wireToolBatchAfter(value ToolBatchAfterDeclaration) (WireDeclaration, bool) {
 	switch v := value.(type) {
 	case ToolBatchAfter:
@@ -956,12 +1059,6 @@ func wireToolBatchAfter(value ToolBatchAfterDeclaration) (WireDeclaration, bool)
 	case *ToolBatchAfter:
 		if v != nil {
 			return v.wire()
-		}
-	case Observe:
-		return WireDeclaration{Modes: []string{"observe"}}, true
-	case *Observe:
-		if v != nil {
-			return WireDeclaration{Modes: []string{"observe"}}, true
 		}
 	}
 	return WireDeclaration{}, false
@@ -1015,7 +1112,6 @@ func (v ToolBatchAfter) wire() (WireDeclaration, bool) {
 type ToolBeforeDeclaration interface{ isToolBeforeDeclaration() }
 
 func (ToolBefore) isToolBeforeDeclaration() {}
-func (Observe) isToolBeforeDeclaration()    {}
 func wireToolBefore(value ToolBeforeDeclaration) (WireDeclaration, bool) {
 	switch v := value.(type) {
 	case ToolBefore:
@@ -1023,12 +1119,6 @@ func wireToolBefore(value ToolBeforeDeclaration) (WireDeclaration, bool) {
 	case *ToolBefore:
 		if v != nil {
 			return v.wire()
-		}
-	case Observe:
-		return WireDeclaration{Modes: []string{"observe"}}, true
-	case *Observe:
-		if v != nil {
-			return WireDeclaration{Modes: []string{"observe"}}, true
 		}
 	}
 	return WireDeclaration{}, false
@@ -1106,7 +1196,6 @@ func (v ToolBefore) wire() (WireDeclaration, bool) {
 type ToolPermissionRequestDeclaration interface{ isToolPermissionRequestDeclaration() }
 
 func (ToolPermissionRequest) isToolPermissionRequestDeclaration() {}
-func (Observe) isToolPermissionRequestDeclaration()               {}
 func wireToolPermissionRequest(value ToolPermissionRequestDeclaration) (WireDeclaration, bool) {
 	switch v := value.(type) {
 	case ToolPermissionRequest:
@@ -1114,12 +1203,6 @@ func wireToolPermissionRequest(value ToolPermissionRequestDeclaration) (WireDecl
 	case *ToolPermissionRequest:
 		if v != nil {
 			return v.wire()
-		}
-	case Observe:
-		return WireDeclaration{Modes: []string{"observe"}}, true
-	case *Observe:
-		if v != nil {
-			return WireDeclaration{Modes: []string{"observe"}}, true
 		}
 	}
 	return WireDeclaration{}, false
@@ -1181,10 +1264,87 @@ func (v ToolPermissionRequest) wire() (WireDeclaration, bool) {
 	return declaration, len(declaration.Modes) > 0
 }
 
+type ToolPermissionResolvedDeclaration interface{ isToolPermissionResolvedDeclaration() }
+
+func (ToolPermissionResolved) isToolPermissionResolvedDeclaration() {}
+func wireToolPermissionResolved(value ToolPermissionResolvedDeclaration) (WireDeclaration, bool) {
+	switch v := value.(type) {
+	case ToolPermissionResolved:
+		return v.wire()
+	case *ToolPermissionResolved:
+		if v != nil {
+			return v.wire()
+		}
+	}
+	return WireDeclaration{}, false
+}
+
+type ToolPermissionResolved struct {
+	Observe bool
+}
+
+func (v ToolPermissionResolved) wire() (WireDeclaration, bool) {
+	if !v.Observe {
+		return WireDeclaration{}, false
+	}
+	return WireDeclaration{Modes: []string{"observe"}}, true
+}
+
+type ToolProgressDeclaration interface{ isToolProgressDeclaration() }
+
+func (ToolProgress) isToolProgressDeclaration() {}
+func wireToolProgress(value ToolProgressDeclaration) (WireDeclaration, bool) {
+	switch v := value.(type) {
+	case ToolProgress:
+		return v.wire()
+	case *ToolProgress:
+		if v != nil {
+			return v.wire()
+		}
+	}
+	return WireDeclaration{}, false
+}
+
+type ToolProgress struct {
+	Observe bool
+}
+
+func (v ToolProgress) wire() (WireDeclaration, bool) {
+	if !v.Observe {
+		return WireDeclaration{}, false
+	}
+	return WireDeclaration{Modes: []string{"observe"}}, true
+}
+
+type TurnEndDeclaration interface{ isTurnEndDeclaration() }
+
+func (TurnEnd) isTurnEndDeclaration() {}
+func wireTurnEnd(value TurnEndDeclaration) (WireDeclaration, bool) {
+	switch v := value.(type) {
+	case TurnEnd:
+		return v.wire()
+	case *TurnEnd:
+		if v != nil {
+			return v.wire()
+		}
+	}
+	return WireDeclaration{}, false
+}
+
+type TurnEnd struct {
+	Observe bool
+}
+
+func (v TurnEnd) wire() (WireDeclaration, bool) {
+	if !v.Observe {
+		return WireDeclaration{}, false
+	}
+	return WireDeclaration{Modes: []string{"observe"}}, true
+}
+
 type TurnFinishBeforeDeclaration interface{ isTurnFinishBeforeDeclaration() }
 
 func (TurnFinishBefore) isTurnFinishBeforeDeclaration() {}
-func (Observe) isTurnFinishBeforeDeclaration()          {}
 func wireTurnFinishBefore(value TurnFinishBeforeDeclaration) (WireDeclaration, bool) {
 	switch v := value.(type) {
 	case TurnFinishBefore:
@@ -1192,12 +1352,6 @@ func wireTurnFinishBefore(value TurnFinishBeforeDeclaration) (WireDeclaration, b
 	case *TurnFinishBefore:
 		if v != nil {
 			return v.wire()
-		}
-	case Observe:
-		return WireDeclaration{Modes: []string{"observe"}}, true
-	case *Observe:
-		if v != nil {
-			return WireDeclaration{Modes: []string{"observe"}}, true
 		}
 	}
 	return WireDeclaration{}, false
@@ -1251,10 +1405,35 @@ func (v TurnFinishBefore) wire() (WireDeclaration, bool) {
 	return declaration, len(declaration.Modes) > 0
 }
 
+type TurnProgressDeclaration interface{ isTurnProgressDeclaration() }
+
+func (TurnProgress) isTurnProgressDeclaration() {}
+func wireTurnProgress(value TurnProgressDeclaration) (WireDeclaration, bool) {
+	switch v := value.(type) {
+	case TurnProgress:
+		return v.wire()
+	case *TurnProgress:
+		if v != nil {
+			return v.wire()
+		}
+	}
+	return WireDeclaration{}, false
+}
+
+type TurnProgress struct {
+	Observe bool
+}
+
+func (v TurnProgress) wire() (WireDeclaration, bool) {
+	if !v.Observe {
+		return WireDeclaration{}, false
+	}
+	return WireDeclaration{Modes: []string{"observe"}}, true
+}
+
 type TurnStartDeclaration interface{ isTurnStartDeclaration() }
 
 func (TurnStart) isTurnStartDeclaration() {}
-func (Observe) isTurnStartDeclaration()   {}
 func wireTurnStart(value TurnStartDeclaration) (WireDeclaration, bool) {
 	switch v := value.(type) {
 	case TurnStart:
@@ -1262,12 +1441,6 @@ func wireTurnStart(value TurnStartDeclaration) (WireDeclaration, bool) {
 	case *TurnStart:
 		if v != nil {
 			return v.wire()
-		}
-	case Observe:
-		return WireDeclaration{Modes: []string{"observe"}}, true
-	case *Observe:
-		if v != nil {
-			return WireDeclaration{Modes: []string{"observe"}}, true
 		}
 	}
 	return WireDeclaration{}, false
@@ -1330,10 +1503,35 @@ func (v TurnStart) wire() (WireDeclaration, bool) {
 	return declaration, len(declaration.Modes) > 0
 }
 
+type UserAttentionDeclaration interface{ isUserAttentionDeclaration() }
+
+func (UserAttention) isUserAttentionDeclaration() {}
+func wireUserAttention(value UserAttentionDeclaration) (WireDeclaration, bool) {
+	switch v := value.(type) {
+	case UserAttention:
+		return v.wire()
+	case *UserAttention:
+		if v != nil {
+			return v.wire()
+		}
+	}
+	return WireDeclaration{}, false
+}
+
+type UserAttention struct {
+	Observe bool
+}
+
+func (v UserAttention) wire() (WireDeclaration, bool) {
+	if !v.Observe {
+		return WireDeclaration{}, false
+	}
+	return WireDeclaration{Modes: []string{"observe"}}, true
+}
+
 type UserElicitationRequestDeclaration interface{ isUserElicitationRequestDeclaration() }
 
 func (UserElicitationRequest) isUserElicitationRequestDeclaration() {}
-func (Observe) isUserElicitationRequestDeclaration()                {}
 func wireUserElicitationRequest(value UserElicitationRequestDeclaration) (WireDeclaration, bool) {
 	switch v := value.(type) {
 	case UserElicitationRequest:
@@ -1341,12 +1539,6 @@ func wireUserElicitationRequest(value UserElicitationRequestDeclaration) (WireDe
 	case *UserElicitationRequest:
 		if v != nil {
 			return v.wire()
-		}
-	case Observe:
-		return WireDeclaration{Modes: []string{"observe"}}, true
-	case *Observe:
-		if v != nil {
-			return WireDeclaration{Modes: []string{"observe"}}, true
 		}
 	}
 	return WireDeclaration{}, false
@@ -1398,7 +1590,6 @@ func (v UserElicitationRequest) wire() (WireDeclaration, bool) {
 type UserElicitationResultDeclaration interface{ isUserElicitationResultDeclaration() }
 
 func (UserElicitationResult) isUserElicitationResultDeclaration() {}
-func (Observe) isUserElicitationResultDeclaration()               {}
 func wireUserElicitationResult(value UserElicitationResultDeclaration) (WireDeclaration, bool) {
 	switch v := value.(type) {
 	case UserElicitationResult:
@@ -1406,12 +1597,6 @@ func wireUserElicitationResult(value UserElicitationResultDeclaration) (WireDecl
 	case *UserElicitationResult:
 		if v != nil {
 			return v.wire()
-		}
-	case Observe:
-		return WireDeclaration{Modes: []string{"observe"}}, true
-	case *Observe:
-		if v != nil {
-			return WireDeclaration{Modes: []string{"observe"}}, true
 		}
 	}
 	return WireDeclaration{}, false
@@ -1463,7 +1648,6 @@ func (v UserElicitationResult) wire() (WireDeclaration, bool) {
 type UserMessageInboundDeclaration interface{ isUserMessageInboundDeclaration() }
 
 func (UserMessageInbound) isUserMessageInboundDeclaration() {}
-func (Observe) isUserMessageInboundDeclaration()            {}
 func wireUserMessageInbound(value UserMessageInboundDeclaration) (WireDeclaration, bool) {
 	switch v := value.(type) {
 	case UserMessageInbound:
@@ -1471,12 +1655,6 @@ func wireUserMessageInbound(value UserMessageInboundDeclaration) (WireDeclaratio
 	case *UserMessageInbound:
 		if v != nil {
 			return v.wire()
-		}
-	case Observe:
-		return WireDeclaration{Modes: []string{"observe"}}, true
-	case *Observe:
-		if v != nil {
-			return WireDeclaration{Modes: []string{"observe"}}, true
 		}
 	}
 	return WireDeclaration{}, false
@@ -1532,7 +1710,6 @@ func (v UserMessageInbound) wire() (WireDeclaration, bool) {
 type UserMessageOutboundDeclaration interface{ isUserMessageOutboundDeclaration() }
 
 func (UserMessageOutbound) isUserMessageOutboundDeclaration() {}
-func (Observe) isUserMessageOutboundDeclaration()             {}
 func wireUserMessageOutbound(value UserMessageOutboundDeclaration) (WireDeclaration, bool) {
 	switch v := value.(type) {
 	case UserMessageOutbound:
@@ -1540,12 +1717,6 @@ func wireUserMessageOutbound(value UserMessageOutboundDeclaration) (WireDeclarat
 	case *UserMessageOutbound:
 		if v != nil {
 			return v.wire()
-		}
-	case Observe:
-		return WireDeclaration{Modes: []string{"observe"}}, true
-	case *Observe:
-		if v != nil {
-			return WireDeclaration{Modes: []string{"observe"}}, true
 		}
 	}
 	return WireDeclaration{}, false
@@ -1598,10 +1769,35 @@ func (v UserMessageOutbound) wire() (WireDeclaration, bool) {
 	return declaration, len(declaration.Modes) > 0
 }
 
+type WorkspaceChangeAfterDeclaration interface{ isWorkspaceChangeAfterDeclaration() }
+
+func (WorkspaceChangeAfter) isWorkspaceChangeAfterDeclaration() {}
+func wireWorkspaceChangeAfter(value WorkspaceChangeAfterDeclaration) (WireDeclaration, bool) {
+	switch v := value.(type) {
+	case WorkspaceChangeAfter:
+		return v.wire()
+	case *WorkspaceChangeAfter:
+		if v != nil {
+			return v.wire()
+		}
+	}
+	return WireDeclaration{}, false
+}
+
+type WorkspaceChangeAfter struct {
+	Observe bool
+}
+
+func (v WorkspaceChangeAfter) wire() (WireDeclaration, bool) {
+	if !v.Observe {
+		return WireDeclaration{}, false
+	}
+	return WireDeclaration{Modes: []string{"observe"}}, true
+}
+
 type WorkspaceChangeBeforeDeclaration interface{ isWorkspaceChangeBeforeDeclaration() }
 
 func (WorkspaceChangeBefore) isWorkspaceChangeBeforeDeclaration() {}
-func (Observe) isWorkspaceChangeBeforeDeclaration()               {}
 func wireWorkspaceChangeBefore(value WorkspaceChangeBeforeDeclaration) (WireDeclaration, bool) {
 	switch v := value.(type) {
 	case WorkspaceChangeBefore:
@@ -1609,12 +1805,6 @@ func wireWorkspaceChangeBefore(value WorkspaceChangeBeforeDeclaration) (WireDecl
 	case *WorkspaceChangeBefore:
 		if v != nil {
 			return v.wire()
-		}
-	case Observe:
-		return WireDeclaration{Modes: []string{"observe"}}, true
-	case *Observe:
-		if v != nil {
-			return WireDeclaration{Modes: []string{"observe"}}, true
 		}
 	}
 	return WireDeclaration{}, false

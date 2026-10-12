@@ -150,8 +150,9 @@ The JSON document uses the `ahp.Registration` wire model: backend
 routes, modes, deadlines, failure policies, content selections, and upload
 endpoints are registration data. `capability.Host` grants only the facilities
 explicitly declared for each event. Set an event declaration's `Observe` field
-when both interception and observation are supported; use `capability.Observe{}`
-for observation alone. Set `ElicitationForm: true` on an event that supports
+when both interception and observation are supported. For observation alone,
+set only `Observe: true`, for example `capability.SessionEnd{Observe: true}`;
+every event has its own declaration type. Set `ElicitationForm: true` on an event that supports
 form decisions to advertise that mode.
 `Options.Events` is the authoritative source of event modes and grants.
 `Options.Metadata` accepts metadata-only customization alongside it:
@@ -320,7 +321,7 @@ supply required occurrence and application data.
 
 ```go
 capability.Host{
-    SessionStart: capability.Observe{},
+    SessionStart: capability.SessionStart{Observe: true},
     ToolBefore: capability.ToolBefore{
         Allow: true, Deny: true, ReturnResult: true,
         ModifyInput: capability.ReplaceAndMerge(),
@@ -331,7 +332,7 @@ capability.Host{
 }
 ```
 
-Each field accepts only its matching event declaration or observation support.
+Each field accepts only its matching event declaration.
 Only catalogue-supported facilities are available on each declaration. A nil
 field or a zero event declaration grants nothing and is omitted. Interception
 and observation are independent: a nonzero facility enables interception, while
