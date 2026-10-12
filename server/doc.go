@@ -17,8 +17,10 @@ package server
 // scope; this stateless handler cannot verify bytes it has not been given.
 //
 // Notifications never receive RPC replies. Observation callback errors produce
-// an empty HTTP failure; callback panics and ordinary interception errors expose
-// only fixed, redacted protocol errors. Applications can wrap their callbacks to
+// an empty HTTP failure; a notification for an event without an observer is a
+// silent 204 reported only through Options.Diagnostic. Intercept requests for an
+// event without a handler receive -32002 unsupported_event. Callback panics and
+// ordinary interception errors expose only fixed, redacted protocol errors. Applications can wrap their callbacks to
 // record safe diagnostics; the SDK does not log payloads or error text.
 //
 // ServeStdio is a sequential HTTP-handler adapter, not another protocol engine.

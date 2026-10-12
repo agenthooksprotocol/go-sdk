@@ -17,6 +17,19 @@ import (
 var ErrFrameTooLarge = errors.New("server: frame exceeds limit")
 var ErrStdioResponse = errors.New("server: invalid stdio response")
 
+// ErrNotificationResponse is reported to StdioOptions.Diagnostic when the
+// handler writes a body for a notification. The body is dropped and serving
+// continues, because notifications never receive a response frame.
+var ErrNotificationResponse = errors.New("server: handler wrote a response for a notification")
+
+// StdioOptions configures ServeStdioWithOptions.
+type StdioOptions struct {
+	// Diagnostic, when non-nil, receives conditions that are handled without
+	// emitting a frame, such as ErrNotificationResponse. It runs on the serving
+	// goroutine and must not block.
+	Diagnostic func(context.Context, error)
+}
+
 // ServeStdio owns both streams and closes them on all exits and cancellation.
 // Close must unblock concurrent Read/Write; no-op closers cannot satisfy this
 // contract. Handlers must cooperate with context cancellation. Requests execute
@@ -25,7 +38,12 @@ var ErrStdioResponse = errors.New("server: invalid stdio response")
 // RemoteAddr and no authenticated identity. HTTP credentials are not synthesized.
 // Only ordinary buffered ResponseWriter operations are supported. Status and
 // headers are ignored; canonical RPC bodies (including HTTP errors) are emitted.
-func ServeStdio(ctx context.Context, input io.ReadCloser, output io.WriteCloser, handler http.Handler) (err error) {
+func ServeStdio(ctx context.Context, input io.ReadCloser, output io.WriteCloser, handler http.Handler) error {
+	return ServeStdioWithOptions(ctx, input, output, handler, StdioOptions{})
+}
+
+// ServeStdioWithOptions is ServeStdio with optional diagnostics.
+func ServeStdioWithOptions(ctx context.Context, input io.ReadCloser, output io.WriteCloser, handler http.Handler, opts StdioOptions) (err error) {
 	var once sync.Once
 	var closeErr error
 	closeBoth := func() {
@@ -79,10 +97,17 @@ func ServeStdio(ctx context.Context, input io.ReadCloser, output io.WriteCloser,
 		if err := serveFrame(handler, capture, req); err != nil {
 			return err
 		}
+		response := bytes.TrimSpace(capture.body.Bytes())
+		if (len(response) > 0 || capture.err != nil) && canonical("notification", frame) {
+			// Never answer a notification; a misbehaving handler must not end the session.
+			if opts.Diagnostic != nil {
+				opts.Diagnostic(ctx, ErrNotificationResponse)
+			}
+			continue
+		}
 		if capture.err != nil {
 			return capture.err
 		}
-		response := bytes.TrimSpace(capture.body.Bytes())
 		if len(response) == 0 {
 			continue
 		}
