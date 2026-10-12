@@ -42,6 +42,11 @@ type Options struct {
 	MaxPendingObservations int
 	ObservationTimeout     time.Duration
 	Content                ContentOptions
+	// TransportDiagnostic, when non-nil, receives transport conditions that do
+	// not fail a delivery, such as ErrUnsolicitedFrame for stdio output that
+	// matched no pending request. It may run on a background goroutine, must be
+	// safe for concurrent use, and must not block. Errors never carry payloads.
+	TransportDiagnostic func(backendID string, err error)
 }
 
 // Hooks is the registration-driven host for AHP boundary delivery.
@@ -202,6 +207,10 @@ func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
 		if err != nil {
 			c.Close()
 			return nil, err
+		}
+		if stdio, ok := tr.(*stdioBackend); ok && opts.TransportDiagnostic != nil {
+			backendID, report := id, opts.TransportDiagnostic
+			stdio.diagnostic = func(err error) { report(backendID, err) }
 		}
 		b.transport = tr
 		c.backends = append(c.backends, b)

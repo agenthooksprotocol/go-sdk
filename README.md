@@ -199,6 +199,14 @@ rejects fractional milliseconds and nonpositive deadlines. Use the generated
 `NewInterceptMilliseconds` for explicit wire values. No timeout or stdio
 lifecycle default is invented.
 
+A persistent stdio backend has one reader per child process that owns its
+stdout. Responses are matched to pending requests by JSON-RPC id. Frames that
+match no pending request, for example output written after a notification, are
+discarded and reported to `Options.TransportDiagnostic` as
+`client.ErrUnsolicitedFrame`. They never fail another request or restart the
+child. Repeated non-JSON output (`client.ErrMalformedFrame`) terminates the
+child, and the next delivery starts a new one.
+
 ### Subscription interest
 
 `func (h *Hooks) Subscribes(eventType event.Type) bool` reports static subscription

@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -39,10 +40,25 @@ func TestTransportHelper(t *testing.T) {
 			continue
 		}
 		if len(req.ID) == 0 {
-			if mode == "stray" {
+			switch mode {
+			case "stray":
 				fmt.Println(`{"id":"wrong","result":{}}`)
+			case "flood":
+				// Far more than a pipe buffer of unsolicited output per notification.
+				pad := strings.Repeat("x", 1024)
+				for i := 0; i < 512; i++ {
+					fmt.Printf("{\"jsonrpc\":\"2.0\",\"method\":\"log\",\"params\":{\"pad\":%q}}\n", pad)
+				}
+			case "garbage":
+				for i := 0; i < maxMalformedFrames; i++ {
+					fmt.Println("not json")
+				}
 			}
 			continue
+		}
+		if mode == "interleave" {
+			fmt.Println(`{"jsonrpc":"2.0","id":"someone-else","result":{}}`)
+			fmt.Println(`{"jsonrpc":"2.0","method":"log","params":{}}`)
 		}
 		if mode == "oversize" {
 			fmt.Println(strings.Repeat("x", maxTransportMessage+1))
@@ -97,21 +113,122 @@ func TestStdioTransportCancellation(t *testing.T) {
 		t.Fatal("child retained")
 	}
 }
-func TestStdioTransportRejectsStrayAndOversize(t *testing.T) {
-	for _, mode := range []string{"stray", "oversize"} {
+func TestStdioTransportRejectsOversize(t *testing.T) {
+	tr := stdioForTest(t, "oversize", ahp.StdioTransportLifecyclePersistent)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := tr.Exchange(ctx, []byte(`{"id":1}`), false); err == nil {
+		t.Fatal("invalid response accepted")
+	}
+}
+
+type diagnosticLog struct {
+	mu   sync.Mutex
+	errs []error
+}
+
+func (d *diagnosticLog) record(err error) { d.mu.Lock(); d.errs = append(d.errs, err); d.mu.Unlock() }
+func (d *diagnosticLog) count(target error) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	n := 0
+	for _, err := range d.errs {
+		if errors.Is(err, target) {
+			n++
+		}
+	}
+	return n
+}
+
+func onlyProcess(t *testing.T, s *stdioBackend) *backendProcess {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.processes) != 1 {
+		t.Fatalf("processes: %d", len(s.processes))
+	}
+	for p := range s.processes {
+		return p
+	}
+	return nil
+}
+
+func TestStdioTransportDiscardsUnsolicitedFrames(t *testing.T) {
+	for _, mode := range []string{"stray", "interleave"} {
 		t.Run(mode, func(t *testing.T) {
 			tr := stdioForTest(t, mode, ahp.StdioTransportLifecyclePersistent)
+			s := tr.(*stdioBackend)
+			var log diagnosticLog
+			s.diagnostic = log.record
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if mode == "stray" {
-				if _, err := tr.Exchange(ctx, []byte(`{"method":"notify"}`), true); err != nil {
-					t.Fatal(err)
+			if _, err := tr.Exchange(ctx, []byte(`{"jsonrpc":"2.0","method":"notify","params":{}}`), true); err != nil {
+				t.Fatal(err)
+			}
+			first := onlyProcess(t, s)
+			for i := 0; i < 3; i++ {
+				got, err := tr.Exchange(ctx, []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"request"}`, i)), false)
+				if err != nil {
+					t.Fatalf("innocent request %d failed: %v", i, err)
+				}
+				if want := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":{}}`, i); string(got) != want {
+					t.Fatalf("got %s want %s", got, want)
 				}
 			}
-			if _, err := tr.Exchange(ctx, []byte(`{"id":1}`), false); err == nil {
-				t.Fatal("invalid response accepted")
+			if onlyProcess(t, s) != first {
+				t.Fatal("unsolicited frame caused a respawn")
+			}
+			if log.count(ErrUnsolicitedFrame) == 0 {
+				t.Fatal("discarded frame not reported")
 			}
 		})
+	}
+}
+
+func TestStdioTransportDrainsOutputAfterNotifications(t *testing.T) {
+	tr := stdioForTest(t, "flood", ahp.StdioTransportLifecyclePersistent)
+	s := tr.(*stdioBackend)
+	var log diagnosticLog
+	s.diagnostic = log.record
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	for i := 0; i < 8; i++ {
+		if _, err := tr.Exchange(ctx, []byte(`{"jsonrpc":"2.0","method":"notify","params":{}}`), true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := tr.Exchange(ctx, []byte(`{"jsonrpc":"2.0","id":"after-flood","method":"request"}`), false); err != nil {
+		t.Fatalf("request after flooded notifications: %v", err)
+	}
+	if n := log.count(ErrUnsolicitedFrame); n != 8*512 {
+		t.Fatalf("discarded %d frames", n)
+	}
+}
+
+func TestStdioTransportTerminatesRepeatedMalformedOutput(t *testing.T) {
+	tr := stdioForTest(t, "garbage", ahp.StdioTransportLifecyclePersistent)
+	s := tr.(*stdioBackend)
+	var log diagnosticLog
+	s.diagnostic = log.record
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := tr.Exchange(ctx, []byte(`{"jsonrpc":"2.0","method":"notify","params":{}}`), true); err != nil {
+		t.Fatal(err)
+	}
+	first := onlyProcess(t, s)
+	select {
+	case <-first.readDone:
+	case <-ctx.Done():
+		t.Fatal("malformed output did not terminate the child")
+	}
+	if !errors.Is(first.readErr, errRepeatedOutput) || log.count(ErrMalformedFrame) != maxMalformedFrames {
+		t.Fatalf("readErr=%v malformed=%d", first.readErr, log.count(ErrMalformedFrame))
+	}
+	if _, err := tr.Exchange(ctx, []byte(`{"jsonrpc":"2.0","id":1,"method":"request"}`), false); err != nil {
+		t.Fatalf("replacement child: %v", err)
+	}
+	if onlyProcess(t, s) == first {
+		t.Fatal("terminated child reused")
 	}
 }
 func TestStdioTransportCloseUnblocks(t *testing.T) {
