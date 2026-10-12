@@ -18,6 +18,9 @@ go get github.com/agenthooksprotocol/go-sdk@latest
 For reproducible builds, pin a published release version, for example
 `go get github.com/agenthooksprotocol/go-sdk@v0.1.1`.
 
+Upgrading from 0.4? See the [migration guide](MIGRATING.md#04--05) for removed
+and renamed APIs and their replacements.
+
 ## Quick start
 
 Every public AHP schema has a Go type plus `Parse<Type>` and `Encode<Type>` functions.
