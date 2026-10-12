@@ -204,6 +204,7 @@ func TestGeneratedConstructorLiteralsAndOptionalDefaults(t *testing.T) {
 }
 
 func TestTypedCapabilityConstruction(t *testing.T) {
+	var _ func(capability.Host) map[event.Type]capability.WireDeclaration = capability.Host.Wire
 	if len((capability.Host{}).Wire()) != 0 {
 		t.Fatal("zero host grants")
 	}
@@ -254,7 +255,7 @@ func TestTypedCapabilityConstruction(t *testing.T) {
 	if err := json.Unmarshal(data, &object); err != nil {
 		t.Fatal(err)
 	}
-	if len(object["tool.before"]["modes"]) == 0 || len(object["tool.before"]["capabilities"]) == 0 {
+	if len(object) != 3 || object["session.start"] == nil || object["session.end"] == nil || len(object["tool.before"]["modes"]) == 0 || len(object["tool.before"]["capabilities"]) == 0 {
 		t.Fatal(string(data))
 	}
 }
@@ -447,7 +448,7 @@ func TestFlowMaxContinuations(t *testing.T) {
 		{"both", capability.Host{TurnFinishBefore: capability.TurnFinishBefore{Flow: capability.ContinueAndStop(2, 1).WithMaxContinuations(3)}}, "turn.finish.before", `{"effects":["flow"],"flow":{"operations":["continue","stop"],"remainingContinuations":2,"continuationCount":1,"maxContinuations":3}}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			data, err := json.Marshal(test.host.Wire()[test.event].Capabilities)
+			data, err := json.Marshal(test.host.Wire()[event.Type(test.event)].Capabilities)
 			if err != nil || string(data) != test.want {
 				t.Fatalf("configured maximum: %s %v", data, err)
 			}
@@ -537,7 +538,7 @@ func TestIndependentElicitationFacilities(t *testing.T) {
 		{"tool-facilities-only", capability.Host{ToolBefore: capability.ToolBefore{ElicitationForm: true, ElicitationURL: true}}, "tool.before", `{"modes":["intercept"],"capabilities":{"effects":[],"elicitation":{"form":{},"url":{}}}}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			wire := test.host.Wire()[test.event]
+			wire := test.host.Wire()[event.Type(test.event)]
 			data, err := json.Marshal(wire)
 			if err != nil || string(data) != test.want {
 				t.Fatalf("facility-only declaration: %s %v", data, err)

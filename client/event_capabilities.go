@@ -7,6 +7,7 @@ import (
 
 	ahp "github.com/agenthooksprotocol/go-sdk"
 	"github.com/agenthooksprotocol/go-sdk/capability"
+	"github.com/agenthooksprotocol/go-sdk/event"
 )
 
 // manifestForOptions transfers typed declarations and metadata directly.
@@ -14,15 +15,15 @@ import (
 // Host declarations never infer interest or authority from receivers.
 func manifestForOptions(reg ahp.Registration, opts Options) (map[string]any, error) {
 	declarations := opts.Events.Wire()
-	keys := make([]string, 0, len(declarations))
+	keys := make([]event.Type, 0, len(declarations))
 	for name := range declarations {
 		keys = append(keys, name)
 	}
-	sort.Strings(keys)
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
 	events := make([]any, 0, len(keys))
 	for _, name := range keys {
 		declaration := declarations[name]
-		entry := map[string]any{"event": name, "modes": wireStrings(declaration.Modes)}
+		entry := map[string]any{"event": string(name), "modes": wireStrings(declaration.Modes)}
 		if declaration.Capabilities != nil {
 			entry["capabilities"] = wireCapabilities(declaration.Capabilities)
 		}
