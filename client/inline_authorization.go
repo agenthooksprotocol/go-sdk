@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	eventtype "github.com/agenthooksprotocol/go-sdk/event"
 )
 
 // authorizeInlineEffects visits only generated contextual payload variants.
@@ -11,7 +12,7 @@ import (
 // or acquire text-write authority merely by resembling protocol JSON.
 func (c *Hooks) authorizeInlineEffects(ctx context.Context, event, projected, sub map[string]any, backendID string, response ahp.InterceptResponse) (ahp.InterceptResponse, error) {
 	kind := compositionString(event["type"])
-	decoded := ahp.ResponseForRequest(kind, sdkJSON(response))
+	decoded := eventtype.ResponseForRequest(eventtype.Type(kind), sdkJSON(response))
 	if !decoded.OK {
 		return ahp.InterceptResponse{}, errors.New("invalid correlated response")
 	}

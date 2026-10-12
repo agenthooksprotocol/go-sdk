@@ -122,7 +122,7 @@ func TestToolBeforeDefaultCodecRetainsSuppliedValidator(t *testing.T) {
 func interruptedProjectionFixture(t *testing.T) (*Result, error) {
 	t.Helper()
 	result := settlementFixture(t)
-	accepted := ahp.ResponseForRequest("tool.before", []byte(`{"jsonrpc":"2.0","id":"accepted","result":{"protocolVersion":"draft","effects":[]}}`))
+	accepted := event.ResponseForRequest(event.ToolBefore, []byte(`{"jsonrpc":"2.0","id":"accepted","result":{"protocolVersion":"draft","effects":[]}}`))
 	if !accepted.OK {
 		t.Fatal(accepted.Diagnostics)
 	}
@@ -208,7 +208,7 @@ func TestTypedSettlementExposesInitialInstructionsAndInjections(t *testing.T) {
 			if e := canonical.Validate("intercept-request", sdkJSON(probe)); e != nil {
 				t.Fatalf("invalid native state fixture: %v", e)
 			}
-			result, err := hooks.Dispatch(context.Background(), "model.request.before", inlineTestInput(t, []any{}), WithInitialState(initial))
+			result, err := hooks.Dispatch(context.Background(), event.ModelRequestBefore, inlineTestInput(t, []any{}), WithInitialState(initial))
 			if result != nil {
 				defer result.Close()
 			}
@@ -248,7 +248,7 @@ func TestTypedSettlementAccumulatesInitialAndReceiverState(t *testing.T) {
 			map[string]any{"type": "inject", "target": "context", "operation": "append", "deliverAt": "next_turn", "value": messages},
 		}
 	}
-	result, err := hooks.Dispatch(context.Background(), "model.request.before", inlineTestInput(t, []any{}), WithInitialState(initial))
+	result, err := hooks.Dispatch(context.Background(), event.ModelRequestBefore, inlineTestInput(t, []any{}), WithInitialState(initial))
 	if result != nil {
 		defer result.Close()
 	}
@@ -280,7 +280,7 @@ func TestTypedSettlementAccumulatesInstructions(t *testing.T) {
 		}
 	}
 	input := map[string]any{"turn": map[string]any{"id": "turn-state"}, "outcome": "completed", "continuationCount": json.Number("0"), "items": []any{}}
-	result, err := hooks.Dispatch(context.Background(), "turn.finish.before", input, WithInitialState(initial))
+	result, err := hooks.Dispatch(context.Background(), event.TurnFinishBefore, input, WithInitialState(initial))
 	if result != nil {
 		defer result.Close()
 	}

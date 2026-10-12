@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/agenthooksprotocol/go-sdk/event"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -99,7 +100,7 @@ func TestUploadPlanOverlapCapAndReceiptBarrier(t *testing.T) {
 			}
 			done := make(chan error, 1)
 			go func() {
-				result, err := c.Dispatch(context.Background(), "model.request.before", uploadPlanInput(t), WithContentSource(uploadPlanPath, content.NewAttachment([]byte("body"))))
+				result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, uploadPlanInput(t), WithContentSource(uploadPlanPath, content.NewAttachment([]byte("body"))))
 				if result != nil {
 					if len(result.Diagnostics) != 0 {
 						err = fmt.Errorf("delivery errors: %v", result.Diagnostics)
@@ -146,7 +147,7 @@ func TestUploadPlanSharedLazyOwnerAndObservationReuse(t *testing.T) {
 		opens.Add(1)
 		return io.NopCloser(strings.NewReader("body")), nil
 	}, nil)
-	result, err := c.Dispatch(context.Background(), "model.request.before", uploadPlanInput(t), WithContentSource(uploadPlanPath, source))
+	result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, uploadPlanInput(t), WithContentSource(uploadPlanPath, source))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +200,7 @@ func TestUploadPlanNoAuthorizedDemandLeavesLazyBodyUnread(t *testing.T) {
 				delete(input, "source")
 				delete(input, "type")
 			}
-			result, err := c.Dispatch(context.Background(), "model.request.before", input, opts...)
+			result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, input, opts...)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -224,7 +225,7 @@ func TestUploadPlanLaterFailureDoesNotPreemptHealthyInterceptor(t *testing.T) {
 			failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "failed", http.StatusBadRequest) }))
 			defer failing.Close()
 			c.backends[1].subscriptions[0]["upload"].(map[string]any)["endpoint"] = failing.URL
-			result, err := c.Dispatch(context.Background(), "model.request.before", uploadPlanInput(t), WithContentSource(uploadPlanPath, content.NewAttachment([]byte("body"))))
+			result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, uploadPlanInput(t), WithContentSource(uploadPlanPath, content.NewAttachment([]byte("body"))))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -274,7 +275,7 @@ func TestUploadPlanRemovalDoesNotReuploadOrRestoreAttachment(t *testing.T) {
 		}
 		return []any{}
 	}
-	result, err := c.Dispatch(context.Background(), "model.request.before", uploadPlanInput(t), WithContentSource(uploadPlanPath, content.NewAttachment([]byte("body"))))
+	result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, uploadPlanInput(t), WithContentSource(uploadPlanPath, content.NewAttachment([]byte("body"))))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +322,7 @@ func TestUploadPlanCredentialsAndReceiptsRemainSubscriptionScoped(t *testing.T) 
 		}
 		return []any{}
 	}
-	result, err := c.Dispatch(context.Background(), "model.request.before", uploadPlanInput(t), WithContentSource(uploadPlanPath, content.NewAttachment([]byte("body"))))
+	result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, uploadPlanInput(t), WithContentSource(uploadPlanPath, content.NewAttachment([]byte("body"))))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +365,7 @@ func TestUploadPlanSharedDemandReceiverLimitsAreIndependent(t *testing.T) {
 				}
 				return io.NopCloser(strings.NewReader("body")), nil
 			}, nil)
-			result, err := c.Dispatch(context.Background(), "model.request.before", uploadPlanInput(t), WithContentSource(uploadPlanPath, source))
+			result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, uploadPlanInput(t), WithContentSource(uploadPlanPath, source))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -406,7 +407,7 @@ func TestUploadPlanOnlyTinyDemandBoundsLazyRead(t *testing.T) {
 	c.backends[0].subscriptions[0]["upload"].(map[string]any)["maxBytes"] = 2
 	reader := &uploadPlanCountingReader{Reader: strings.NewReader("body-and-many-more-bytes")}
 	source := content.NewLazyAttachment(func(context.Context) (io.ReadCloser, error) { opens.Add(1); return reader, nil }, nil)
-	result, err := c.Dispatch(context.Background(), "model.request.before", uploadPlanInput(t), WithContentSource(uploadPlanPath, source))
+	result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, uploadPlanInput(t), WithContentSource(uploadPlanPath, source))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +433,7 @@ func TestUploadPlanCancellationJoinsSharedMaterialization(t *testing.T) {
 	input := uploadPlanInput(t)
 	done := make(chan error, 1)
 	go func() {
-		result, err := c.Dispatch(ctx, "model.request.before", input, WithContentSource(uploadPlanPath, source))
+		result, err := c.Dispatch(ctx, event.ModelRequestBefore, input, WithContentSource(uploadPlanPath, source))
 		if result != nil {
 			_ = result.Close()
 		}
@@ -483,7 +484,7 @@ func TestUploadPlanHooksCloseJoinsConcurrentTransfers(t *testing.T) {
 	source := content.NewAttachment([]byte("body"))
 	done := make(chan error, 1)
 	go func() {
-		result, err := c.Dispatch(context.Background(), "model.request.before", input, WithContentSource(uploadPlanPath, source))
+		result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, input, WithContentSource(uploadPlanPath, source))
 		if result != nil {
 			_ = result.Close()
 		}
@@ -578,7 +579,7 @@ func TestUploadPlanReadyOwnerUploadsBeforeUnrelatedMaterialization(t *testing.T)
 	file["id"], file["category"] = "fast-file", "files"
 	image := map[string]any{"id": "slow-image", "kind": "attachment", "mediaType": "image/png", "category": "images", "selection": "metadata"}
 	sdkObj(input["items"].([]any)[0])["parts"] = append(parts, image)
-	result, err := c.Dispatch(context.Background(), "model.request.before", input, WithContentSource(uploadPlanPath, fast), WithContentSource("/items/0/parts/2", slow))
+	result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, input, WithContentSource(uploadPlanPath, fast), WithContentSource("/items/0/parts/2", slow))
 	if err != nil {
 		t.Fatal(err)
 	}

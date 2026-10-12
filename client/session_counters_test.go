@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/event"
 	"testing"
 )
 
@@ -47,7 +48,7 @@ func TestSessionCountersRejectNonIntegerAndNegative(t *testing.T) {
 	c, transports := testClient(t, "fail-closed")
 	input := testInput()
 	input["session"] = map[string]any{"id": "session", "counters": map[string]any{"future": json.Number("-1")}}
-	if result, err := c.Dispatch(context.Background(), "tool.before", input); err == nil || result != nil || len(transports[0].calls) != 0 {
+	if result, err := c.Dispatch(context.Background(), event.ToolBefore, input); err == nil || result != nil || len(transports[0].calls) != 0 {
 		t.Fatal("invalid full counter input reached backend")
 	}
 }

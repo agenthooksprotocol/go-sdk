@@ -10,25 +10,27 @@ import (
 	ahp "github.com/agenthooksprotocol/go-sdk"
 	"github.com/agenthooksprotocol/go-sdk/auth"
 	"github.com/agenthooksprotocol/go-sdk/capability"
+	"github.com/agenthooksprotocol/go-sdk/event"
 )
 
 func TestSubscribesStaticInterest(t *testing.T) {
 	for _, tc := range []struct {
-		name, selector, mode, query string
-		filtered, want              bool
+		name, selector, mode string
+		query                event.Type
+		filtered, want       bool
 	}{
-		{name: "unrelated selector", selector: "tool.after", mode: "observe", query: "tool.before"},
-		{name: "exact", selector: "tool.before", mode: "intercept", query: "tool.before", want: true},
-		{name: "global wildcard", selector: "*", mode: "intercept", query: "tool.before", want: true},
-		{name: "prefix wildcard", selector: "tool.*", mode: "intercept", query: "tool.before", want: true},
-		{name: "prefix is not bare namespace", selector: "tool.*", mode: "intercept", query: "tool"},
-		{name: "unrelated namespace", selector: "tool.*", mode: "intercept", query: "session.start"},
-		{name: "observe only", selector: "tool.after", mode: "observe", query: "tool.after", want: true},
-		{name: "filtered exact", selector: "tool.before", mode: "intercept", query: "tool.before", filtered: true, want: true},
-		{name: "filtered observer", selector: "tool.before", mode: "observe", query: "tool.before", filtered: true, want: true},
-		{name: "intercept fallback observation", selector: "tool.*", mode: "intercept", query: "tool.after", want: true},
-		{name: "wildcard unknown", selector: "*", mode: "observe", query: "unknown.event"},
-		{name: "wildcard unconfigured", selector: "*", mode: "observe", query: "session.end"},
+		{name: "unrelated selector", selector: "tool.after", mode: "observe", query: event.ToolBefore},
+		{name: "exact", selector: "tool.before", mode: "intercept", query: event.ToolBefore, want: true},
+		{name: "global wildcard", selector: "*", mode: "intercept", query: event.ToolBefore, want: true},
+		{name: "prefix wildcard", selector: "tool.*", mode: "intercept", query: event.ToolBefore, want: true},
+		{name: "prefix is not bare namespace", selector: "tool.*", mode: "intercept", query: event.Type("tool")},
+		{name: "unrelated namespace", selector: "tool.*", mode: "intercept", query: event.SessionStart},
+		{name: "observe only", selector: "tool.after", mode: "observe", query: event.ToolAfter, want: true},
+		{name: "filtered exact", selector: "tool.before", mode: "intercept", query: event.ToolBefore, filtered: true, want: true},
+		{name: "filtered observer", selector: "tool.before", mode: "observe", query: event.ToolBefore, filtered: true, want: true},
+		{name: "intercept fallback observation", selector: "tool.*", mode: "intercept", query: event.ToolAfter, want: true},
+		{name: "wildcard unknown", selector: "*", mode: "observe", query: event.Type("unknown.event")},
+		{name: "wildcard unconfigured", selector: "*", mode: "observe", query: event.SessionEnd},
 		{name: "wildcard empty", selector: "*", mode: "observe", query: ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -122,8 +124,23 @@ func TestSubscribesWithoutSubscribers(t *testing.T) {
 	// Canonical registration requires at least one backend and subscription.
 	// Exercise the empty lookup directly without weakening admission.
 	for _, h := range []*Hooks{nil, {}, {manifest: map[string]any{"events": []any{map[string]any{"event": "tool.before", "modes": []any{"intercept", "observe"}}}}}} {
-		if h.Subscribes("tool.before") {
+		if h.Subscribes(event.ToolBefore) {
 			t.Fatal("no subscriptions must mean no interest")
 		}
+	}
+}
+
+func TestSubscribesAllCanonicalEvents(t *testing.T) {
+	events := []event.Type{event.ConfigChangeAfter, event.ConfigChangeBefore, event.ContextCompactAfter, event.ContextCompactBefore, event.FileChanged, event.HookFailure, event.ModelError, event.ModelRequestBefore, event.ModelResponseAfter, event.ModelSwitchAfter, event.ModelSwitchBefore, event.SessionEnd, event.SessionStart, event.TaskChangeAfter, event.TaskChangeBefore, event.ToolAfter, event.ToolBatchAfter, event.ToolBefore, event.ToolPermissionRequest, event.ToolPermissionResolved, event.ToolProgress, event.TurnEnd, event.TurnFinishBefore, event.TurnProgress, event.TurnStart, event.UserAttention, event.UserElicitationRequest, event.UserElicitationResult, event.UserMessageInbound, event.UserMessageOutbound, event.WorkspaceChangeAfter, event.WorkspaceChangeBefore}
+	if len(events) != 32 {
+		t.Fatalf("expected 32 canonical event constants, got %d", len(events))
+	}
+	for _, eventType := range events {
+		t.Run(string(eventType), func(t *testing.T) {
+			h := &Hooks{manifest: map[string]any{"events": []any{map[string]any{"event": string(eventType), "modes": []any{"observe"}}}}, backends: []registeredBackend{{subscriptions: []map[string]any{{"events": []any{"*"}, "mode": "observe"}}}}}
+			if !h.Subscribes(eventType) {
+				t.Fatal("configured canonical event lacks static interest")
+			}
+		})
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/agenthooksprotocol/go-sdk/content"
+	"github.com/agenthooksprotocol/go-sdk/event"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -199,7 +200,7 @@ func TestContentSourceFailureAndUnusedBoundaryClose(t *testing.T) {
 			if mode == "closed" {
 				_ = c.Close()
 			}
-			result, err := c.Dispatch(context.Background(), "tool.before", input, WithContentSource("/items/0", source))
+			result, err := c.Dispatch(context.Background(), event.ToolBefore, input, WithContentSource("/items/0", source))
 			if (mode == "invalid" || mode == "closed") && err == nil {
 				t.Fatal("invalid call accepted")
 			}

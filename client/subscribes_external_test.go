@@ -7,11 +7,12 @@ import (
 	ahp "github.com/agenthooksprotocol/go-sdk"
 	"github.com/agenthooksprotocol/go-sdk/capability"
 	"github.com/agenthooksprotocol/go-sdk/client"
+	"github.com/agenthooksprotocol/go-sdk/event"
 )
 
 // A consumer can depend on this synchronous API without input or context.
-var _ interface{ Subscribes(string) bool } = (*client.Hooks)(nil)
-var _ func(*client.Hooks, string) bool = (*client.Hooks).Subscribes
+var _ interface{ Subscribes(event.Type) bool } = (*client.Hooks)(nil)
+var _ func(*client.Hooks, event.Type) bool = (*client.Hooks).Subscribes
 
 func TestPublicSubscribesIncludesObserveOnly(t *testing.T) {
 	var registration ahp.Registration
@@ -23,12 +24,12 @@ func TestPublicSubscribesIncludesObserveOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer hooks.Close()
-	if !hooks.Subscribes("tool.after") {
+	if !hooks.Subscribes(event.ToolAfter) {
 		t.Fatal("observe-only filtered match must retain preparation")
 	}
-	for _, event := range []string{"tool.before", "unknown.event", ""} {
-		if hooks.Subscribes(event) {
-			t.Fatalf("unconfigured event %q has interest", event)
+	for _, eventType := range []event.Type{event.ToolBefore, event.Type("unknown.event"), ""} {
+		if hooks.Subscribes(eventType) {
+			t.Fatalf("unconfigured event %q has interest", eventType)
 		}
 	}
 }

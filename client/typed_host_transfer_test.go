@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/agenthooksprotocol/go-sdk/capability"
+	"github.com/agenthooksprotocol/go-sdk/event"
 )
 
 // Keep typed Host construction separate from wire capabilities admission. Raw
@@ -93,7 +94,7 @@ func TestTypedHostElicitationOnlyIsValidInterception(t *testing.T) {
 	if !reflect.DeepEqual(entry["modes"], []any{"intercept"}) || !reflect.DeepEqual(caps["effects"], []any{}) || !reflect.DeepEqual(caps["elicitation"], map[string]any{"form": map[string]any{}}) {
 		t.Fatalf("facility manufactured effect authority: %v", entry)
 	}
-	if !h.Subscribes("tool.before") {
+	if !h.Subscribes(event.ToolBefore) {
 		t.Fatal("elicitation-only subscriber omitted")
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	eventtype "github.com/agenthooksprotocol/go-sdk/event"
 	"math/big"
 	"reflect"
 	"strings"
@@ -16,7 +17,7 @@ import (
 // composition. Public boundary calls prepare verified bodies and snapshots first;
 // invalid or missing host inputs fail admission before transport dispatch.
 type CapabilityAdmissionError struct {
-	Event  string
+	Event  eventtype.Type
 	Effect string
 	Target string
 	Reason string
@@ -99,7 +100,7 @@ func composePrepared(request ahp.InterceptRequest, response ahp.InterceptRespons
 	}
 	var staged *composition
 	var stageErr error
-	admitted := ahp.StageResponseForRequest(kind, resBytes, func(contextual ahp.ContextualResponse) error {
+	admitted := eventtype.StageResponseForRequest(eventtype.Type(kind), resBytes, func(contextual ahp.ContextualResponse) error {
 		staged, stageErr = stageContextualComposition(req.Value, contextual, res.Value.Result, prepared)
 		return stageErr
 	})
@@ -344,7 +345,7 @@ func compositionCapabilitiesPrepared(caps, event map[string]any, prepared bool) 
 			return fmt.Errorf("elicitation mode is not advertised")
 		}
 		if !prepared && compositionContains(caps["effects"], "return") {
-			return &CapabilityAdmissionError{Event: kind, Effect: "return", Reason: "elicitation answers require the original MCP request body and requester/mode correlation; wire descriptors cannot establish form-schema or URL consent validity"}
+			return &CapabilityAdmissionError{Event: eventtype.Type(kind), Effect: "return", Reason: "elicitation answers require the original MCP request body and requester/mode correlation; wire descriptors cannot establish form-schema or URL consent validity"}
 		}
 	}
 	for target, grant := range compositionMap(caps["modify"]) {
@@ -382,10 +383,10 @@ func compositionCapabilitiesPrepared(caps, event map[string]any, prepared bool) 
 	return nil
 }
 
-func compositionUnsupportedTarget(event, target string) error {
+func compositionUnsupportedTarget(kind, target string) error {
 	reason := "target requires an explicit native-to-wire projection, unavailable to the protocol-only composer"
 	if target != "workspace" {
 		reason = "target requires resolved content and immutable descriptor re-publication, unavailable to the protocol-only composer"
 	}
-	return &CapabilityAdmissionError{Event: event, Effect: "modify", Target: target, Reason: reason}
+	return &CapabilityAdmissionError{Event: eventtype.Type(kind), Effect: "modify", Target: target, Reason: reason}
 }

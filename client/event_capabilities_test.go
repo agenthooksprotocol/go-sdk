@@ -189,6 +189,16 @@ func TestTypedCapabilityPublicAPI(t *testing.T) {
 		name, source string
 		valid        bool
 	}{
+		{"all canonical public event names", `func allEvents(h *client.Hooks) { for _, name := range []event.Type{event.ConfigChangeAfter, event.ConfigChangeBefore, event.ContextCompactAfter, event.ContextCompactBefore, event.FileChanged, event.HookFailure, event.ModelError, event.ModelRequestBefore, event.ModelResponseAfter, event.ModelSwitchAfter, event.ModelSwitchBefore, event.SessionEnd, event.SessionStart, event.TaskChangeAfter, event.TaskChangeBefore, event.ToolAfter, event.ToolBatchAfter, event.ToolBefore, event.ToolPermissionRequest, event.ToolPermissionResolved, event.ToolProgress, event.TurnEnd, event.TurnFinishBefore, event.TurnProgress, event.TurnStart, event.UserAttention, event.UserElicitationRequest, event.UserElicitationResult, event.UserMessageInbound, event.UserMessageOutbound, event.WorkspaceChangeAfter, event.WorkspaceChangeBefore} { _ = h.Subscribes(name); _, _ = h.Dispatch(nil, name, nil); _ = client.CapabilityAdmissionError{Event: name}; _ = event.ResponseForRequest(name, nil); _ = event.StageResponseForRequest(name, nil, nil) } }`, true},
+		{"typed contextual parsers", `var _ = event.ResponseForRequest(event.ToolBefore, nil); var _ = event.StageResponseForRequest(event.ToolBefore, nil, nil)`, true},
+		{"runtime string response parser", `func parse(name string) { _ = event.ResponseForRequest(name, nil) }`, false},
+		{"runtime string stage parser", `func stage(name string) { _ = event.StageResponseForRequest(name, nil, nil) }`, false},
+		{"typed dispatch event", `func dispatch(h *client.Hooks) { _, _ = h.Dispatch(nil, event.ToolBefore, nil) }`, true},
+		{"runtime string dispatch event", `func dispatch(h *client.Hooks, name string) { _, _ = h.Dispatch(nil, name, nil) }`, false},
+		{"typed capability diagnostic event", `var _ = client.CapabilityAdmissionError{Event: event.ToolBefore}`, true},
+		{"runtime string capability diagnostic event", `func diagnostic(name string) client.CapabilityAdmissionError { return client.CapabilityAdmissionError{Event: name} }`, false},
+		{"typed subscription interest", `func interest(h *client.Hooks) bool { return h.Subscribes(event.ToolBefore) }`, true},
+		{"runtime string subscription interest", `func interest(h *client.Hooks, name string) bool { return h.Subscribes(name) }`, false},
 		{"public example", `var _ = capability.Host{SessionStart: capability.Observe{}, ToolBefore: capability.ToolBefore{Allow: true, Deny: true, ReturnResult: true, ModifyInput: capability.ReplaceAndMerge(), Observe: true}}`, true},
 		{"unknown event", `var _ = capability.Host{ToolUnknown: capability.Observe{}}`, false},
 		{"arbitrary modes", `var _ = capability.ToolBefore{Modes: []string{"execute"}}`, false},
@@ -211,7 +221,7 @@ func TestTypedCapabilityPublicAPI(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			source := "package consumer\nimport (\"github.com/agenthooksprotocol/go-sdk/capability\"; \"github.com/agenthooksprotocol/go-sdk/client\")\nvar _ client.Options\n" + tc.source + "\n"
+			source := "package consumer\nimport (\"github.com/agenthooksprotocol/go-sdk/capability\"; \"github.com/agenthooksprotocol/go-sdk/client\"; \"github.com/agenthooksprotocol/go-sdk/event\")\nvar _ event.Type\nvar _ capability.Host\nvar _ client.Options\n" + tc.source + "\n"
 			if err := os.WriteFile(filepath.Join(dir, "consumer.go"), []byte(source), 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -224,6 +234,9 @@ func TestTypedCapabilityPublicAPI(t *testing.T) {
 			}
 			if !tc.valid && err == nil {
 				t.Fatal("invalid public API compiled")
+			}
+			if strings.HasPrefix(tc.name, "runtime string ") && err != nil && (!strings.Contains(string(out), "cannot use name") || !strings.Contains(string(out), "event.Type")) {
+				t.Fatalf("expected runtime string type rejection, got: %v\n%s", err, out)
 			}
 			if !tc.valid && !strings.Contains(string(out), "./consumer.go:") {
 				t.Fatalf("compiler did not reject source: %v\n%s", err, out)

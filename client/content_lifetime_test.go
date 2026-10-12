@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"github.com/agenthooksprotocol/go-sdk/content"
+	"github.com/agenthooksprotocol/go-sdk/event"
 	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 	"io"
 	"net/http"
@@ -33,7 +34,7 @@ func TestPublicDispatchRetainedResultsAndSources(t *testing.T) {
 		delete(item, "body")
 		item["selection"] = "metadata"
 		input["items"] = []any{item}
-		result, err := c.Dispatch(context.Background(), "tool.before", input, WithContentSource("/items/0", source))
+		result, err := c.Dispatch(context.Background(), event.ToolBefore, input, WithContentSource("/items/0", source))
 		if err != nil || len(result.Diagnostics) != 0 {
 			t.Fatalf("call %d: %v %+v", i, err, result)
 		}
@@ -125,7 +126,7 @@ func TestPublicDispatchCancellationRetiresSource(t *testing.T) {
 			}
 			done := make(chan error, 1)
 			go func() {
-				_, err := c.Dispatch(ctx, "tool.before", input, WithContentSource("/items/0", source))
+				_, err := c.Dispatch(ctx, event.ToolBefore, input, WithContentSource("/items/0", source))
 				done <- err
 			}()
 			if _, err := w.Write([]byte("x")); err != nil && mode != "timeout" {

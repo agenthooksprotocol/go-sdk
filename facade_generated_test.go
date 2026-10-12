@@ -339,6 +339,49 @@ func TestInitialAndTypedEffectOperations(t *testing.T) {
 	var _ event.Type = event.ToolBefore
 }
 
+func TestTypedContextualResponseDispatch(t *testing.T) {
+	raw := []byte(`{"jsonrpc":"2.0","id":"typed-context","result":{"protocolVersion":"draft","effects":[]}}`)
+	parsed := event.ResponseForRequest(event.ToolBefore, raw)
+	if !parsed.OK {
+		t.Fatal(parsed.Diagnostics)
+	}
+	if _, ok := parsed.Value.(*ahp.ToolBeforeInterceptResponse); !ok {
+		t.Fatalf("wrong correlated model: %T", parsed.Value)
+	}
+	called := false
+	staged := event.StageResponseForRequest(event.ToolBefore, raw, func(value ahp.ContextualResponse) error { called = true; return nil })
+	if !called || !staged.OK {
+		t.Fatal("typed staging failed", staged.Diagnostics)
+	}
+	observed := event.ResponseForRequest(event.SessionEnd, raw)
+	if observed.OK || len(observed.Diagnostics) == 0 {
+		t.Fatal("observation granted interception")
+	}
+	unknown := event.ResponseForRequest(event.Type("unknown"), raw)
+	if unknown.OK || len(unknown.Diagnostics) == 0 {
+		t.Fatal("explicit invalid conversion granted authority")
+	}
+}
+func TestDefinedEventTypeKeepsCanonicalWire(t *testing.T) {
+	matches := func(selected event.Type) bool { return selected == event.ToolBefore }
+	if !matches(event.ToolBefore) || matches(event.ToolAfter) {
+		t.Fatal("typed event constants do not match")
+	}
+	dynamic := "tool.before"
+	if !matches(event.Type(dynamic)) || string(event.ToolBefore) != dynamic {
+		t.Fatal("explicit event/string conversion failed")
+	}
+	raw, err := json.Marshal(struct {
+		Type event.Type `json:"type"`
+	}{Type: event.ToolBefore})
+	if err != nil || string(raw) != `{"type":"tool.before"}` {
+		t.Fatalf("event wire changed: %s %v", raw, err)
+	}
+	var parsed event.Type
+	if err := json.Unmarshal([]byte(`"tool.before"`), &parsed); err != nil || parsed != event.ToolBefore {
+		t.Fatal("event JSON decoding failed", parsed, err)
+	}
+}
 func TestNamedContentSourceBindingsAreOutOfBand(t *testing.T) {
 	source := content.NewSource(io.NopCloser(strings.NewReader("owned content")))
 	messages := []*event.ModelVisibleItemInput{

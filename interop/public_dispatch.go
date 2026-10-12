@@ -3,6 +3,7 @@ package interop
 import (
 	"context"
 	hooks "github.com/agenthooksprotocol/go-sdk/client"
+	"github.com/agenthooksprotocol/go-sdk/event"
 )
 
 // Canonical fixtures use the SDK's explicit dynamic dispatch surface. Named
@@ -17,5 +18,6 @@ func dispatchPublicBoundary(ctx context.Context, c *hooks.Hooks, name string, ev
 		}
 		input[key] = value
 	}
-	return c.Dispatch(ctx, name, input, opts...)
+	// The fixture name is decoded from canonical wire JSON at this boundary.
+	return c.Dispatch(ctx, event.Type(name), input, opts...)
 }

@@ -5,18 +5,20 @@ import (
 	"encoding/json"
 	"errors"
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	eventtype "github.com/agenthooksprotocol/go-sdk/event"
 	"github.com/agenthooksprotocol/go-sdk/internal/canonical"
 	"github.com/agenthooksprotocol/go-sdk/internal/inputsources"
 	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 	"time"
 )
 
-// Dispatch is the advanced canonical/dynamic boundary entry point. input uses
-// canonical host fields (including nested call/tool envelopes), not flattened
+// Dispatch is the advanced canonical boundary entry point. Use generated event
+// constants for name. Input uses canonical host fields (including nested
+// call/tool envelopes), not flattened
 // generated input fields. Source, type, and manifest remain SDK-owned and must
 // be absent. Prefer named methods and generated inputs for ordinary callers.
-func (c *Hooks) Dispatch(ctx context.Context, name string, input any, options ...InterceptOption) (*Result, error) {
-	return c.intercept(ctx, name, input, options...)
+func (c *Hooks) Dispatch(ctx context.Context, name eventtype.Type, input any, options ...InterceptOption) (*Result, error) {
+	return c.intercept(ctx, string(name), input, options...)
 }
 
 func (c *Hooks) intercept(ctx context.Context, name string, input any, options ...InterceptOption) (*Result, error) {
@@ -277,7 +279,7 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 					if e == nil {
 						stage = "acceptance"
 						response := ahp.ParseInterceptResponse(raw)
-						contextual := ahp.ResponseForRequest(name, raw)
+						contextual := eventtype.ResponseForRequest(eventtype.Type(name), raw)
 						if canonical.Validate("intercept-response", raw) != nil || !response.OK || !contextual.OK {
 							e = interceptResponseFailure(raw, request["id"])
 						} else {

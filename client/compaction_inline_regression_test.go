@@ -140,7 +140,7 @@ func TestPublicWorkspaceModifyPreservesOpaquePrior(t *testing.T) {
 	transports[0].reply = func(map[string]any) []any {
 		return []any{map[string]any{"type": "modify", "target": "workspace", "operation": "merge", "value": map[string]any{"cwd": "/new"}}}
 	}
-	result, err := c.Dispatch(context.Background(), "workspace.change.before", input)
+	result, err := c.Dispatch(context.Background(), event.WorkspaceChangeBefore, input)
 	if err != nil || result == nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestPublicModelReturnCanonicalMessages(t *testing.T) {
 	c.backends[0].subscriptions[0]["content"] = map[string]any{"default": "body"}
 	messages := []any{inlineTestMessage("candidate", "assistant", inlineTestText("candidate-part", "answer"))}
 	transports[0].reply = func(map[string]any) []any { return []any{map[string]any{"type": "return", "value": messages}} }
-	result, err := c.Dispatch(context.Background(), "model.request.before", inlineTestInput(t, []any{inlineTestMessage("input", "user", inlineTestText("input-part", "question"))}))
+	result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, inlineTestInput(t, []any{inlineTestMessage("input", "user", inlineTestText("input-part", "question"))}))
 	if err != nil || result == nil {
 		t.Fatalf("dispatch: %v", err)
 	}

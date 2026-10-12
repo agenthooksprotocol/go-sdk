@@ -10,7 +10,8 @@ import "mime"
 import "sync/atomic"
 import "github.com/agenthooksprotocol/go-sdk/content"
 
-type Type = string
+// Type identifies an event; convert explicitly at string wire boundaries.
+type Type string
 
 // ContentPartInput accepts exactly one wire, inline text, or owned attachment part.
 // Wire preserves all advanced gap/metadata/omitted and future alternatives.
@@ -3906,3 +3907,157 @@ func (v WorkspaceChangeBeforeInput) MarshalJSON() ([]byte, error) {
 }
 
 const WorkspaceChangeBefore Type = "workspace.change.before"
+
+// ResponseForRequest validates a known canonical event context without publishing state.
+func ResponseForRequest(eventType Type, input []byte) ahp.ParseResult[ahp.ContextualResponse] {
+	switch eventType {
+	case "config.change.before":
+		r := ahp.ParseConfigChangeBeforeInterceptResponse(input)
+		result := ahp.ParseResult[ahp.ContextualResponse]{OK: r.OK, Raw: r.Raw, Diagnostics: r.Diagnostics}
+		if r.OK {
+			result.Value = &r.Value
+		}
+		return result
+	case "context.compact.after":
+		r := ahp.ParseContextCompactAfterInterceptResponse(input)
+		result := ahp.ParseResult[ahp.ContextualResponse]{OK: r.OK, Raw: r.Raw, Diagnostics: r.Diagnostics}
+		if r.OK {
+			result.Value = &r.Value
+		}
+		return result
+	case "context.compact.before":
+		r := ahp.ParseContextCompactBeforeInterceptResponse(input)
+		result := ahp.ParseResult[ahp.ContextualResponse]{OK: r.OK, Raw: r.Raw, Diagnostics: r.Diagnostics}
+		if r.OK {
+			result.Value = &r.Value
+		}
+		return result
+	case "model.request.before":
+		r := ahp.ParseModelRequestBeforeInterceptResponse(input)
+		result := ahp.ParseResult[ahp.ContextualResponse]{OK: r.OK, Raw: r.Raw, Diagnostics: r.Diagnostics}
+		if r.OK {
+			result.Value = &r.Value
+		}
+		return result
+	case "model.response.after":
+		r := ahp.ParseModelResponseAfterInterceptResponse(input)
+		result := ahp.ParseResult[ahp.ContextualResponse]{OK: r.OK, Raw: r.Raw, Diagnostics: r.Diagnostics}
+		if r.OK {
+			result.Value = &r.Value
+		}
+		return result
+	case "model.switch.before":
+		r := ahp.ParseModelSwitchBeforeInterceptResponse(input)
+		result := ahp.ParseResult[ahp.ContextualResponse]{OK: r.OK, Raw: r.Raw, Diagnostics: r.Diagnostics}
+		if r.OK {
+			result.Value = &r.Value
+		}
+		return result
+	case "session.start":
+		r := ahp.ParseSessionStartInterceptResponse(input)
+		result := ahp.ParseResult[ahp.ContextualResponse]{OK: r.OK, Raw: r.Raw, Diagnostics: r.Diagnostics}
+		if r.OK {
+			result.Value = &r.Value
+		}
+		return result
+	case "task.change.before":
+		r := ahp.ParseTaskChangeBeforeInterceptResponse(input)
+		result := ahp.ParseResult[ahp.ContextualResponse]{OK: r.OK, Raw: r.Raw, Diagnostics: r.Diagnostics}
+		if r.OK {
+			result.Value = &r.Value
+		}
+		return result
+	case "tool.after":
+		r := ahp.ParseToolAfterInterceptResponse(input)
+		result := ahp.ParseResult[ahp.ContextualResponse]{OK: r.OK, Raw: r.Raw, Diagnostics: r.Diagnostics}
+		if r.OK {
+			result.Value = &r.Value
+		}
+		return result
+	case "tool.batch.after":
+		r := ahp.ParseToolBatchAfterInterceptResponse(input)
+		result := ahp.ParseResult[ahp.ContextualResponse]{OK: r.OK, Raw: r.Raw, Diagnostics: r.Diagnostics}
+		if r.OK {
+			result.Value = &r.Value
+		}
+		return result
+	case "tool.before":
+		r := ahp.ParseToolBeforeInterceptResponse(input)
+		result := ahp.ParseResult[ahp.ContextualResponse]{OK: r.OK, Raw: r.Raw, Diagnostics: r.Diagnostics}
+		if r.OK {
+			result.Value = &r.Value
+		}
+		return result
+	case "tool.permission.request":
+		r := ahp.ParseToolPermissionRequestInterceptResponse(input)
+		result := ahp.ParseResult[ahp.ContextualResponse]{OK: r.OK, Raw: r.Raw, Diagnostics: r.Diagnostics}
+		if r.OK {
+			result.Value = &r.Value
+		}
+		return result
+	case "turn.finish.before":
+		r := ahp.ParseTurnFinishBeforeInterceptResponse(input)
+		result := ahp.ParseResult[ahp.ContextualResponse]{OK: r.OK, Raw: r.Raw, Diagnostics: r.Diagnostics}
+		if r.OK {
+			result.Value = &r.Value
+		}
+		return result
+	case "turn.start":
+		r := ahp.ParseTurnStartInterceptResponse(input)
+		result := ahp.ParseResult[ahp.ContextualResponse]{OK: r.OK, Raw: r.Raw, Diagnostics: r.Diagnostics}
+		if r.OK {
+			result.Value = &r.Value
+		}
+		return result
+	case "user.elicitation.request":
+		r := ahp.ParseUserElicitationRequestInterceptResponse(input)
+		result := ahp.ParseResult[ahp.ContextualResponse]{OK: r.OK, Raw: r.Raw, Diagnostics: r.Diagnostics}
+		if r.OK {
+			result.Value = &r.Value
+		}
+		return result
+	case "user.elicitation.result":
+		r := ahp.ParseUserElicitationResultInterceptResponse(input)
+		result := ahp.ParseResult[ahp.ContextualResponse]{OK: r.OK, Raw: r.Raw, Diagnostics: r.Diagnostics}
+		if r.OK {
+			result.Value = &r.Value
+		}
+		return result
+	case "user.message.inbound":
+		r := ahp.ParseUserMessageInboundInterceptResponse(input)
+		result := ahp.ParseResult[ahp.ContextualResponse]{OK: r.OK, Raw: r.Raw, Diagnostics: r.Diagnostics}
+		if r.OK {
+			result.Value = &r.Value
+		}
+		return result
+	case "user.message.outbound":
+		r := ahp.ParseUserMessageOutboundInterceptResponse(input)
+		result := ahp.ParseResult[ahp.ContextualResponse]{OK: r.OK, Raw: r.Raw, Diagnostics: r.Diagnostics}
+		if r.OK {
+			result.Value = &r.Value
+		}
+		return result
+	case "workspace.change.before":
+		r := ahp.ParseWorkspaceChangeBeforeInterceptResponse(input)
+		result := ahp.ParseResult[ahp.ContextualResponse]{OK: r.OK, Raw: r.Raw, Diagnostics: r.Diagnostics}
+		if r.OK {
+			result.Value = &r.Value
+		}
+		return result
+	default:
+		return ahp.ParseResult[ahp.ContextualResponse]{Diagnostics: []ahp.ParseDiagnostic{{Code: ahp.DiagnosticUnknownVariant, Severity: ahp.SeverityError, Message: "Unsupported request event: " + string(eventType)}}}
+	}
+}
+
+// StageResponseForRequest runs application validation before a runtime may publish state.
+func StageResponseForRequest(eventType Type, input []byte, validate func(ahp.ContextualResponse) error) ahp.ParseResult[ahp.ContextualResponse] {
+	r := ResponseForRequest(eventType, input)
+	if r.OK && validate != nil {
+		if err := validate(r.Value); err != nil {
+			r.OK = false
+			r.Value = nil
+			r.Diagnostics = append(r.Diagnostics, ahp.ParseDiagnostic{Code: ahp.DiagnosticInvalidKnownVariant, Severity: ahp.SeverityError, Message: err.Error()})
+		}
+	}
+	return r
+}

@@ -240,7 +240,7 @@ func TestContractPublicHostCodecsOptInOnly(t *testing.T) {
 			if mode == "missing" {
 				options = append(options, WithHostValueCodec("/absent", JSONCodec[int](nil)))
 			}
-			result, err := c.Dispatch(context.Background(), "tool.before", input, options...)
+			result, err := c.Dispatch(context.Background(), event.ToolBefore, input, options...)
 			if mode == "invalid" {
 				if err == nil || result != nil || len(transports[0].calls) != 0 {
 					t.Fatal("invalid host contract reached backend")

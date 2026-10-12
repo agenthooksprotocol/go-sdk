@@ -41,7 +41,7 @@ func TestTypedSettlementPublicBoundary(t *testing.T) {
 			map[string]any{"type": "message", "text": "accepted"},
 			map[string]any{"type": "inject", "target": "context", "operation": "append", "deliverAt": "now", "value": messages},
 		}
-		parsed := ahp.ResponseForRequest("model.request.before", sdkJSON(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{"protocolVersion": "draft", "effects": effects}}))
+		parsed := event.ResponseForRequest(event.ModelRequestBefore, sdkJSON(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{"protocolVersion": "draft", "effects": effects}}))
 		if err := canonical.Validate("intercept-response", sdkJSON(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{"protocolVersion": "draft", "effects": effects}})); err != nil {
 			t.Fatal(err)
 		}
@@ -50,7 +50,7 @@ func TestTypedSettlementPublicBoundary(t *testing.T) {
 		}
 		return effects
 	}
-	result, err := c.Dispatch(context.Background(), "model.request.before", input)
+	result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, input)
 	if err != nil {
 		t.Fatal(err)
 	}

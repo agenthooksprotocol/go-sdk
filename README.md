@@ -201,8 +201,8 @@ lifecycle default is invented.
 
 ### Subscription interest
 
-`func (h *Hooks) Subscribes(event string) bool` reports static subscription
-interest. Call `hooks.Subscribes("tool.before")` before expensive hook input
+`func (h *Hooks) Subscribes(eventType event.Type) bool` reports static subscription
+interest. Call `hooks.Subscribes(event.ToolBefore)` before expensive hook input
 preparation; when it returns false, skip that preparation and hook delivery,
 not the host's permission checks. The synchronous lookup performs no input
 preparation, transport I/O, authentication, or uploads.
@@ -303,8 +303,15 @@ fields are typed; optional fields use `ahp.Some(value)`, including `ID` and
 `ParentEventID`. Zero optional values mean absent, not an explicit null.
 The generated marshaler restores canonical nested wire fields. Use root `ahp`
 wire models and parsers for decoding protocol JSON, not ergonomic input structs.
-Advanced dynamic callers can use `Hooks.Dispatch(ctx, eventType, input, options...)`
-with canonical host fields, excluding SDK-owned `type`, `source`, and `manifest`.
+Advanced dynamic callers can use `Hooks.Dispatch(ctx, event.ToolBefore, input, options...)`
+with a generated `event.Type` constant and canonical host fields, excluding
+SDK-owned `type`, `source`, and `manifest`. `CapabilityAdmissionError.Event` uses
+that same generated event type. Wire registration selectors remain strings and
+can include exact names, `*`, and prefixes. Contextual response parsing uses
+`event.ResponseForRequest(event.ToolBefore, responseBytes)` or
+`event.StageResponseForRequest(event.ToolBefore, responseBytes, validate)`;
+both accept the same generated `event.Type`. Root `ahp` models and schema parsers
+handle protocol wire documents.
 Canonical fixture adapters use this path instead of duplicating generated mappings.
 The SDK owns the protocol envelope and fills permitted identity fields; callers
 supply required occurrence and application data.

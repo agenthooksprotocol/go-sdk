@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/agenthooksprotocol/go-sdk/diagnostic"
+	"github.com/agenthooksprotocol/go-sdk/event"
 	"io"
 	"reflect"
 	"testing"
@@ -45,7 +46,7 @@ func TestInlineCanonicalMessagesSelectionPrivacy(t *testing.T) {
 			}
 			input := inlineTestInput(t, messages)
 			before := contentClone(input)
-			result, err := c.Dispatch(context.Background(), "model.request.before", input)
+			result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, input)
 			if result != nil {
 				defer result.Close()
 			}
@@ -108,7 +109,7 @@ func TestInlineCanonicalMessagesMergeAppendAndReplaceSubstitute(t *testing.T) {
 			}
 			input := inlineTestInput(t, []any{original})
 			before := contentClone(input)
-			result, err := c.Dispatch(context.Background(), "model.request.before", input)
+			result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, input)
 			if result != nil {
 				defer result.Close()
 			}
@@ -144,7 +145,7 @@ func TestInlineCanonicalMessagesBodySelectionRequiresAuthorization(t *testing.T)
 	c, transports := testClient(t, "fail-closed")
 	setDispatchBoundary(c, "model.request.before", map[string]any{"effects": []any{}})
 	c.backends[0].subscriptions[0]["content"] = map[string]any{"default": "body"}
-	result, err := c.Dispatch(context.Background(), "model.request.before", inlineTestInput(t, []any{inlineTestMessage("m1", "user", inlineTestText("p1", "secret"))}))
+	result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, inlineTestInput(t, []any{inlineTestMessage("m1", "user", inlineTestText("p1", "secret"))}))
 	if result != nil {
 		defer result.Close()
 	}
@@ -175,7 +176,7 @@ func inlineTestRejectEdit(t *testing.T, selection map[string]any, original, inco
 	transports[0].reply = func(map[string]any) []any {
 		return []any{map[string]any{"type": "modify", "target": "request", "operation": operation, "value": incoming}}
 	}
-	result, err := c.Dispatch(context.Background(), "model.request.before", inlineTestInput(t, original))
+	result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, inlineTestInput(t, original))
 	if result != nil {
 		t.Cleanup(func() { _ = result.Close() })
 	}
@@ -307,7 +308,7 @@ func TestInlineCanonicalReceiverStatePrivacy(t *testing.T) {
 					}
 					return []any{map[string]any{"type": "inject", "target": "context", "operation": "append", "deliverAt": "now", "value": value}}
 				}
-				result, err := c.Dispatch(context.Background(), "model.request.before", inlineTestInput(t, []any{inlineTestMessage("input-message", "user", inlineTestText("input-text", "ordinary input"))}))
+				result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, inlineTestInput(t, []any{inlineTestMessage("input-message", "user", inlineTestText("input-text", "ordinary input"))}))
 				if result != nil {
 					defer result.Close()
 				}
@@ -390,7 +391,7 @@ func TestInlineCanonicalInitialModelCandidateRejectedBeforeDelivery(t *testing.T
 			if err := json.Unmarshal(sdkJSON(map[string]any{"permission": "none", "candidate": map[string]any{"value": tc.value}}), &initial); err != nil {
 				t.Fatal(err)
 			}
-			result, err := c.Dispatch(context.Background(), "model.request.before", inlineTestInput(t, []any{}), WithInitialState(initial))
+			result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, inlineTestInput(t, []any{}), WithInitialState(initial))
 			if result != nil {
 				defer result.Close()
 			}
