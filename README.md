@@ -527,6 +527,27 @@ Each intercept context supplies the exact `Event` and `Capabilities`, optional
 extra maps; the observation schema has no state or extensions members. Unknown
 params members retain future data without granting authority.
 
+`ObserveHandlers.Any` is an optional catch-all for observations whose
+per-event callback is nil. It receives a `server.ObserveAnyContext` with the
+canonical event `Type`, the validated `*ahp.Event` union, and the same extras
+maps. It never runs alongside a per-event callback, so you can audit-log every
+observation and still handle selected events with typed callbacks:
+
+```go
+Observe: server.ObserveHandlers{
+    ToolAfter: handleToolAfter, // takes precedence for tool.after
+    Any: func(ctx context.Context, observation server.ObserveAnyContext) error {
+        log.Printf("observed %s", observation.Type)
+        return nil
+    },
+},
+```
+
+Without `Any`, an observation with no matching callback is acknowledged with an
+empty `204` and reported only through `server.Options.Diagnostic` as
+`server.ErrObserverUnavailable`. An intercept request with no matching
+callback receives JSON-RPC error `-32002` (`unsupported_event`).
+
 Replies contain ordered event-specific `Effects`, optional `Extensions`, and
 opaque result `AdditionalProperties`. A zero reply is a no-op. The engine supplies
 protocol version and request correlation and validates effects against the
