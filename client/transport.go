@@ -16,6 +16,9 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"runtime"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -74,6 +77,16 @@ func newBackendTransport(backend *ahp.Backend, eventClient *http.Client) (backen
 	}
 	copied := *cfg
 	copied.Args.Value = append([]string(nil), cfg.Args.Value...)
+	if cfg.Env.Present {
+		copied.Env.Value = make(map[string]string, len(cfg.Env.Value))
+		for name, value := range cfg.Env.Value {
+			// Names and values are literal; only reject what an OS environment cannot hold.
+			if name == "" || strings.ContainsAny(name, "=\x00") || strings.ContainsRune(value, 0) {
+				return nil, errors.New("invalid stdio environment entry")
+			}
+			copied.Env.Value[name] = value
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &stdioBackend{credential: credential, cfg: copied, gate: make(chan struct{}, 1), ctx: ctx, cancel: cancel, processes: make(map[*backendProcess]struct{})}, nil
 }
@@ -184,6 +197,63 @@ func (t *httpBackend) Exchange(ctx context.Context, body []byte, notification bo
 	return data, nil
 }
 
+// baseEnvironment is the minimal host environment a stdio backend receives
+// unless the host opts into full inheritance. Every LC_* locale variable is
+// also kept. Registration env entries are applied on top.
+var baseEnvironment = []string{"PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "TZ", "TMPDIR", "TEMP", "TMP"}
+
+// windowsBaseEnvironment adds variables Windows processes commonly need to start.
+var windowsBaseEnvironment = []string{"SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA"}
+
+// backendEnvironment builds a child environment from the host environment and
+// registration entries. Entries replace base values with the same name, using
+// case-insensitive names on Windows. The result is never nil, so exec.Cmd does
+// not fall back to inheriting the full host environment.
+func backendEnvironment(host []string, entries map[string]string, inherit, windows bool) []string {
+	key := func(name string) string {
+		if windows {
+			return strings.ToUpper(name)
+		}
+		return name
+	}
+	allowed := make(map[string]bool, len(baseEnvironment)+len(windowsBaseEnvironment))
+	for _, name := range baseEnvironment {
+		allowed[key(name)] = true
+	}
+	if windows {
+		for _, name := range windowsBaseEnvironment {
+			allowed[key(name)] = true
+		}
+	}
+	overridden := make(map[string]bool, len(entries))
+	for name := range entries {
+		overridden[key(name)] = true
+	}
+	env := make([]string, 0, len(entries)+len(allowed))
+	seen := make(map[string]bool)
+	for _, kv := range host {
+		name, _, ok := strings.Cut(kv, "=")
+		if !ok || name == "" {
+			continue
+		}
+		k := key(name)
+		if seen[k] || overridden[k] || !(inherit || allowed[k] || strings.HasPrefix(k, key("LC_"))) {
+			continue
+		}
+		seen[k] = true
+		env = append(env, kv)
+	}
+	names := make([]string, 0, len(entries))
+	for name := range entries {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		env = append(env, name+"="+entries[name])
+	}
+	return env
+}
+
 type backendProcess struct {
 	cmd    *exec.Cmd
 	stdin  *os.File
@@ -209,6 +279,8 @@ type stdioBackend struct {
 	processes  map[*backendProcess]struct{}
 	current    *backendProcess // guarded by gate
 	workers    sync.WaitGroup
+	// inheritEnvironment passes the full host environment instead of the minimal base.
+	inheritEnvironment bool
 }
 
 func (t *stdioBackend) start() (*backendProcess, error) {
@@ -224,7 +296,7 @@ func (t *stdioBackend) start() (*backendProcess, error) {
 	if t.cfg.CWD.Present {
 		cmd.Dir = t.cfg.CWD.Value
 	}
-	// The schema has no env override. Inherit the host environment.
+	cmd.Env = backendEnvironment(os.Environ(), t.cfg.Env.Value, t.inheritEnvironment, runtime.GOOS == "windows")
 	cmd.Stderr = nil // discard diagnostics without leaking credentials or blocking
 	configureBackendProcess(cmd)
 	inRead, inWrite, err := os.Pipe()

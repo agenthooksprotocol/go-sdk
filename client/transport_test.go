@@ -44,6 +44,16 @@ func TestTransportHelper(t *testing.T) {
 			}
 			continue
 		}
+		if mode == "env" {
+			names := map[string]string{}
+			for _, kv := range os.Environ() {
+				name, value, _ := strings.Cut(kv, "=")
+				names[name] = value
+			}
+			encoded, _ := json.Marshal(names)
+			fmt.Printf("{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":%s}\n", req.ID, encoded)
+			continue
+		}
 		if mode == "oversize" {
 			fmt.Println(strings.Repeat("x", maxTransportMessage+1))
 			continue

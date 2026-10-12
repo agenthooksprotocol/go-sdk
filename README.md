@@ -200,6 +200,18 @@ rejects fractional milliseconds and nonpositive deadlines. Use the generated
 `NewInterceptMilliseconds` for explicit wire values. No timeout or stdio
 lifecycle default is invented.
 
+A stdio backend starts with a minimal base environment taken from the host:
+`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_ALL` and other `LC_*`
+variables, `TZ`, `TMPDIR`, `TEMP` and `TMP`. On Windows it also gets
+`SYSTEMROOT`, `WINDIR`, `COMSPEC`, `PATHEXT`, `USERPROFILE`, `APPDATA`,
+`LOCALAPPDATA` and `PROGRAMDATA`, matched case-insensitively. The registration's
+stdio `env` entries are applied on top as literal values and replace base
+values with the same name. Bearer `tokenEnv` references are always resolved in
+the host environment, and credentials are never copied into the child.
+`client.Options.InheritEnvironment` passes the full host environment instead.
+It is an SDK option, not part of the protocol, for backends that still depend
+on inherited variables.
+
 ### Subscription interest
 
 `func (h *Hooks) Subscribes(eventType event.Type) bool` reports static subscription
