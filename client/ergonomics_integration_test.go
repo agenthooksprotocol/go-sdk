@@ -22,62 +22,39 @@ import (
 )
 
 func TestGeneratedCapabilityCompositionAndBoundaryAdmission(t *testing.T) {
-	operations := []capability.ModifyOperation{capability.Replace}
-	grant := capability.ModifyInput(operations...)
-	operations[0] = capability.Merge
-	first, err := capability.Intercept(capability.Deny(), grant)
-	if err != nil {
-		t.Fatal(err)
+	grant := capability.Replace()
+	first := capability.Host{ToolBefore: capability.ToolBefore{Deny: true, ModifyInput: grant, Observe: true}}.Wire()["tool.before"]
+	before := string(sdkJSON(first))
+	reused := capability.Host{ToolBefore: capability.ToolBefore{ModifyInput: grant}}.Wire()["tool.before"]
+	if !reflect.DeepEqual(reused.Capabilities.Modify, first.Capabilities.Modify) {
+		t.Fatal("reused modification grant changed authority")
 	}
-	before := string(sdkJSON(first.Capabilities))
-	second, err := capability.Intercept(grant, capability.ModifyInput(capability.Merge))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(sdkJSON(first.Capabilities)) != before || !reflect.DeepEqual(first.Modes, []Mode{Intercept, Observe}) {
+	second := capability.Host{ToolBefore: capability.ToolBefore{ModifyInput: capability.ReplaceAndMerge()}}.Wire()["tool.before"]
+	if string(sdkJSON(first)) != before || !reflect.DeepEqual(first.Modes, []string{"intercept", "observe"}) {
 		t.Fatal("reused grant mutated declaration or modes")
 	}
 	base, _ := sdkMap(first.Capabilities)
-	if _, _, _, err := resolveOptions(base, []InterceptOption{WithCapabilities(*second.Capabilities)}); err == nil {
-		t.Fatal("per-call merge widened replace-only grant")
-	}
-	if _, err := capability.Intercept(); err == nil {
-		t.Fatal("empty declaration accepted")
-	}
-	if _, err := capability.Intercept(capability.ModifyInput()); err == nil {
-		t.Fatal("empty operation set accepted")
-	}
-	if _, err := capability.Intercept(capability.ModifyInput("unknown")); err == nil {
-		t.Fatal("unknown operation accepted")
-	}
-	wrong, err := capability.Intercept(capability.ModifySummary(capability.Replace))
-	if err != nil {
+	var wider ahp.Capabilities
+	if err := json.Unmarshal(sdkJSON(second.Capabilities), &wider); err != nil {
 		t.Fatal(err)
 	}
-	c, err := New(eventOptionsRegistration(t, "tool.before", "intercept", nil), Options{Source: "urn:test:generated", Events: map[event.Type]capability.Event{event.ToolBefore: wrong}})
-	if c != nil {
-		c.Close()
-		t.Fatal("incompatible generated declaration acquired client")
+	if _, _, _, err := resolveOptions(base, []InterceptOption{WithCapabilities(wider)}); err == nil {
+		t.Fatal("per-call merge widened replace-only grant")
 	}
-	if err == nil {
-		t.Fatal("boundary incompatibility accepted")
-	}
-	if !reflect.DeepEqual(capability.Observe().Modes, []Mode{Observe}) {
-		t.Fatal("observe constructor added interception")
-	}
-	// Numeric limits are always checked by canonical runtime admission even
-	// when a generated parser only checks the structural capability shape.
-	if invalid, buildErr := capability.Intercept(capability.FlowContinue(-1, 0)); buildErr == nil {
-		c, admissionErr := New(eventOptionsRegistration(t, event.TurnFinishBefore, "intercept", nil), Options{Source: "urn:test:generated", Events: map[event.Type]capability.Event{event.TurnFinishBefore: invalid}})
-		if c != nil {
-			c.Close()
-			t.Fatal("negative continuation count admitted")
-		}
-		if admissionErr == nil {
-			t.Fatal("invalid limits reached delivery")
+	for _, host := range []capability.Host{{}, {ToolBefore: capability.ToolBefore{}}, {ToolBefore: capability.ToolBefore{ModifyInput: capability.Modify{}}}} {
+		if len(host.Wire()) != 0 {
+			t.Fatal("zero declaration granted authority")
 		}
 	}
-	var code diagnostic.Code = DeliveryRemoteRPC
+	zeroModify := capability.Host{ToolBefore: capability.ToolBefore{Deny: true, ModifyInput: capability.Modify{}}}.Wire()["tool.before"]
+	if zeroModify.Capabilities.Modify != nil || !reflect.DeepEqual(zeroModify.Capabilities.Effects, []string{"deny"}) {
+		t.Fatal("zero modification widened a nonzero event")
+	}
+	observed := capability.Host{ToolBefore: capability.Observe{}}.Wire()["tool.before"]
+	if !reflect.DeepEqual(observed.Modes, []string{"observe"}) || observed.Capabilities != nil {
+		t.Fatal("explicit observation added interception")
+	}
+	var code diagnostic.Code = diagnostic.RemoteRpc
 	if code != diagnostic.RemoteRpc {
 		t.Fatal("diagnostic vocabulary diverged")
 	}
@@ -171,11 +148,7 @@ func TestNamedSourcesReachAuthorizedReceiverReferences(t *testing.T) {
 				if !reg.OK {
 					t.Fatal(reg.Diagnostics)
 				}
-				declaration, err := capability.Intercept(capability.Deny())
-				if err != nil {
-					t.Fatal(err)
-				}
-				hooks, err := New(reg.Value, Options{Source: "urn:test:source", Events: map[event.Type]capability.Event{event.ToolBefore: declaration}, Content: ContentOptions{AllowLoopbackHTTP: true, AuthorizeContent: contentTestAllow, ProjectOpaque: func(_ context.Context, _ ContentAuthorization, _ string, value any) (any, error) { return value, nil }}})
+				hooks, err := New(reg.Value, Options{Source: "urn:test:source", Events: capability.Host{ToolBefore: capability.ToolBefore{Deny: true, Observe: true}}, Content: ContentOptions{AllowLoopbackHTTP: true, AuthorizeContent: contentTestAllow, ProjectOpaque: func(_ context.Context, _ ContentAuthorization, _ string, value any) (any, error) { return value, nil }}})
 				if err != nil {
 					t.Fatal(err)
 				}

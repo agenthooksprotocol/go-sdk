@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-func uploadFixture(ctx context.Context, binding UploadBinding, sub, ref string, body []byte, step Object) (Object, int, error) {
+func uploadFixture(ctx context.Context, binding UploadBinding, body []byte, step Object) (Object, int, error) {
 	sum := fmt.Sprintf("%x", sha256.Sum256(body))
 	size, ok := step["size"].(float64)
 	if !ok {
@@ -26,7 +26,7 @@ func uploadFixture(ctx context.Context, binding UploadBinding, sub, ref string, 
 		hash = sum
 	}
 	if size == float64(len(body)) && hash == sum {
-		return UploadContent(ctx, binding, sub, ref, body)
+		return UploadContent(ctx, binding, body)
 	}
 	timeout := 5 * time.Second
 	if binding.TimeoutMs > 0 {

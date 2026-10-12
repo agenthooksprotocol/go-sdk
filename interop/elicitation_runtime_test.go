@@ -23,6 +23,24 @@ func TestElicitationPublicEffects(t *testing.T) {
 		return Object{"jsonrpc": "2.0", "id": stage, "method": "hooks/intercept", "params": Object{"protocolVersion": "draft", "event": event, "capabilities": caps}}
 	}
 	resolve := func(ref Object) ([]byte, error) { return bodies[str(ref["ref"])], nil }
+	t.Run("standalone exchange validation", func(t *testing.T) {
+		request, result := makeRequest("request"), makeRequest("result")
+		// Passive validation does not require an elicitation effect grant.
+		delete(obj(obj(request["params"])["capabilities"]), "elicitation")
+		delete(obj(obj(result["params"])["capabilities"]), "elicitation")
+		validate := func(string, any) error { return nil }
+		summary, err := ValidateElicitationExchange(request, result, resolve, validate, "authenticated")
+		if err != nil || obj(summary["provenance"])["kind"] != "mcp" || obj(obj(summary["result"])["content"])["answer"] != "original" {
+			t.Fatalf("passive exchange changed: %v %v", summary, err)
+		}
+		if _, err := ValidateElicitationExchange(request, result, resolve, validate, ""); err == nil {
+			t.Fatal("missing authenticated principal accepted")
+		}
+		obj(obj(result["params"])["event"])["parentEventId"] = "other-request"
+		if _, err := ValidateElicitationExchange(request, result, resolve, validate, "authenticated"); err == nil {
+			t.Fatal("uncorrelated exchange accepted")
+		}
+	})
 	for _, tc := range []struct {
 		name    string
 		result  Object
@@ -88,13 +106,9 @@ func TestElicitationPublicModeAdmission(t *testing.T) {
 					request = makeBoundary("request", Object{"effects": []any{"message"}})
 					result = makeBoundary("result", caps)
 				}
-				legacyResult := result
-				if legacyResult == nil {
-					legacyResult = makeBoundary("result", Object{"effects": []any{"message"}})
-				}
 				effects := []any{candidate}
-				before := jsonBytes(Object{"request": request, "result": result, "legacyResult": legacyResult, "effects": effects, "bodies": bodies})
-				for _, entry := range []string{"runtime", "apply", "legacy", "legacy-neutral"} {
+				before := jsonBytes(Object{"request": request, "result": result, "effects": effects, "bodies": bodies})
+				for _, entry := range []string{"runtime", "apply"} {
 					reads := map[string]int{}
 					deliveries := map[string]int{}
 					resolve := func(ref Object) ([]byte, error) { key := str(ref["ref"]); reads[key]++; return bodies[key], nil }
@@ -103,29 +117,17 @@ func TestElicitationPublicModeAdmission(t *testing.T) {
 					switch entry {
 					case "apply":
 						published, err = ApplyElicitationEffects(request, result, resolve, func(string, any) error { return nil }, "authenticated", effects)
-					case "legacy":
-						published, err = ValidateElicitationExchange(request, legacyResult, resolve, func(string, any) error { return nil }, "authenticated", candidate)
-					case "legacy-neutral":
-						published, err = ValidateElicitationExchange(request, legacyResult, resolve, func(string, any) error { return nil }, "authenticated", nil)
 					default:
 						err = acceptElicitationEffectsObserved(request, result, resolve, effects, func(event string) { deliveries[event]++ })
 					}
-					if grant == "correct" || entry == "legacy-neutral" {
+					if grant == "correct" {
 						if err != nil {
 							t.Fatalf("entry=%s: correct grant rejected: %v", entry, err)
 						}
 						if entry != "runtime" && published == nil {
 							t.Fatal("correct grant produced no publication")
 						}
-						if entry == "legacy" || entry == "legacy-neutral" {
-							if obj(obj(published["result"])["content"])["answer"] != "original" {
-								t.Fatal("legacy validation applied the effect instead of preserving the exchange")
-							}
-							provenance := obj(published["provenance"])
-							if (entry == "legacy" && (provenance["kind"] != "hook" || provenance["effect"] != effect)) || (entry == "legacy-neutral" && provenance["kind"] != "mcp") {
-								t.Fatalf("legacy provenance changed: %v", provenance)
-							}
-						}
+
 					} else {
 						if err == nil || !strings.Contains(err.Error(), "mode") {
 							t.Fatalf("entry=%s: expected runtime mode admission error, got %v", entry, err)
@@ -142,7 +144,7 @@ func TestElicitationPublicModeAdmission(t *testing.T) {
 							t.Fatalf("entry=%s: rejected boundary resolved: %v", entry, reads)
 						}
 					}
-					after := jsonBytes(Object{"request": request, "result": result, "legacyResult": legacyResult, "effects": effects, "bodies": bodies})
+					after := jsonBytes(Object{"request": request, "result": result, "effects": effects, "bodies": bodies})
 					if !bytes.Equal(before, after) {
 						t.Fatal("bridge mutated inputs")
 					}

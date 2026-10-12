@@ -11,10 +11,11 @@ import (
 )
 
 // ValidateElicitationExchange binds complete uploaded MCP objects to normalized
-// metadata. Resolve and validate are host-owned. Principal MUST come from the
+// metadata without applying effects or checking effect grants. Resolve and validate
+// are host-owned. Principal MUST come from the
 // authenticated transport, never event.source or elicitation.server.
-func ValidateElicitationExchange(request, result Object, resolve func(Object) ([]byte, error), validate func(string, any) error, principal string, effect Object) (Object, error) {
-	fail := func() (Object, error) { return nil, fmt.Errorf("invalid elicitation binding or effect grant") }
+func ValidateElicitationExchange(request, result Object, resolve func(Object) ([]byte, error), validate func(string, any) error, principal string) (Object, error) {
+	fail := func() (Object, error) { return nil, fmt.Errorf("invalid elicitation binding") }
 	if principal == "" {
 		return fail()
 	}
@@ -34,17 +35,6 @@ func ValidateElicitationExchange(request, result Object, resolve func(Object) ([
 	if err := ValidateElicitationCorrelation(request, result); err != nil {
 		return nil, err
 	}
-	if effect != nil {
-		// Legacy single-effect checks share public admission with atomic apply.
-		// Return/deny belong to the request; only modify dispatches the result.
-		var effectResult Object
-		if effect["type"] == "modify" {
-			effectResult = result
-		}
-		if err := acceptElicitationEffects(request, effectResult, resolve, []any{effect}); err != nil {
-			return nil, err
-		}
-	}
 	req, res := obj(re["elicitation"]), obj(se["elicitation"])
 	payload, err := ReadSelectedElicitation(req, "request", resolve, validate)
 	if err != nil {
@@ -58,9 +48,6 @@ func ValidateElicitationExchange(request, result Object, resolve func(Object) ([
 		return fail()
 	}
 	if payload == nil || answer == nil {
-		if effect != nil {
-			return fail()
-		}
 		return Object{"selection": Object{"request": elicitationSelection(req, "request"), "result": elicitationSelection(res, "result")}, "bodyValidation": "not-selected", "provenance": Object{"kind": "mcp", "authenticatedSource": principal}, "externalCompletion": false}, nil
 	}
 	if err = ValidateElicitationAnswer(payload, answer, validate); err != nil {
@@ -77,26 +64,6 @@ func ValidateElicitationExchange(request, result Object, resolve func(Object) ([
 		return fail()
 	}
 	provenance := Object{"kind": "mcp", "authenticatedSource": principal}
-	if effect != nil {
-		if err := validateEffectShape(effect); err != nil {
-			return nil, err
-		}
-		if err := validate("effect", effect); err != nil {
-			return nil, err
-		}
-		kind := str(effect["type"])
-		boundary := rp
-		if kind == "modify" {
-			boundary = sp
-		}
-		if (kind != "return" && kind != "deny" && kind != "modify") || !has(obj(boundary["capabilities"])["effects"], kind) {
-			return fail()
-		}
-		if kind == "modify" && (effect["target"] != "content" || (effect["operation"] != "replace" && effect["operation"] != "merge") || obj(obj(obj(boundary["capabilities"])["modify"])["content"])[str(effect["operation"])] != true) {
-			return fail()
-		}
-		provenance = Object{"kind": "hook", "authenticatedSource": principal, "effect": kind}
-	}
 	return Object{"request": payload, "result": answer, "provenance": provenance, "externalCompletion": false}, nil
 }
 
@@ -189,7 +156,7 @@ func ApplyElicitationEffects(request, result Object, resolve func(Object) ([]byt
 	var staged Object
 	if result != nil {
 		boundary = result
-		summary, e := ValidateElicitationExchange(request, result, resolve, validate, principal, nil)
+		summary, e := ValidateElicitationExchange(request, result, resolve, validate, principal)
 		if e != nil {
 			return nil, e
 		}
@@ -348,8 +315,12 @@ func acceptElicitationEffectsObserved(request, result Object, resolve func(Objec
 	if !reg.OK {
 		return fmt.Errorf("invalid elicitation fixture registration")
 	}
-	var manifest ahp.StaticCapabilityManifest
-	if err := json.Unmarshal(jsonBytes(Object{"events": events, "gaps": []any{}, "transports": []any{"http"}, "authentication": []any{}, "toolPaths": []any{"execute"}, "contentCategories": []any{"text"}, "limits": Object{"maxContinuations": 4}, "managedPolicy": Object{"scopes": []any{"user"}, "disableable": true}, "correlationIdentityFields": []any{"event.id"}}), &manifest); err != nil {
+	metadata, err := fixtureManifestMetadata(Object{"events": events, "gaps": []any{}, "transports": []any{"http"}, "authentication": []any{}, "toolPaths": []any{"execute"}, "contentCategories": []any{"text"}, "limits": Object{"maxContinuations": 4}, "managedPolicy": Object{"scopes": []any{"user"}, "disableable": true}, "correlationIdentityFields": []any{"event.id"}})
+	if err != nil {
+		return err
+	}
+	host, err := fixtureHost(events)
+	if err != nil {
 		return err
 	}
 	transport := &fixtureTransport{exchange: func(_ context.Context, _ string, raw []byte) ([]byte, error) {
@@ -366,15 +337,18 @@ func acceptElicitationEffectsObserved(request, result Object, resolve func(Objec
 		}
 		return jsonBytes(Object{"jsonrpc": "2.0", "id": req["id"], "result": Object{"protocolVersion": "draft", "effects": selected}}), nil
 	}}
-	c, err := hooks.New(reg.Value, hooks.Options{Source: str(obj(obj(request["params"])["event"])["source"]), Manifest: manifest, EventClient: &http.Client{Transport: transport}, Content: hooks.ContentOptions{
+	c, err := hooks.New(reg.Value, hooks.Options{Source: str(obj(obj(request["params"])["event"])["source"]), Events: host, Metadata: metadata, EventClient: &http.Client{Transport: transport}, Content: hooks.ContentOptions{
 		// This isolated host grants body disclosure and structured answer edits only
 		// to its registered elicitation receiver. Metadata/omit parts do not acquire
 		// body authority, and no resolver or upload is involved.
 		AuthorizeContent: func(_ context.Context, scope hooks.ContentAuthorization) (bool, error) {
 			return scope.BackendID == "org.agenthooks.elicitation-fixture" &&
 				(scope.Operation == "read" || scope.Operation == "write") &&
-				obj(scope.Subscription["content"])["default"] == "body" &&
-				scope.Item["kind"] == "text" && scope.Item["selection"] == "body", nil
+				scope.Subscription.InterceptSubscription.Present &&
+				scope.Subscription.InterceptSubscription.Value != nil &&
+				scope.Subscription.InterceptSubscription.Value.Content != nil &&
+				scope.Subscription.InterceptSubscription.Value.Content.Default == "body" &&
+				scope.Item.Kind == "text" && scope.Item.Selection == "body", nil
 		},
 	}})
 	if err != nil {
@@ -384,7 +358,11 @@ func acceptElicitationEffectsObserved(request, result Object, resolve func(Objec
 	var snapshot *hooks.ElicitationRequest
 	for _, req := range boundaries {
 		e := obj(obj(req["params"])["event"])
-		var opts []hooks.InterceptOption
+		narrow, err := fixtureOccurrenceCapabilities(obj(req["params"]))
+		if err != nil {
+			return err
+		}
+		opts := []hooks.InterceptOption{narrow}
 		if snapshot != nil {
 			opts = append(opts, hooks.WithElicitationRequest(snapshot))
 		}
@@ -392,8 +370,8 @@ func acceptElicitationEffectsObserved(request, result Object, resolve func(Objec
 		if err != nil {
 			return err
 		}
-		if len(accepted.Errors) > 0 {
-			return accepted.Errors[0]
+		if len(accepted.Diagnostics) > 0 {
+			return accepted.Diagnostics[0]
 		}
 		snapshot = accepted.Snapshot
 	}

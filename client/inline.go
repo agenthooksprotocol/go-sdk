@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/content"
 	"github.com/agenthooksprotocol/go-sdk/internal/canonical"
 	"reflect"
 	"strings"
@@ -86,10 +87,10 @@ func inlineAttachments(value any, path string) map[string]map[string]any {
 func (p *preparedBoundary) validateInlineAttachments(event map[string]any, path string, value any) error {
 	old := inlineAttachments(inlineAt(event, path), path)
 	next := inlineAttachments(value, path)
-	owners := map[string]*ContentSource{}
+	owners := map[string]*content.Source{}
 	for nextPath, item := range next {
 		matched := false
-		var owner *ContentSource
+		var owner *content.Source
 		for oldPath, previous := range old {
 			if reflect.DeepEqual(item, previous) {
 				candidate := p.sources[oldPath]

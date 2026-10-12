@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"github.com/agenthooksprotocol/go-sdk/content"
+	"github.com/agenthooksprotocol/go-sdk/event"
 	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 	"io"
 	"net/http"
@@ -24,16 +25,16 @@ func TestPublicDispatchRetainedResultsAndSources(t *testing.T) {
 	sub := c.backends[0].subscriptions[0]
 	projection := contentTestSubscription(server.URL)
 	sub["content"], sub["upload"] = projection["content"], projection["upload"]
-	var sources []*ContentSource
+	var sources []*content.Source
 	var results []*Result
 	for i := 0; i < 4097; i++ {
-		source := NewContentSource(io.NopCloser(strings.NewReader("original")))
+		source := content.NewSource(io.NopCloser(strings.NewReader("original")))
 		input := testInput()
 		item := contentTestItem(nil)
 		delete(item, "body")
 		item["selection"] = "metadata"
 		input["items"] = []any{item}
-		result, err := c.Dispatch(context.Background(), "tool.before", input, WithContentSource("/items/0", source))
+		result, err := c.Dispatch(context.Background(), event.ToolBefore, input, WithContentSource("/items/0", source))
 		if err != nil || len(result.Diagnostics) != 0 {
 			t.Fatalf("call %d: %v %+v", i, err, result)
 		}
@@ -71,22 +72,16 @@ func TestPreparedResultRetainsReplacementOwner(t *testing.T) {
 	path := "/items/0/parts/1"
 	attachment := map[string]any{"id": "binary", "kind": "attachment", "mediaType": "application/octet-stream", "selection": "metadata"}
 	event := targetTestCanonicalEvent(t, "model.request.before", []any{targetInlineMessage("message", targetInlineText("text", "inline replacement"), attachment)})
-	p := &preparedBoundary{sources: map[string]*ContentSource{path: source}, slots: map[string][]string{"request": {"/items"}}}
-	result := &Result{Event: sdkJSON(event)}
+	p := &preparedBoundary{sources: map[string]*content.Source{path: source}, slots: map[string][]string{"request": {"/items"}}}
+	result := &Result{Event: parsedFixtureEvent(t, event)}
 	result.retainAttachments(contentSourceConfig(nil), context.Background(), p, 64)
 	delete(p.sources, path)
 	if result.attachments[path] != source || len(result.attachments) != 1 {
 		t.Fatal("result created a second owner or text snapshot")
 	}
-	encoded, err := result.EffectiveValue("request")
-	want := string(sdkJSON(event["items"]))
-	if err != nil || string(encoded) != want {
-		t.Fatal(err, string(encoded))
-	}
-	encoded[0] = 'X'
-	againValue, err := result.EffectiveValue("request")
-	if err != nil || string(againValue) != want {
-		t.Fatal("effective value shared caller bytes", err)
+	items := result.Event.ModelRequestBeforeEvent.Value.Items
+	if string(sdkJSON(items)) != string(sdkJSON(event["items"])) {
+		t.Fatal("typed canonical items changed during owner transfer")
 	}
 	got, ok := result.Content(path)
 	if !ok || string(got) != "replacement" {
@@ -116,7 +111,7 @@ func TestPublicDispatchCancellationRetiresSource(t *testing.T) {
 			sub["content"], sub["upload"] = projection["content"], projection["upload"]
 			r, w := io.Pipe()
 			defer w.Close()
-			source := NewContentSource(r)
+			source := content.NewSource(r)
 			input := testInput()
 			item := contentTestItem(nil)
 			delete(item, "body")
@@ -131,7 +126,7 @@ func TestPublicDispatchCancellationRetiresSource(t *testing.T) {
 			}
 			done := make(chan error, 1)
 			go func() {
-				_, err := c.Dispatch(ctx, "tool.before", input, WithContentSource("/items/0", source))
+				_, err := c.Dispatch(ctx, event.ToolBefore, input, WithContentSource("/items/0", source))
 				done <- err
 			}()
 			if _, err := w.Write([]byte("x")); err != nil && mode != "timeout" {

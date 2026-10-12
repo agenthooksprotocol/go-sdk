@@ -48,10 +48,10 @@ func TestPublicCompactionInlineTextEdits(t *testing.T) {
 					t.Fatalf("dispatch: %v", err)
 				}
 				defer result.Close()
-				if len(result.Errors) != 0 {
-					t.Fatalf("composition: %+v", result.Errors)
+				if len(result.Diagnostics) != 0 {
+					t.Fatalf("composition: %+v", result.Diagnostics)
 				}
-				effective := inlineAt(compositionObject(result.Event), "/"+target)
+				effective := inlineAt(compositionObject(sdkJSON(result.Event)), "/"+target)
 				expected := []any{replacement}
 				if operation == "merge" {
 					expected = []any{original, replacement}
@@ -126,8 +126,8 @@ func TestPublicCompactionResponseRollbackRetainsEarlierAcceptedEdits(t *testing.
 		t.Fatalf("dispatch: %v", err)
 	}
 	defer result.Close()
-	if len(result.Errors) != 1 || len(result.Response.Effects.Value) != 1 || !compositionEqual(compositionObject(result.Event)["instructions"], []any{accepted}) {
-		t.Fatalf("response not atomic: errors=%d effects=%d", len(result.Errors), len(result.Response.Effects.Value))
+	if len(result.Diagnostics) != 1 || len(result.response.Effects.Value) != 1 || !compositionEqual(compositionObject(sdkJSON(result.Event))["instructions"], []any{accepted}) {
+		t.Fatalf("response not atomic: errors=%d effects=%d", len(result.Diagnostics), len(result.response.Effects.Value))
 	}
 }
 
@@ -140,15 +140,15 @@ func TestPublicWorkspaceModifyPreservesOpaquePrior(t *testing.T) {
 	transports[0].reply = func(map[string]any) []any {
 		return []any{map[string]any{"type": "modify", "target": "workspace", "operation": "merge", "value": map[string]any{"cwd": "/new"}}}
 	}
-	result, err := c.Dispatch(context.Background(), "workspace.change.before", input)
+	result, err := c.Dispatch(context.Background(), event.WorkspaceChangeBefore, input)
 	if err != nil || result == nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	defer result.Close()
-	if len(result.Errors) != 0 {
-		t.Fatalf("composition: %+v", result.Errors)
+	if len(result.Diagnostics) != 0 {
+		t.Fatalf("composition: %+v", result.Diagnostics)
 	}
-	effective := compositionObject(result.Event)
+	effective := compositionObject(sdkJSON(result.Event))
 	workspace := sdkObj(effective["workspace"])
 	if !compositionEqual(effective["future"], input["future"]) {
 		t.Fatal("unknown event metadata changed")
@@ -165,15 +165,15 @@ func TestPublicModelReturnCanonicalMessages(t *testing.T) {
 	c.backends[0].subscriptions[0]["content"] = map[string]any{"default": "body"}
 	messages := []any{inlineTestMessage("candidate", "assistant", inlineTestText("candidate-part", "answer"))}
 	transports[0].reply = func(map[string]any) []any { return []any{map[string]any{"type": "return", "value": messages}} }
-	result, err := c.Dispatch(context.Background(), "model.request.before", inlineTestInput(t, []any{inlineTestMessage("input", "user", inlineTestText("input-part", "question"))}))
+	result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, inlineTestInput(t, []any{inlineTestMessage("input", "user", inlineTestText("input-part", "question"))}))
 	if err != nil || result == nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	defer result.Close()
-	if len(result.Errors) != 0 {
-		t.Fatalf("composition: %+v", result.Errors)
+	if len(result.Diagnostics) != 0 {
+		t.Fatalf("composition: %+v", result.Diagnostics)
 	}
-	state := compositionObject(sdkJSON(result.State))
+	state := compositionObject(sdkJSON(result.state))
 	candidate := sdkObj(state["candidate"])["value"]
 	var typed ahp.CanonicalMessages
 	if err := json.Unmarshal(sdkJSON(candidate), &typed); err != nil || len(typed) != 1 || typed[0].Parts[0].TextBodyPart.Value.Text != "answer" {

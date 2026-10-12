@@ -2,9 +2,9 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/agenthooksprotocol/go-sdk/event"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +14,7 @@ import (
 	"time"
 
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/capability"
 	"github.com/agenthooksprotocol/go-sdk/content"
 )
 
@@ -23,10 +24,6 @@ func uploadPlanClient(t *testing.T, endpoint string, limit int, policies ...stri
 	caps := targetTestCaps("request")
 	caps["effects"] = []any{"modify", "message", "deny"}
 	setDispatchBoundary(base, "model.request.before", caps)
-	var manifest ahp.StaticCapabilityManifest
-	if err := json.Unmarshal(sdkJSON(base.manifest), &manifest); err != nil {
-		t.Fatal(err)
-	}
 	hooks := []any{}
 	for i, policy := range policies {
 		sub := contentTestSubscription(endpoint)
@@ -38,7 +35,7 @@ func uploadPlanClient(t *testing.T, endpoint string, limit int, policies ...stri
 	if !reg.OK {
 		t.Fatal(reg.Diagnostics)
 	}
-	c, err := New(reg.Value, Options{Source: "urn:test:upload-plan", Manifest: manifest, MaxConcurrentUploads: limit, Content: ContentOptions{AuthorizeContent: contentTestAllow, AllowLoopbackHTTP: true, ProjectOpaque: base.opts.Content.ProjectOpaque}})
+	c, err := New(reg.Value, Options{Source: "urn:test:upload-plan", Events: capability.Host{ModelRequestBefore: capability.ModelRequestBefore{ModifyRequest: capability.ReplaceAndMerge(), Message: true, Deny: true, Observe: true}}, Metadata: testManifestMetadata(), MaxConcurrentUploads: limit, Content: ContentOptions{AuthorizeContent: contentTestAllow, AllowLoopbackHTTP: true, ProjectOpaque: base.opts.Content.ProjectOpaque}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,10 +100,10 @@ func TestUploadPlanOverlapCapAndReceiptBarrier(t *testing.T) {
 			}
 			done := make(chan error, 1)
 			go func() {
-				result, err := c.Dispatch(context.Background(), "model.request.before", uploadPlanInput(t), WithContentSource(uploadPlanPath, content.NewAttachment([]byte("body"))))
+				result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, uploadPlanInput(t), WithContentSource(uploadPlanPath, content.NewAttachment([]byte("body"))))
 				if result != nil {
-					if len(result.Errors) != 0 {
-						err = fmt.Errorf("delivery errors: %v", result.Errors)
+					if len(result.Diagnostics) != 0 {
+						err = fmt.Errorf("delivery errors: %v", result.Diagnostics)
 					}
 					_ = result.Close()
 				}
@@ -150,7 +147,7 @@ func TestUploadPlanSharedLazyOwnerAndObservationReuse(t *testing.T) {
 		opens.Add(1)
 		return io.NopCloser(strings.NewReader("body")), nil
 	}, nil)
-	result, err := c.Dispatch(context.Background(), "model.request.before", uploadPlanInput(t), WithContentSource(uploadPlanPath, source))
+	result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, uploadPlanInput(t), WithContentSource(uploadPlanPath, source))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,13 +200,13 @@ func TestUploadPlanNoAuthorizedDemandLeavesLazyBodyUnread(t *testing.T) {
 				delete(input, "source")
 				delete(input, "type")
 			}
-			result, err := c.Dispatch(context.Background(), "model.request.before", input, opts...)
+			result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, input, opts...)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer result.Close()
-			if opens.Load() != 0 || len(trs[0].calls) != 1 || len(result.Errors) != 0 {
-				t.Fatalf("opens=%d callbacks=%d errors=%v", opens.Load(), len(trs[0].calls), result.Errors)
+			if opens.Load() != 0 || len(trs[0].calls) != 1 || len(result.Diagnostics) != 0 {
+				t.Fatalf("opens=%d callbacks=%d errors=%v", opens.Load(), len(trs[0].calls), result.Diagnostics)
 			}
 		})
 	}
@@ -228,16 +225,16 @@ func TestUploadPlanLaterFailureDoesNotPreemptHealthyInterceptor(t *testing.T) {
 			failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "failed", http.StatusBadRequest) }))
 			defer failing.Close()
 			c.backends[1].subscriptions[0]["upload"].(map[string]any)["endpoint"] = failing.URL
-			result, err := c.Dispatch(context.Background(), "model.request.before", uploadPlanInput(t), WithContentSource(uploadPlanPath, content.NewAttachment([]byte("body"))))
+			result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, uploadPlanInput(t), WithContentSource(uploadPlanPath, content.NewAttachment([]byte("body"))))
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer result.Close()
-			if len(trs[0].calls) != 1 || len(trs[1].calls) != 0 || len(result.Errors) != 1 {
-				t.Fatalf("callbacks=%d/%d errors=%v", len(trs[0].calls), len(trs[1].calls), result.Errors)
+			if len(trs[0].calls) != 1 || len(trs[1].calls) != 0 || len(result.Diagnostics) != 1 {
+				t.Fatalf("callbacks=%d/%d errors=%v", len(trs[0].calls), len(trs[1].calls), result.Diagnostics)
 			}
-			if (result.State.Permission == "deny") != (policy == "fail-closed") {
-				t.Fatalf("permission=%s policy=%s", result.State.Permission, policy)
+			if (result.state.Permission == "deny") != (policy == "fail-closed") {
+				t.Fatalf("permission=%s policy=%s", result.state.Permission, policy)
 			}
 		})
 	}
@@ -249,7 +246,7 @@ func TestUploadPlanNegativeLimitRejected(t *testing.T) {
 	if !reg.OK {
 		t.Fatal(reg.Diagnostics)
 	}
-	c, err := New(reg.Value, Options{Source: "urn:test:upload-plan", Manifest: base.opts.Manifest, MaxConcurrentUploads: -1})
+	c, err := New(reg.Value, Options{Source: "urn:test:upload-plan", Events: base.opts.Events, Metadata: base.opts.Metadata, MaxConcurrentUploads: -1})
 	if c != nil {
 		_ = c.Close()
 	}
@@ -278,15 +275,15 @@ func TestUploadPlanRemovalDoesNotReuploadOrRestoreAttachment(t *testing.T) {
 		}
 		return []any{}
 	}
-	result, err := c.Dispatch(context.Background(), "model.request.before", uploadPlanInput(t), WithContentSource(uploadPlanPath, content.NewAttachment([]byte("body"))))
+	result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, uploadPlanInput(t), WithContentSource(uploadPlanPath, content.NewAttachment([]byte("body"))))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer result.Close()
-	if len(result.Errors) != 0 || len(trs[1].calls) != 1 || uploads.Load() != 2 {
-		t.Fatalf("uploads=%d later callbacks=%d errors=%v", uploads.Load(), len(trs[1].calls), result.Errors)
+	if len(result.Diagnostics) != 0 || len(trs[1].calls) != 1 || uploads.Load() != 2 {
+		t.Fatalf("uploads=%d later callbacks=%d errors=%v", uploads.Load(), len(trs[1].calls), result.Diagnostics)
 	}
-	if strings.Contains(string(result.Event), "attachment") {
+	if strings.Contains(string(sdkJSON(result.Event)), "attachment") {
 		t.Fatal("settled event retains removed attachment")
 	}
 }
@@ -325,13 +322,13 @@ func TestUploadPlanCredentialsAndReceiptsRemainSubscriptionScoped(t *testing.T) 
 		}
 		return []any{}
 	}
-	result, err := c.Dispatch(context.Background(), "model.request.before", uploadPlanInput(t), WithContentSource(uploadPlanPath, content.NewAttachment([]byte("body"))))
+	result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, uploadPlanInput(t), WithContentSource(uploadPlanPath, content.NewAttachment([]byte("body"))))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer result.Close()
-	if uploads.Load() != 2 || callbacks != 2 || len(result.Errors) != 0 {
-		t.Fatalf("uploads=%d callbacks=%d errors=%v", uploads.Load(), callbacks, result.Errors)
+	if uploads.Load() != 2 || callbacks != 2 || len(result.Diagnostics) != 0 {
+		t.Fatalf("uploads=%d callbacks=%d errors=%v", uploads.Load(), callbacks, result.Diagnostics)
 	}
 }
 
@@ -368,7 +365,7 @@ func TestUploadPlanSharedDemandReceiverLimitsAreIndependent(t *testing.T) {
 				}
 				return io.NopCloser(strings.NewReader("body")), nil
 			}, nil)
-			result, err := c.Dispatch(context.Background(), "model.request.before", uploadPlanInput(t), WithContentSource(uploadPlanPath, source))
+			result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, uploadPlanInput(t), WithContentSource(uploadPlanPath, source))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -376,8 +373,8 @@ func TestUploadPlanSharedDemandReceiverLimitsAreIndependent(t *testing.T) {
 			if opens.Load() != 1 || cancelled.Load() != 0 || uploads.Load() != 1 {
 				t.Fatalf("opens=%d cancelled=%d uploads=%d", opens.Load(), cancelled.Load(), uploads.Load())
 			}
-			if len(trs[0].calls) != 0 || len(trs[1].calls) != 1 || len(result.Errors) != 1 || result.State.Permission == "deny" {
-				t.Fatalf("callbacks=%d/%d errors=%v permission=%s", len(trs[0].calls), len(trs[1].calls), result.Errors, result.State.Permission)
+			if len(trs[0].calls) != 0 || len(trs[1].calls) != 1 || len(result.Diagnostics) != 1 || result.state.Permission == "deny" {
+				t.Fatalf("callbacks=%d/%d errors=%v permission=%s", len(trs[0].calls), len(trs[1].calls), result.Diagnostics, result.state.Permission)
 			}
 			if raw, err := result.ReadContent(context.Background(), uploadPlanPath); err != nil || string(raw) != "body" {
 				t.Fatalf("shared owner lost healthy bytes: %q %v", raw, err)
@@ -410,13 +407,13 @@ func TestUploadPlanOnlyTinyDemandBoundsLazyRead(t *testing.T) {
 	c.backends[0].subscriptions[0]["upload"].(map[string]any)["maxBytes"] = 2
 	reader := &uploadPlanCountingReader{Reader: strings.NewReader("body-and-many-more-bytes")}
 	source := content.NewLazyAttachment(func(context.Context) (io.ReadCloser, error) { opens.Add(1); return reader, nil }, nil)
-	result, err := c.Dispatch(context.Background(), "model.request.before", uploadPlanInput(t), WithContentSource(uploadPlanPath, source))
+	result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, uploadPlanInput(t), WithContentSource(uploadPlanPath, source))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer result.Close()
-	if opens.Load() != 1 || reader.bytes.Load() > 3 || reader.closes.Load() != 1 || uploads.Load() != 0 || len(trs[0].calls) != 0 || len(result.Errors) != 1 {
-		t.Fatalf("opens=%d bytes=%d closes=%d uploads=%d callbacks=%d errors=%v", opens.Load(), reader.bytes.Load(), reader.closes.Load(), uploads.Load(), len(trs[0].calls), result.Errors)
+	if opens.Load() != 1 || reader.bytes.Load() > 3 || reader.closes.Load() != 1 || uploads.Load() != 0 || len(trs[0].calls) != 0 || len(result.Diagnostics) != 1 {
+		t.Fatalf("opens=%d bytes=%d closes=%d uploads=%d callbacks=%d errors=%v", opens.Load(), reader.bytes.Load(), reader.closes.Load(), uploads.Load(), len(trs[0].calls), result.Diagnostics)
 	}
 }
 
@@ -436,7 +433,7 @@ func TestUploadPlanCancellationJoinsSharedMaterialization(t *testing.T) {
 	input := uploadPlanInput(t)
 	done := make(chan error, 1)
 	go func() {
-		result, err := c.Dispatch(ctx, "model.request.before", input, WithContentSource(uploadPlanPath, source))
+		result, err := c.Dispatch(ctx, event.ModelRequestBefore, input, WithContentSource(uploadPlanPath, source))
 		if result != nil {
 			_ = result.Close()
 		}
@@ -487,7 +484,7 @@ func TestUploadPlanHooksCloseJoinsConcurrentTransfers(t *testing.T) {
 	source := content.NewAttachment([]byte("body"))
 	done := make(chan error, 1)
 	go func() {
-		result, err := c.Dispatch(context.Background(), "model.request.before", input, WithContentSource(uploadPlanPath, source))
+		result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, input, WithContentSource(uploadPlanPath, source))
 		if result != nil {
 			_ = result.Close()
 		}
@@ -582,12 +579,12 @@ func TestUploadPlanReadyOwnerUploadsBeforeUnrelatedMaterialization(t *testing.T)
 	file["id"], file["category"] = "fast-file", "files"
 	image := map[string]any{"id": "slow-image", "kind": "attachment", "mediaType": "image/png", "category": "images", "selection": "metadata"}
 	sdkObj(input["items"].([]any)[0])["parts"] = append(parts, image)
-	result, err := c.Dispatch(context.Background(), "model.request.before", input, WithContentSource(uploadPlanPath, fast), WithContentSource("/items/0/parts/2", slow))
+	result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, input, WithContentSource(uploadPlanPath, fast), WithContentSource("/items/0/parts/2", slow))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer result.Close()
-	if uploads.Load() != 2 || fastOpens.Load() != 1 || slowOpens.Load() != 1 || len(result.Errors) != 0 || len(trs[0].calls) != 1 || len(trs[1].calls) != 1 {
-		t.Fatalf("uploads=%d opens=%d/%d callbacks=%d/%d errors=%v", uploads.Load(), fastOpens.Load(), slowOpens.Load(), len(trs[0].calls), len(trs[1].calls), result.Errors)
+	if uploads.Load() != 2 || fastOpens.Load() != 1 || slowOpens.Load() != 1 || len(result.Diagnostics) != 0 || len(trs[0].calls) != 1 || len(trs[1].calls) != 1 {
+		t.Fatalf("uploads=%d opens=%d/%d callbacks=%d/%d errors=%v", uploads.Load(), fastOpens.Load(), slowOpens.Load(), len(trs[0].calls), len(trs[1].calls), result.Diagnostics)
 	}
 }

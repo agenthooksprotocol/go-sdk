@@ -1,92 +1,55 @@
 package client
 
 import (
-	"errors"
-	"fmt"
-	"reflect"
+	"encoding/json"
 	"sort"
+	"strconv"
 
 	ahp "github.com/agenthooksprotocol/go-sdk"
 	"github.com/agenthooksprotocol/go-sdk/capability"
+	"github.com/agenthooksprotocol/go-sdk/event"
 )
 
-// Mode is an explicitly supported delivery mode for a boundary.
-type Mode = capability.Mode
-
-const (
-	Intercept Mode = ahp.StaticCapabilityManifestEventsItemModesItemIntercept
-	Observe   Mode = ahp.StaticCapabilityManifestEventsItemModesItemObserve
-)
-
-// EventCapabilities declares host authority for one exact boundary. Modes must
-// be nonempty and unique. Intercept requires an explicit Capabilities value,
-// including when its Effects list is empty. Observe-only entries omit Capabilities.
-// Neither registration subscriptions nor per-occurrence options grant authority.
-type EventCapabilities = capability.Event
-
-// manifestForOptions synthesizes only the metadata needed by the ordinary path.
-// Events are host declarations, never inferred from registration. Transport and
-// authentication lists describe the supplied registration, not blanket native
-// support. Policy is user-only and disableable; stronger policy admission needs
-// an explicit Manifest. Gaps, tool paths, content categories, correlation fields,
-// and limits are left empty rather than claiming unconfigured feature support.
-// The same manifest is delivered on session.start. The caller validates it with
-// the canonical schema and root codec before acquiring any transport.
+// manifestForOptions transfers typed declarations and metadata directly.
+// External registration and final wire admission are validated independently.
+// Host declarations never infer interest or authority from receivers.
 func manifestForOptions(reg ahp.Registration, opts Options) (map[string]any, error) {
-	if opts.Events == nil {
-		return sdkMap(opts.Manifest)
-	}
-	if !reflect.ValueOf(opts.Manifest).IsZero() {
-		return nil, errors.New("Events and Manifest are mutually exclusive")
-	}
-	keys := make([]string, 0, len(opts.Events))
-	for name := range opts.Events {
+	declarations := opts.Events.Wire()
+	keys := make([]event.Type, 0, len(declarations))
+	for name := range declarations {
 		keys = append(keys, name)
 	}
-	sort.Strings(keys)
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
 	events := make([]any, 0, len(keys))
 	for _, name := range keys {
-		cfg := opts.Events[name]
-		if len(cfg.Modes) == 0 {
-			return nil, fmt.Errorf("event %q requires explicit modes", name)
-		}
-		seen := map[Mode]bool{}
-		intercept := false
-		for _, mode := range cfg.Modes {
-			if seen[mode] {
-				return nil, fmt.Errorf("event %q repeats a mode", name)
-			}
-			seen[mode] = true
-			intercept = intercept || mode == Intercept
-		}
-		if intercept && cfg.Capabilities == nil {
-			return nil, fmt.Errorf("event %q requires explicit intercept capabilities", name)
-		}
-		if !intercept && cfg.Capabilities != nil {
-			return nil, fmt.Errorf("event %q observe-only entry must omit capabilities", name)
-		}
-		entry := map[string]any{"event": name, "modes": cfg.Modes}
-		if cfg.Capabilities != nil {
-			entry["capabilities"] = cfg.Capabilities
+		declaration := declarations[name]
+		entry := map[string]any{"event": string(name), "modes": wireStrings(declaration.Modes)}
+		if declaration.Capabilities != nil {
+			entry["capabilities"] = wireCapabilities(declaration.Capabilities)
 		}
 		events = append(events, entry)
 	}
 	transports, authentication := []string{}, []string{}
 	for _, backend := range reg.Hooks {
-		bm, err := sdkMap(backend)
-		if err != nil {
-			return nil, err
+		if backend.Transport.HttpTransport.Present && backend.Transport.HttpTransport.Value != nil {
+			transports = append(transports, "http")
 		}
-		if kind, ok := sdkObj(bm["transport"])["type"].(string); ok {
-			transports = append(transports, kind)
+		if backend.Transport.StdioTransport.Present && backend.Transport.StdioTransport.Value != nil {
+			transports = append(transports, "stdio")
 		}
-		if kind, ok := sdkObj(bm["authentication"])["type"].(string); ok {
-			authentication = append(authentication, kind)
+		if backend.Authentication.Present && backend.Authentication.Value != nil {
+			a := backend.Authentication.Value
+			if a.Bearer.Present {
+				authentication = append(authentication, "bearer")
+			}
+			if a.Oauth.Present {
+				authentication = append(authentication, "oauth")
+			}
 		}
 	}
-	unique := func(values []string) []string {
+	unique := func(values []string) []any {
 		sort.Strings(values)
-		out := make([]string, 0, len(values))
+		out := []any{}
 		for _, v := range values {
 			if len(out) == 0 || out[len(out)-1] != v {
 				out = append(out, v)
@@ -94,10 +57,52 @@ func manifestForOptions(reg ahp.Registration, opts Options) (map[string]any, err
 		}
 		return out
 	}
-	return sdkMap(map[string]any{
-		"events": events, "transports": unique(transports), "authentication": unique(authentication),
-		"gaps": []any{}, "toolPaths": []string{}, "contentCategories": []string{},
-		"correlationIdentityFields": []string{}, "limits": map[string]any{},
-		"managedPolicy": map[string]any{"scopes": []string{"user"}, "disableable": true},
-	})
+	manifest := map[string]any{"events": events, "transports": unique(transports), "authentication": unique(authentication), "gaps": []any{}, "toolPaths": []any{}, "contentCategories": []any{}, "correlationIdentityFields": []any{}, "limits": map[string]any{}, "managedPolicy": map[string]any{"scopes": []any{"user"}, "disableable": true}}
+	if err := applyManifestMetadata(manifest, opts.Metadata); err != nil {
+		return nil, err
+	}
+	return manifest, nil
+}
+
+func wireStrings(values []string) []any {
+	out := make([]any, 0, len(values))
+	for _, v := range values {
+		out = append(out, v)
+	}
+	return out
+}
+
+func wireCapabilities(c *capability.WireCapabilities) map[string]any {
+	out := map[string]any{"effects": wireStrings(c.Effects)}
+	if len(c.Modify) != 0 {
+		modifications := map[string]any{}
+		for target, grant := range c.Modify {
+			modifications[target] = map[string]any{"replace": grant.Replace, "merge": grant.Merge}
+		}
+		out["modify"] = modifications
+	}
+	if c.Flow != nil {
+		flow := map[string]any{"operations": wireStrings(c.Flow.Operations)}
+		if c.Flow.RemainingContinuations != nil {
+			flow["remainingContinuations"] = json.Number(strconv.FormatUint(*c.Flow.RemainingContinuations, 10))
+		}
+		if c.Flow.ContinuationCount != nil {
+			flow["continuationCount"] = json.Number(strconv.FormatUint(*c.Flow.ContinuationCount, 10))
+		}
+		if c.Flow.MaxContinuations != nil {
+			flow["maxContinuations"] = json.Number(strconv.FormatUint(*c.Flow.MaxContinuations, 10))
+		}
+		out["flow"] = flow
+	}
+	if c.Inject != nil {
+		out["inject"] = map[string]any{"context": map[string]any{"append": c.Inject.Context.Append, "deliverAt": wireStrings(c.Inject.Context.DeliverAt)}}
+	}
+	if len(c.Elicitation) != 0 {
+		modes := map[string]any{}
+		for mode := range c.Elicitation {
+			modes[mode] = map[string]any{}
+		}
+		out["elicitation"] = modes
+	}
+	return out
 }

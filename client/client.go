@@ -12,6 +12,9 @@ import (
 	"fmt"
 	ahp "github.com/agenthooksprotocol/go-sdk"
 	"github.com/agenthooksprotocol/go-sdk/auth"
+	"github.com/agenthooksprotocol/go-sdk/capability"
+	"github.com/agenthooksprotocol/go-sdk/content"
+	"github.com/agenthooksprotocol/go-sdk/diagnostic"
 	"github.com/agenthooksprotocol/go-sdk/internal/canonical"
 	"math/big"
 	"net/http"
@@ -26,15 +29,14 @@ import (
 type Options struct {
 	Source string
 	// Events explicitly advertises boundary modes and capabilities.
-	// Use Events for ordinary configuration or Manifest for advanced metadata, not both.
-	Events   map[string]EventCapabilities
-	Manifest ahp.StaticCapabilityManifest
+	// Metadata customizes only non-event advertisement fields.
+	Events   capability.Host
+	Metadata *ManifestMetadata
 	// AuthProvider is harness-owned; Hooks never closes it.
-	AuthProvider           auth.Provider
-	EventClient            *http.Client
-	EventTransportResolver EventTransportResolver
-	UploadClient           *http.Client
-	MaxContentBytes        int64
+	AuthProvider    auth.Provider
+	EventClient     *http.Client
+	UploadClient    *http.Client
+	MaxContentBytes int64
 	// MaxConcurrentUploads limits active transfers across invocations; zero uses 8.
 	MaxConcurrentUploads   int
 	MaxPendingObservations int
@@ -59,10 +61,6 @@ type Hooks struct {
 	uploads      chan struct{}
 }
 
-// Client is retained for source compatibility.
-// Deprecated: use Hooks.
-type Client = Hooks
-
 type registeredBackend struct {
 	id            string
 	subscriptions []map[string]any
@@ -74,7 +72,7 @@ type DeliveryError struct {
 	BackendID    string
 	Subscription int
 	Stage        string
-	Code         DeliveryCode
+	Code         diagnostic.Code
 	Err          error
 	FailClosed   bool
 }
@@ -85,40 +83,41 @@ func (e DeliveryError) Error() string {
 func (e DeliveryError) Unwrap() error { return e.Err }
 
 type Result struct {
-	effectiveTargets  map[string][]string
-	effectiveBindings map[string]ModificationTarget
-	contentMu         sync.Mutex
-	contentClosed     bool
-	attachments       map[string]*ContentSource
-	attachmentItems   map[string]map[string]any
-	attachmentBudget  *contentSourceBudget
-	attachmentLimit   int64
+	contentMu        sync.Mutex
+	contentClosed    bool
+	attachments      map[string]*content.Source
+	attachmentItems  map[string]map[string]any
+	attachmentBudget *contentSourceBudget
+	attachmentLimit  int64
 	// Snapshot retains the original MCP semantic contract, not body bytes.
 	Snapshot *ElicitationRequest
-	// Event and EffectiveInput are compatibility snapshots for raw consumers.
-	// SettledEvent is the SDK-decoded effective event, including opaque extras.
-	Event          json.RawMessage
-	EffectiveInput json.RawMessage
-	SettledEvent   *ahp.Event
+	// Event is the authoritative SDK-owned settled event, including opaque extras.
+	Event     *ahp.Event
+	eventWire json.RawMessage
 	// AcceptedResponses retains complete receiver envelopes in atomic acceptance
-	// order, including envelope/result extras. Response is the composed effect
-	// aggregate, not a receiver response. The list is empty when none are accepted.
+	// order, including envelope/result extras. The list is empty when no receiver
+	// response is accepted; there is no separate aggregate/last-response snapshot.
 	AcceptedResponses []ahp.ContextualResponse
-	// AcceptedResponse is the last accepted receiver envelope, or nil if none.
-	AcceptedResponse ahp.ContextualResponse
-	// SettledCandidate distinguishes no candidate from an opaque candidate whose
+	// Candidate distinguishes no candidate from an opaque candidate whose
 	// value is JSON null. Schema-owned values are decoded using event context.
-	SettledCandidate ahp.Nullable[SettledCandidate]
-	State            ahp.InterceptRequestParamsState
+	Candidate ahp.Nullable[Candidate]
+	state     ahp.InterceptRequestParamsState
+	// Flow is the settled canonical control flow.
+	Flow ahp.Optional[ahp.InterceptRequestParamsStateFlow]
+	// StateExtras preserves unknown state properties without granting authority.
+	StateExtras map[string]json.RawMessage
+	// Instructions and Injections retain the complete accumulated settlement,
+	// including native initial state and omission versus an explicitly empty list.
+	Instructions ahp.Optional[[]string]
+	Injections   ahp.Optional[[]*ahp.InjectEffect]
 	// Permission is the settled canonical permission, not proof of execution.
 	// None and Ask are not grants; Interrupted always gates execution.
 	Permission ahp.InterceptRequestParamsStatePermission
 	// Diagnostics includes interception and completed observation delivery failures.
-	Diagnostics  []DeliveryError
-	Response     ahp.InterceptResponseResult
-	Errors       []DeliveryError
-	Observations *Observations
-	Interrupted  bool
+	Diagnostics []DeliveryError
+	response    ahp.InterceptResponseResult
+	errors      []DeliveryError
+	Interrupted bool
 }
 
 // New validates and snapshots configuration before opening any transport.
@@ -164,15 +163,12 @@ func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
 	if err != nil {
 		return nil, err
 	}
-	mb, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": "manifest", "result": map[string]any{"protocolVersion": "draft", "manifest": manifest}})
-	if canonical.Validate("capabilities-response", mb) != nil || !ahp.ParseCapabilitiesResponse(mb).OK {
-		return nil, errors.New("invalid manifest")
-	}
-	if err = json.Unmarshal(sdkJSON(manifest), &opts.Manifest); err != nil {
+	if err := validateManifestMetadata(manifest); err != nil {
 		return nil, err
 	}
 	// Retain only the detached normalized advertisement, not the caller's map.
-	opts.Events = nil
+	opts.Events = capability.Host{}
+	opts.Metadata = nil
 	c := &Hooks{opts: opts, manifest: manifest, observations: make(chan struct{}, opts.MaxPendingObservations), closeDone: make(chan struct{}), uploads: make(chan struct{}, opts.MaxConcurrentUploads)}
 	c.life, c.cancel = context.WithCancel(context.Background())
 	ids := map[string]bool{}
@@ -202,7 +198,7 @@ func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
 			}
 			b.subscriptions = append(b.subscriptions, sub)
 		}
-		tr, err := newAuthenticatedBackendTransport(backend, opts.EventClient, opts.EventTransportResolver, opts.AuthProvider)
+		tr, err := newAuthenticatedBackendTransport(backend, opts.EventClient, opts.AuthProvider)
 		if err != nil {
 			c.Close()
 			return nil, err

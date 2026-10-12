@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/event"
 	"reflect"
 	"testing"
 )
@@ -26,18 +27,18 @@ func TestDispatchNeutralEffects(t *testing.T) {
 			}}
 			input := testInput()
 			before := contentClone(input)
-			result, err := c.Dispatch(context.Background(), "tool.before", input)
+			result, err := c.Dispatch(context.Background(), event.ToolBefore, input)
 			if err != nil || result == nil {
 				t.Fatalf("dispatch: %v", err)
 			}
 			defer result.Close()
 			if field == "null" || field == "invalid" {
-				if len(result.Errors) == 0 {
+				if len(result.Diagnostics) == 0 {
 					t.Fatal("invalid effects accepted")
 				}
 				return
 			}
-			if len(result.Errors) != 0 || result.Response.Effects.Value == nil || len(result.Response.Effects.Value) != 0 {
+			if len(result.Diagnostics) != 0 || result.response.Effects.Value == nil || len(result.response.Effects.Value) != 0 {
 				t.Fatalf("not typed neutral: %+v", result)
 			}
 			if !reflect.DeepEqual(input, before) {
@@ -50,7 +51,7 @@ func TestDispatchNeutralEffects(t *testing.T) {
 func TestGeneratedAbsentEffectsRemainNeutralWithoutMutation(t *testing.T) {
 	raw := []byte(`{"jsonrpc":"2.0","id":"test","result":{"protocolVersion":"draft","future":{"kind":"attachment","parts":null}}}`)
 	before := string(raw)
-	parsed := ahp.ResponseForRequest("tool.before", raw)
+	parsed := event.ResponseForRequest(event.ToolBefore, raw)
 	if !parsed.OK {
 		t.Fatal(parsed.Diagnostics)
 	}

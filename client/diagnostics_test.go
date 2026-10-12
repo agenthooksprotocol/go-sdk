@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/diagnostic"
 	"strings"
 	"testing"
 )
@@ -34,7 +35,7 @@ func TestMalformedRPCErrorRemainsProtocolRejection(t *testing.T) {
 		`{"jsonrpc":"2.0","id":"request","result":{},"error":{"code":-32000,"message":"secret"}}`,
 	} {
 		err := interceptResponseFailure([]byte(raw), "request")
-		if deliveryCode("acceptance", err) != DeliveryProtocolRejection || strings.Contains(err.Error(), "secret") {
+		if deliveryCode("acceptance", err) != diagnostic.ProtocolRejection || strings.Contains(err.Error(), "secret") {
 			t.Fatalf("malformed RPC classification: %v", err)
 		}
 	}
@@ -47,21 +48,21 @@ func TestDeliveryDiagnosticCodesRetainAtomicPrefix(t *testing.T) {
 	}
 	cases := []struct {
 		name      string
-		code      DeliveryCode
+		code      diagnostic.Code
 		transport diagnosticTransport
 	}{
-		{"schema", DeliveryProtocolRejection, diagnosticTransport{response: func(r map[string]any) []byte { return []byte(`{"result":"` + secret + `"}`) }}},
-		{"unsupported-effect", DeliveryProtocolRejection, diagnosticTransport{response: func(r map[string]any) []byte {
+		{"schema", diagnostic.ProtocolRejection, diagnosticTransport{response: func(r map[string]any) []byte { return []byte(`{"result":"` + secret + `"}`) }}},
+		{"unsupported-effect", diagnostic.ProtocolRejection, diagnosticTransport{response: func(r map[string]any) []byte {
 			return sdkJSON(map[string]any{"jsonrpc": "2.0", "id": r["id"], "result": map[string]any{"protocolVersion": "draft", "effects": []any{map[string]any{"type": "modify", "operation": "replace", "target": "input", "value": map[string]any{"count": 99}}, map[string]any{"type": "unknown-" + secret}}}})
 		}}},
-		{"ungranted-effect", DeliveryProtocolRejection, diagnosticTransport{response: func(r map[string]any) []byte {
+		{"ungranted-effect", diagnostic.ProtocolRejection, diagnosticTransport{response: func(r map[string]any) []byte {
 			return sdkJSON(map[string]any{"jsonrpc": "2.0", "id": r["id"], "result": map[string]any{"protocolVersion": "draft", "effects": []any{map[string]any{"type": "modify", "operation": "replace", "target": "input", "value": map[string]any{"count": 99}}, map[string]any{"type": "allow"}}}})
 		}}},
-		{"remote-rpc", DeliveryRemoteRPC, diagnosticTransport{response: func(r map[string]any) []byte { return rpc(r["id"]) }}},
-		{"uncorrelated-rpc", DeliveryProtocolRejection, diagnosticTransport{response: func(map[string]any) []byte { return rpc("wrong") }}},
-		{"transport", DeliveryTransport, diagnosticTransport{err: errors.New("safe transport failure")}},
-		{"cancelled", DeliveryCancelled, diagnosticTransport{err: context.Canceled}},
-		{"deadline", DeliveryDeadlineExceeded, diagnosticTransport{err: context.DeadlineExceeded}},
+		{"remote-rpc", diagnostic.RemoteRpc, diagnosticTransport{response: func(r map[string]any) []byte { return rpc(r["id"]) }}},
+		{"uncorrelated-rpc", diagnostic.ProtocolRejection, diagnosticTransport{response: func(map[string]any) []byte { return rpc("wrong") }}},
+		{"transport", diagnostic.Transport, diagnosticTransport{err: errors.New("safe transport failure")}},
+		{"cancelled", diagnostic.Cancelled, diagnosticTransport{err: context.Canceled}},
+		{"deadline", diagnostic.DeadlineExceeded, diagnosticTransport{err: context.DeadlineExceeded}},
 	}
 	for _, policy := range []string{"fail-open", "fail-closed"} {
 		for _, tc := range cases {
@@ -83,21 +84,21 @@ func TestDeliveryDiagnosticCodesRetainAtomicPrefix(t *testing.T) {
 					t.Fatal(err)
 				}
 				waitObservations(t, result)
-				if len(result.Errors) != 1 {
-					t.Fatalf("failure multiplicity: %+v", result.Errors)
+				if len(result.Diagnostics) != 1 {
+					t.Fatalf("failure multiplicity: %+v", result.Diagnostics)
 				}
-				failure := result.Errors[0]
+				failure := result.Diagnostics[0]
 				if failure.Code != tc.code || failure.FailClosed != (policy == "fail-closed") {
 					t.Fatalf("diagnostic: %+v", failure)
 				}
 				if strings.Contains(failure.Error(), secret) || strings.Contains(failure.Err.Error(), secret) {
 					t.Fatal("unsafe backend error exposed")
 				}
-				if len(result.Response.Effects.Value) != 1 || !strings.Contains(string(sdkJSON(result.EffectiveInput)), `"count":2`) {
-					t.Fatalf("accepted prefix changed: %s", sdkJSON(result.Response))
+				if len(result.response.Effects.Value) != 1 || !strings.Contains(string(sdkJSON(result.Event.ToolBeforeEvent.Value.Tool.Input)), `"count":2`) {
+					t.Fatalf("accepted prefix changed: %s", sdkJSON(result.response))
 				}
-				if (result.State.Permission == "deny") != (policy == "fail-closed") {
-					t.Fatalf("failure policy changed: %+v", result.State)
+				if (result.state.Permission == "deny") != (policy == "fail-closed") {
+					t.Fatalf("failure policy changed: %+v", result.state)
 				}
 				if tc.transport.err == context.Canceled && !errors.Is(failure, context.Canceled) {
 					t.Fatal("lost cancellation identity")

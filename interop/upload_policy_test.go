@@ -35,7 +35,7 @@ func TestCredentialOnlyUploadReceiverPolicy(t *testing.T) {
 			}()
 			ready := waitReady(t, c.ReadinessFile)
 			binding := UploadBinding{Endpoint: str(ready["uploadEndpoint"]), Auth: &UploadAuth{Type: "bearer", TokenEnv: "AHP_POLICY_UPLOAD"}}
-			descriptor, status, err := UploadContent(ctx, binding, "untrusted-alias", "untrusted-ref", []byte{0, 255, 128})
+			descriptor, status, err := UploadContent(ctx, binding, []byte{0, 255, 128})
 			if explicitDeny {
 				if err == nil || status != http.StatusForbidden {
 					t.Fatalf("explicit empty grants: status=%d err=%v", status, err)

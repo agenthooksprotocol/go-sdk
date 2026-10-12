@@ -19,9 +19,9 @@ import (
 // These assignments are compiler regressions: callers need no schema-owned JSON
 // decode to reach effective messages, candidates, or contextual effect envelopes.
 func typedConsumerSurface(r *Result) {
-	var event *ahp.Event = r.SettledEvent
-	var response ahp.ContextualResponse = r.AcceptedResponse
-	var candidate *ahp.MessagesCandidate = r.SettledCandidate.Value.Messages
+	var event *ahp.Event = r.Event
+	var response ahp.ContextualResponse = lastAccepted(r)
+	var candidate *ahp.MessagesCandidate = r.Candidate.Value.Messages
 	var messages *ahp.CanonicalMessages = candidate.Value
 	_, _, _, _ = event, response, candidate, messages
 }
@@ -41,7 +41,7 @@ func TestTypedSettlementPublicBoundary(t *testing.T) {
 			map[string]any{"type": "message", "text": "accepted"},
 			map[string]any{"type": "inject", "target": "context", "operation": "append", "deliverAt": "now", "value": messages},
 		}
-		parsed := ahp.ResponseForRequest("model.request.before", sdkJSON(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{"protocolVersion": "draft", "effects": effects}}))
+		parsed := event.ResponseForRequest(event.ModelRequestBefore, sdkJSON(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{"protocolVersion": "draft", "effects": effects}}))
 		if err := canonical.Validate("intercept-response", sdkJSON(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{"protocolVersion": "draft", "effects": effects}})); err != nil {
 			t.Fatal(err)
 		}
@@ -50,23 +50,23 @@ func TestTypedSettlementPublicBoundary(t *testing.T) {
 		}
 		return effects
 	}
-	result, err := c.Dispatch(context.Background(), "model.request.before", input)
+	result, err := c.Dispatch(context.Background(), event.ModelRequestBefore, input)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer result.Close()
-	if !result.SettledEvent.ModelRequestBeforeEvent.Present {
+	if !result.Event.ModelRequestBeforeEvent.Present {
 		t.Fatal("missing typed event")
 	}
-	if len(result.Errors) != 0 {
-		t.Fatalf("delivery rejected: %+v", result.Errors)
+	if len(result.Diagnostics) != 0 {
+		t.Fatalf("delivery rejected: %+v", result.Diagnostics)
 	}
-	candidate := result.SettledCandidate.Value.Messages
-	if !result.SettledCandidate.Valid || candidate == nil || len(*candidate.Value) != 1 {
+	candidate := result.Candidate.Value.Messages
+	if !result.Candidate.Valid || candidate == nil || len(*candidate.Value) != 1 {
 		t.Fatal("missing typed candidate")
 	}
 	typedConsumerSurface(result)
-	response, ok := result.AcceptedResponse.(*ahp.ModelRequestBeforeInterceptResponse)
+	response, ok := lastAccepted(result).(*ahp.ModelRequestBeforeInterceptResponse)
 	if !ok || len(response.Result.Effects.Value) != 3 {
 		t.Fatal("missing contextual effects")
 	}
@@ -75,14 +75,14 @@ func TestTypedSettlementPublicBoundary(t *testing.T) {
 	if message.Text != "accepted" || injection.DeliverAt != "now" || len(*injection.Value) != 1 {
 		t.Fatal("erased effect envelopes")
 	}
-	encoded, err := json.Marshal(result.SettledEvent)
+	encoded, err := json.Marshal(result.Event)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !contractPreserves(compositionObject(result.Event), compositionObject(encoded)) {
+	if !contractPreserves(compositionObject(sdkJSON(result.Event)), compositionObject(encoded)) {
 		t.Fatal("settled event lost extras")
 	}
-	future := result.SettledEvent.ModelRequestBeforeEvent.Value.AdditionalProperties["future"]
+	future := result.Event.ModelRequestBeforeEvent.Value.AdditionalProperties["future"]
 	if string(future) != `{"integer":9007199254740993,"null":null}` {
 		t.Fatalf("opaque extras changed: %s", future)
 	}
@@ -91,7 +91,7 @@ func TestTypedSettlementPublicBoundary(t *testing.T) {
 func settlementFixture(t *testing.T) *Result {
 	t.Helper()
 	request := compositionTestRequest(t)
-	return &Result{Event: sdkJSON(request.Params.Event), State: request.Params.State.Value, Response: compositionTestResponse(t, `[]`).Result}
+	return &Result{eventWire: sdkJSON(request.Params.Event), state: request.Params.State.Value, response: compositionTestResponse(t, `[]`).Result}
 }
 
 func TestTypedSettlementCandidateNullAndExtras(t *testing.T) {
@@ -101,19 +101,19 @@ func TestTypedSettlementCandidateNullAndExtras(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &candidate); err != nil {
 		t.Fatal(err)
 	}
-	r.State.Candidate = ahp.NonNull(candidate)
+	r.state.Candidate = ahp.NonNull(candidate)
 	if err := r.decodeSettlement("tool.before"); err != nil {
 		t.Fatal(err)
 	}
-	if !r.SettledCandidate.Valid || string(r.SettledCandidate.Value.Opaque.Value) != "null" {
+	if !r.Candidate.Valid || string(r.Candidate.Value.Opaque.Value) != "null" {
 		t.Fatal("null candidate became absent")
 	}
-	encoded, _ := json.Marshal(r.SettledCandidate.Value.Opaque)
+	encoded, _ := json.Marshal(r.Candidate.Value.Opaque)
 	if !contractPreserves(compositionObject([]byte(raw)), compositionObject(encoded)) {
 		t.Fatal("candidate extras/provenance lost")
 	}
-	r.State.Candidate = ahp.Null[ahp.InterceptRequestParamsStateCandidateValue]()
-	if err := r.decodeSettlement("tool.before"); err != nil || r.SettledCandidate.Valid {
+	r.state.Candidate = ahp.Null[ahp.InterceptRequestParamsStateCandidateValue]()
+	if err := r.decodeSettlement("tool.before"); err != nil || r.Candidate.Valid {
 		t.Fatal("absent candidate became present", err)
 	}
 }
@@ -125,13 +125,13 @@ func TestTypedSettlementInvalidFailsAtomically(t *testing.T) {
 			name := "tool.before"
 			switch kind {
 			case "event":
-				r.Event = json.RawMessage(`{"type":"unknown.future"}`)
+				r.eventWire = json.RawMessage(`{"type":"unknown.future"}`)
 			case "identity":
 				name = "tool.after"
 			case "candidate":
 				name = "model.request.before"
-				r.Event = sdkJSON(targetTestCanonicalEvent(t, name, []any{}))
-				r.State.Candidate = ahp.NonNull(ahp.InterceptRequestParamsStateCandidateValue{Value: json.RawMessage(`42`)})
+				r.eventWire = sdkJSON(targetTestCanonicalEvent(t, name, []any{}))
+				r.state.Candidate = ahp.NonNull(ahp.InterceptRequestParamsStateCandidateValue{Value: json.RawMessage(`42`)})
 			}
 			r.Permission = "allow"
 			err := r.decodeSettlement(name)
@@ -139,10 +139,10 @@ func TestTypedSettlementInvalidFailsAtomically(t *testing.T) {
 			if !errors.As(err, &decode) {
 				t.Fatalf("expected decode error: %v", err)
 			}
-			if !r.Interrupted || r.Permission != "none" || r.State.Permission != "allow" {
+			if !r.Interrupted || r.Permission != "none" || r.state.Permission != "allow" {
 				t.Fatal("decode failure did not gate execution or lost accepted state")
 			}
-			if r.SettledEvent != nil || r.AcceptedResponse != nil || r.SettledCandidate.Valid {
+			if r.Event != nil || lastAccepted(r) != nil || r.Candidate.Valid {
 				t.Fatal("partial typed publication")
 			}
 		})
@@ -163,25 +163,25 @@ func TestTypedSettlementOtherCandidateOrigins(t *testing.T) {
 				event["id"], event["source"], event["time"] = "test", "urn:test", "2026-01-01T00:00:00Z"
 				value = map[string]any{"action": "decline", "future": map[string]any{"n": json.Number("9007199254740993")}}
 			}
-			r.Event = sdkJSON(event)
+			r.eventWire = sdkJSON(event)
 			var raw ahp.InterceptRequestParamsStateCandidateValue
 			candidate := map[string]any{"value": value, "provenance": map[string]any{"future": true}, "future": nil}
 			if err := json.Unmarshal(sdkJSON(candidate), &raw); err != nil {
 				t.Fatal(err)
 			}
-			r.State.Candidate = ahp.NonNull(raw)
+			r.state.Candidate = ahp.NonNull(raw)
 			if err := r.decodeSettlement(kind); err != nil {
 				t.Fatal(err)
 			}
 			var envelope any
 			if kind == "context.compact.before" {
-				text := r.SettledCandidate.Value.Text
+				text := r.Candidate.Value.Text
 				if text == nil || len(*text.Value) != 1 {
 					t.Fatal("missing TextParts candidate")
 				}
 				envelope = text
 			} else {
-				elicit := r.SettledCandidate.Value.Elicitation
+				elicit := r.Candidate.Value.Elicitation
 				if elicit == nil {
 					t.Fatal("missing complete elicitation candidate")
 				}
@@ -208,10 +208,10 @@ func TestTypedSettlementNamedModelRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer result.Close()
-	if result.SettledEvent == nil || !result.SettledEvent.ModelRequestBeforeEvent.Present {
+	if result.Event == nil || !result.Event.ModelRequestBeforeEvent.Present {
 		t.Fatal("named consumer requires event decode")
 	}
-	if _, ok := result.AcceptedResponse.(*ahp.ModelRequestBeforeInterceptResponse); !ok {
+	if _, ok := lastAccepted(result).(*ahp.ModelRequestBeforeInterceptResponse); !ok {
 		t.Fatal("named consumer response lost context")
 	}
 }
@@ -269,16 +269,16 @@ func TestAcceptedReceiverEnvelopesHTTP(t *testing.T) {
 			}
 			defer result.Close()
 			if !accept {
-				if result.AcceptedResponses == nil || len(result.AcceptedResponses) != 0 || result.AcceptedResponse != nil {
+				if result.AcceptedResponses == nil || len(result.AcceptedResponses) != 0 || lastAccepted(result.Result) != nil {
 					t.Fatal("fabricated accepted response")
 				}
-				if len(result.Errors) != 4 {
-					t.Fatalf("expected all responses rejected: %v", result.Errors)
+				if len(result.Diagnostics) != 4 {
+					t.Fatalf("expected all responses rejected: %v", result.Diagnostics)
 				}
 				return
 			}
-			if len(result.Errors) != 2 || len(result.AcceptedResponses) != 2 || len(result.Response.Effects.Value) != 2 {
-				t.Fatalf("acceptance counts: responses=%d errors=%d", len(result.AcceptedResponses), len(result.Errors))
+			if len(result.Diagnostics) != 2 || len(result.AcceptedResponses) != 2 || len(result.response.Effects.Value) != 2 {
+				t.Fatalf("acceptance counts: responses=%d errors=%d", len(result.AcceptedResponses), len(result.Diagnostics))
 			}
 			originalsMu.Lock()
 			defer originalsMu.Unlock()
@@ -289,9 +289,38 @@ func TestAcceptedReceiverEnvelopesHTTP(t *testing.T) {
 					t.Fatalf("receiver envelope %d lost extras, provenance, identity, or order", i)
 				}
 			}
-			if result.AcceptedResponse != result.AcceptedResponses[1] {
+			if lastAccepted(result.Result) != result.AcceptedResponses[1] {
 				t.Fatal("last response alias is not a receiver envelope")
 			}
 		})
+	}
+}
+
+func parsedFixtureEvent(t *testing.T, wire any) *ahp.Event {
+	t.Helper()
+	parsed := ahp.ParseEvent(sdkJSON(wire))
+	if !parsed.OK {
+		t.Fatal("invalid event fixture")
+	}
+	return &parsed.Value
+}
+
+func TestTypedSettlementPreservesOpaqueStateWithoutAuthority(t *testing.T) {
+	r := settlementFixture(t)
+	r.state.Candidate = ahp.Null[ahp.InterceptRequestParamsStateCandidateValue]()
+	r.state.AdditionalProperties = map[string]json.RawMessage{
+		"future": json.RawMessage(`{"number":9007199254740993,"null":null,"permission":"allow","candidate":{"value":42}}`),
+	}
+	if err := r.decodeSettlement("tool.before"); err != nil {
+		t.Fatal(err)
+	}
+	if r.Candidate.Valid {
+		t.Fatal("opaque state extra became an authoritative candidate")
+	}
+	if string(r.StateExtras["future"]) != string(r.state.AdditionalProperties["future"]) {
+		t.Fatal("opaque state extras changed")
+	}
+	if r.Flow.Present != r.state.Flow.Present {
+		t.Fatal("flow omission changed")
 	}
 }

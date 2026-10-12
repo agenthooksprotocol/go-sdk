@@ -18,22 +18,22 @@ import (
 // DefaultMaxFrameBytes is the finite HTTP and stdio frame ceiling (4 MiB).
 const DefaultMaxFrameBytes int64 = 4 << 20
 
-// Handlers receive canonical wire requests. Nil callbacks reject the method.
-// Callbacks may run concurrently over HTTP and must cooperate with cancellation.
-type Handlers struct {
-	Intercept    func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error)
-	Observe      func(context.Context, ahp.ObserveNotification) error
-	Capabilities func(context.Context, ahp.CapabilitiesRequest) (ahp.CapabilitiesResponseResult, error)
+// wireHandlers is the private validated transport callback seam.
+type wireHandlers struct {
+	typedIntercept func(context.Context, ahp.InterceptRequest) (any, map[string]json.RawMessage, error)
+	Intercept      func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error)
+	Observe        func(context.Context, ahp.ObserveNotification) error
+	Capabilities   func(context.Context, ahp.CapabilitiesRequest) (ahp.CapabilitiesResponseResult, error)
 }
 type Options struct {
 	MaxRequestBytes  int64
 	MaxResponseBytes int64
 }
 
-// NewHandler validates configuration without starting workers or listeners.
+// newWireHandler validates configuration without starting workers or listeners.
 // Zero limits select DefaultMaxFrameBytes. Responses are buffered and validated
 // before writing. Callback errors and panics are never exposed to peers.
-func NewHandler(h Handlers, opts Options) (http.Handler, error) {
+func newWireHandler(h wireHandlers, opts Options) (http.Handler, error) {
 	if opts.MaxRequestBytes < 0 || opts.MaxResponseBytes < 0 {
 		return nil, errors.New("server: negative frame limit")
 	}
@@ -135,6 +135,7 @@ func NewHandler(h Handlers, opts Options) (http.Handler, error) {
 				return
 			}
 		}
+		var envelopeExtras map[string]json.RawMessage
 		var result any
 		switch method {
 		case "hooks/intercept":
@@ -143,11 +144,16 @@ func NewHandler(h Handlers, opts Options) (http.Handler, error) {
 				rpcError(-32602, "Invalid params")
 				return
 			}
-			if h.Intercept == nil {
+			if h.Intercept == nil && h.typedIntercept == nil {
 				rpcError(-32601, "Method not found")
 				return
 			}
-			result, err = h.Intercept(r.Context(), p.Value)
+			if h.typedIntercept != nil {
+				ctx := context.WithValue(r.Context(), rawCapabilitiesKey{}, params["capabilities"])
+				result, envelopeExtras, err = h.typedIntercept(ctx, p.Value)
+			} else {
+				result, err = h.Intercept(r.Context(), p.Value)
+			}
 		case "hooks/observe":
 			p := ahp.ParseObserveNotification(b)
 			if !p.OK || !canonical("observe-notification", b) {
@@ -181,11 +187,22 @@ func NewHandler(h Handlers, opts Options) (http.Handler, error) {
 			rpcError(-32601, "Method not found")
 			return
 		}
+		if errors.Is(err, errMissingHandler) {
+			rpcError(-32601, "Method not found")
+			return
+		}
 		if err != nil {
 			rpcError(-32004, "Backend internal error")
 			return
 		}
-		out, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": id, "result": result})
+		envelope := make(map[string]any, len(envelopeExtras)+3)
+		for key, value := range envelopeExtras {
+			if key != "error" {
+				envelope[key] = value
+			}
+		}
+		envelope["jsonrpc"], envelope["id"], envelope["result"] = "2.0", id, result
+		out, err := json.Marshal(envelope)
 		kind := "intercept-response"
 		valid := false
 		if method == "hooks/capabilities" {

@@ -53,11 +53,27 @@ func ElicitForm[T any](ctx context.Context, hooks *Hooks, input event.UserElicit
 	input.Elicitation.Request = ahp.Some(&part)
 	options = append(options, WithReturnCodec(formResultCodec(form)))
 	result, err := hooks.UserElicitationRequest(ctx, input, options...)
+	return decodeFormRequest(result, err, form)
+}
+
+func decodeFormRequest[T any](result *Result, err error, form *FormContract[T]) (*FormHookResult[T], error) {
 	if result == nil {
 		return nil, err
 	}
 	out := &FormHookResult[T]{Result: result}
-	state, stateErr := sdkMap(result.State)
+	complete := false
+	defer func() {
+		if !complete {
+			result.Interrupted = true
+			result.Permission = "none"
+			out.Candidate = ahp.Optional[FormAnswer[T]]{}
+			out.Answer = ahp.Optional[FormAnswer[T]]{}
+		}
+	}()
+	if e := result.requireSettledEvent("user.elicitation.request"); e != nil {
+		return out, errors.Join(err, e)
+	}
+	state, stateErr := sdkMap(result.state)
 	if stateErr != nil {
 		return out, stateErr
 	}
@@ -68,6 +84,7 @@ func ElicitForm[T any](ctx context.Context, hooks *Hooks, input event.UserElicit
 		}
 		out.Candidate = ahp.Some(answer)
 	}
+	complete = true
 	return out, err
 }
 
@@ -94,14 +111,27 @@ func ElicitFormResult[T any](ctx context.Context, hooks *Hooks, input event.User
 		}
 	})
 	result, err := hooks.UserElicitationResult(ctx, input, options...)
+	return decodeFormResult(result, err, form)
+}
+
+func decodeFormResult[T any](result *Result, err error, form *FormContract[T]) (*FormHookResult[T], error) {
 	if result == nil {
 		return nil, err
 	}
 	out := &FormHookResult[T]{Result: result}
-	var settled ahp.UserElicitationResultEvent
-	if decodeErr := json.Unmarshal(result.Event, &settled); decodeErr != nil {
-		return out, decodeErr
+	complete := false
+	defer func() {
+		if !complete {
+			result.Interrupted = true
+			result.Permission = "none"
+			out.Candidate = ahp.Optional[FormAnswer[T]]{}
+			out.Answer = ahp.Optional[FormAnswer[T]]{}
+		}
+	}()
+	if e := result.requireSettledEvent("user.elicitation.result"); e != nil {
+		return out, errors.Join(err, e)
 	}
+	settled := result.Event.UserElicitationResultEvent.Value
 	descriptor := settled.Elicitation.Result
 	if descriptor.Present && descriptor.Value != nil && descriptor.Value.TextBodyPart.Present && descriptor.Value.TextBodyPart.Value != nil {
 		answer, decodeErr := form.DecodeResult([]byte(descriptor.Value.TextBodyPart.Value.Text))
@@ -110,5 +140,6 @@ func ElicitFormResult[T any](ctx context.Context, hooks *Hooks, input event.User
 		}
 		out.Answer = ahp.Some(answer)
 	}
+	complete = true
 	return out, err
 }

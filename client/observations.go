@@ -4,32 +4,10 @@ import (
 	"context"
 	"errors"
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/diagnostic"
 	"github.com/agenthooksprotocol/go-sdk/internal/canonical"
 	"sync"
 )
-
-// Observations retains completed best-effort delivery outcomes for compatibility.
-// Boundary calls own and finish all deliveries before returning. Hosts may run the
-// entire boundary call in their own goroutine; settlement never authorizes early execution.
-type Observations struct {
-	done   chan struct{}
-	cancel context.CancelFunc
-	mu     sync.Mutex
-	errors []DeliveryError
-}
-
-func (o *Observations) Done() <-chan struct{} { return o.done }
-func (o *Observations) Cancel()               { o.cancel() }
-func (o *Observations) Wait(ctx context.Context) ([]DeliveryError, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-o.done:
-		o.mu.Lock()
-		defer o.mu.Unlock()
-		return append([]DeliveryError(nil), o.errors...), nil
-	}
-}
 
 type observationDelivery struct {
 	backend registeredBackend
@@ -37,12 +15,14 @@ type observationDelivery struct {
 	index   int
 }
 
-func (c *Hooks) scheduleObservations(parent context.Context, event map[string]any, pending []observationDelivery, prepared ...*preparedBoundary) *Observations {
+func (c *Hooks) scheduleObservations(parent context.Context, event map[string]any, pending []observationDelivery, prepared ...*preparedBoundary) []DeliveryError {
 	ctx, cancel := context.WithCancel(parent)
 	if len(prepared) > 0 && prepared[0] != nil {
 		ctx = context.WithValue(ctx, preparedContextKey{}, prepared[0])
 	}
-	o := &Observations{done: make(chan struct{}), cancel: cancel}
+	defer cancel()
+	var mu sync.Mutex
+	var failures []DeliveryError
 	var wg sync.WaitGroup
 	for _, delivery := range pending {
 		// Interruption retires owned work, never starts best-effort follow-up.
@@ -52,9 +32,9 @@ func (c *Hooks) scheduleObservations(parent context.Context, event map[string]an
 		select {
 		case c.observations <- struct{}{}:
 		default:
-			o.mu.Lock()
-			o.errors = append(o.errors, DeliveryError{BackendID: delivery.backend.id, Subscription: delivery.index, Stage: "admission", Code: DeliveryCapacity, Err: errors.New("observation capacity exceeded")})
-			o.mu.Unlock()
+			mu.Lock()
+			failures = append(failures, DeliveryError{BackendID: delivery.backend.id, Subscription: delivery.index, Stage: "admission", Code: diagnostic.Capacity, Err: errors.New("observation capacity exceeded")})
+			mu.Unlock()
 			continue
 		}
 		snapshot, _ := sdkMap(event)
@@ -87,16 +67,12 @@ func (c *Hooks) scheduleObservations(parent context.Context, event map[string]an
 				}
 			}
 			if err != nil {
-				o.mu.Lock()
-				o.errors = append(o.errors, DeliveryError{BackendID: d.backend.id, Subscription: d.index, Stage: stage, Code: deliveryCode(stage, err), Err: err})
-				o.mu.Unlock()
+				mu.Lock()
+				failures = append(failures, DeliveryError{BackendID: d.backend.id, Subscription: d.index, Stage: stage, Code: deliveryCode(stage, err), Err: err})
+				mu.Unlock()
 			}
 		}(delivery)
 	}
 	wg.Wait()
-	cancel()
-	// Completed handles must not retain the delivery context and its source store.
-	o.cancel = func() {}
-	close(o.done)
-	return o
+	return failures
 }

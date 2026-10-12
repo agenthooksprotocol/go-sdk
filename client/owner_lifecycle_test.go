@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"github.com/agenthooksprotocol/go-sdk/content"
 	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 	"io"
 	"strings"
@@ -9,13 +10,13 @@ import (
 	"testing"
 )
 
-func preparedLifecycleFixture(t *testing.T) (map[string]any, *preparedBoundary, *ContentSource) {
+func preparedLifecycleFixture(t *testing.T) (map[string]any, *preparedBoundary, *content.Source) {
 	t.Helper()
 	part := preparedOwnerAttachment("binary")
 	part["selection"] = "body"
 	part["body"] = map[string]any{"ref": "urn:original"}
 	event := preparedOwnerEvent(preparedOwnerMessage("one", part, preparedOwnerText("text", "original")))
-	c := &Client{opts: Options{Content: ContentOptions{Resolver: func(context.Context, string) (io.ReadCloser, error) {
+	c := &Hooks{opts: Options{Content: ContentOptions{Resolver: func(context.Context, string) (io.ReadCloser, error) {
 		return io.NopCloser(strings.NewReader("original")), nil
 	}}}}
 	p, err := c.prepareBoundary(context.Background(), event, preparedOwnerCaps("response"), interceptConfig{})
@@ -89,7 +90,7 @@ func TestReleaseUnusedCleansLazyOwnersWithoutOpening(t *testing.T) {
 	}, func() error { cleanups.Add(1); return nil })
 	external := ownedcontent.NewAttachment([]byte("external"))
 	live := ownedcontent.NewAttachment([]byte("live"))
-	p := &preparedBoundary{sources: map[string]*ContentSource{"/items/0/parts/0": live}, owned: map[*ContentSource]bool{stale: true, live: true}}
+	p := &preparedBoundary{sources: map[string]*content.Source{"/items/0/parts/0": live}, owned: map[*content.Source]bool{stale: true, live: true}}
 	// An original user source in a discarded index is not in the owned ledger.
 	discarded := p.clone()
 	discarded.sources["/items/1/parts/0"] = external
@@ -113,7 +114,7 @@ func TestReleaseUnusedCleansLazyOwnersWithoutOpening(t *testing.T) {
 
 func TestReleaseUnusedReclaimsSerialEditBudget(t *testing.T) {
 	event, p, owner := preparedLifecycleFixture(t)
-	budget := &contentSourceBudget{seen: map[*ContentSource]bool{}}
+	budget := &contentSourceBudget{seen: map[*content.Source]bool{}}
 	for i := 0; i < 8; i++ {
 		if _, err := budget.snapshot(context.Background(), owner, 8, 8); err != nil {
 			t.Fatal("inline versions exhausted immutable budget", i, err)

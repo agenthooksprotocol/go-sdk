@@ -1,6 +1,9 @@
 package client
 
-import "github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
+import (
+	"github.com/agenthooksprotocol/go-sdk/content"
+	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
+)
 
 // releaseUnused retires speculative and superseded owners after the caller has
 // chosen the authoritative prepared boundary. No discarded staging clone may be
@@ -10,7 +13,7 @@ func (p *preparedBoundary) releaseUnused(budget *contentSourceBudget) {
 	if p == nil {
 		return
 	}
-	live := make(map[*ContentSource]bool, len(p.sources))
+	live := make(map[*content.Source]bool, len(p.sources))
 	for _, source := range p.sources {
 		live[source] = true
 	}

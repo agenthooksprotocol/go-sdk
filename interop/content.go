@@ -52,8 +52,7 @@ func uploadToken(a *UploadAuth) (string, error) {
 
 // UploadContent sends arbitrary octets to the exact configured endpoint. The
 // returned reference is usable only after validating synchronous 201 confirmation.
-// The two string arguments are local fixture labels only; neither is sent on the wire.
-func UploadContent(ctx context.Context, binding UploadBinding, _, _ string, body []byte) (Object, int, error) {
+func UploadContent(ctx context.Context, binding UploadBinding, body []byte) (Object, int, error) {
 	if binding.MaxBytes != nil && int64(len(body)) > *binding.MaxBytes {
 		return nil, 0, fmt.Errorf("upload exceeds configured maxBytes")
 	}

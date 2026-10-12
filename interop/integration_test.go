@@ -26,7 +26,7 @@ func TestBinaryUploadBinding(t *testing.T) {
 	defer server.Close()
 	binding := UploadBinding{Endpoint: server.URL + "/exact?scope=1", Auth: policy["body"].Auth}
 	body := []byte{0, 255, 128, 'a', 0}
-	ref, status, e := UploadContent(context.Background(), binding, "body", "urn:binary", body)
+	ref, status, e := UploadContent(context.Background(), binding, body)
 	if e != nil || status != 201 {
 		t.Fatalf("%d %v", status, e)
 	}
@@ -36,41 +36,36 @@ func TestBinaryUploadBinding(t *testing.T) {
 	if e = checkContent(Object{"items": []any{Object{"body": Object{"ref": ref["ref"]}}}}, "other", s.uploads); e == nil {
 		t.Fatal("cross-subscription reference")
 	}
-	if str(ref["ref"]) == "" || ref["ref"] == "urn:binary" {
-		t.Fatal("sender alias used as receiver reference", ref)
+	if str(ref["ref"]) == "" {
+		t.Fatal("receiver did not allocate a reference", ref)
 	}
-	retry, status, e := UploadContent(context.Background(), binding, "body", "urn:binary", body)
+	retry, status, e := UploadContent(context.Background(), binding, body)
 	if e != nil || status != 201 {
 		t.Fatal("retry", status, e)
 	}
 	if e = checkContent(Object{"items": []any{Object{"body": Object{"ref": retry["ref"]}}}}, "body", s.uploads); e != nil {
 		t.Fatal(e)
 	}
-	changed, status, e := UploadContent(context.Background(), binding, "body", "urn:binary", []byte("changed"))
+	changed, status, e := UploadContent(context.Background(), binding, []byte("changed"))
 	if e != nil || status != 201 || changed["ref"] == ref["ref"] || s.uploads[contentKey("body", str(ref["ref"]))] != string(body) {
 		t.Fatal("later upload mutated original reference", status, e)
 	}
-	if _, status, e = UploadContent(context.Background(), binding, "body", "urn:empty", nil); e != nil || status != 201 {
+	if _, status, e = UploadContent(context.Background(), binding, nil); e != nil || status != 201 {
 		t.Fatal("zero bytes", status, e)
 	}
 	anonymous := binding
 	anonymous.Auth = nil
-	if _, status, _ = UploadContent(context.Background(), anonymous, "body", "x", body); status != 403 {
+	if _, status, _ = UploadContent(context.Background(), anonymous, body); status != 403 {
 		t.Fatal("anonymous scope authorized on protected route", status)
 	}
 	t.Setenv("GO_BAD_UPLOAD_TOKEN", "invalid")
 	bad := binding
 	bad.Auth = &UploadAuth{Type: "bearer", TokenEnv: "GO_BAD_UPLOAD_TOKEN"}
-	if _, status, _ = UploadContent(context.Background(), bad, "body", "x", body); status != 401 {
+	if _, status, _ = UploadContent(context.Background(), bad, body); status != 401 {
 		t.Fatal("invalid credentials accepted", status)
 	}
-	// A local alias cannot select or grant an authorization scope.
-	aliased, status, e := UploadContent(context.Background(), binding, "unknown", "x", body)
-	if e != nil || status != 201 || checkContent(Object{"items": []any{Object{"body": aliased}}}, "unknown", s.uploads) == nil {
-		t.Fatal("sender alias changed authorized scope", status, e)
-	}
 	anonymous.Endpoint = server.URL + "/anonymous"
-	if _, status, e = UploadContent(context.Background(), anonymous, "anonymous", "x", body); e != nil || status != 201 {
+	if _, status, e = UploadContent(context.Background(), anonymous, body); e != nil || status != 201 {
 		t.Fatal("explicit anonymous", status, e)
 	}
 	// Same-size bad hash, chunked framing, and JSON are rejected, not persisted.
@@ -103,7 +98,7 @@ func TestBinaryUploadBinding(t *testing.T) {
 	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target.URL, 307) }))
 	defer redirect.Close()
 	binding.Endpoint = redirect.URL
-	if _, status, _ = UploadContent(context.Background(), binding, "body", "redirect", body); status != 307 || leaked {
+	if _, status, _ = UploadContent(context.Background(), binding, body); status != 307 || leaked {
 		t.Fatal("redirect followed")
 	}
 }
@@ -276,7 +271,7 @@ func TestCanonicalEvaluatorScenarios(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	for _, s := range withHostRefusalExpectations(t, ss) {
+	for _, s := range ss {
 		t.Run(s.ID, func(t *testing.T) {
 			var req, res Object
 			if e := json.Unmarshal(s.Request, &req); e != nil {
@@ -364,7 +359,7 @@ func TestTaskWorkspaceCapabilities(t *testing.T) {
 func TestUploadConfiguredLimits(t *testing.T) {
 	max := int64(0)
 	binding := UploadBinding{Endpoint: "https://unused.example/bytes", MaxBytes: &max}
-	if _, status, e := UploadContent(context.Background(), binding, "s", "r", []byte{1}); e == nil || status != 0 {
+	if _, status, e := UploadContent(context.Background(), binding, []byte{1}); e == nil || status != 0 {
 		t.Fatal("maxBytes ignored")
 	}
 }

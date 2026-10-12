@@ -118,7 +118,7 @@ func TestSharedScenarios(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	for _, s := range withHostRefusalExpectations(t, ss) {
+	for _, s := range ss {
 		t.Run(s.ID, func(t *testing.T) {
 			req, e := v.Validate("intercept-request", s.Request)
 			if e != nil {
@@ -202,7 +202,7 @@ func transportScenarios(t *testing.T) []Scenario {
 		if err != nil {
 			t.Fatal(err)
 		}
-		all = append(all, withHostRefusalExpectations(t, central)...)
+		all = append(all, central...)
 	}
 	return all
 }

@@ -41,7 +41,7 @@ func request(h http.Handler, b []byte) *httptest.ResponseRecorder {
 }
 func TestHandlerCanonicalAndRedaction(t *testing.T) {
 	var calls int
-	h, e := NewHandler(Handlers{Intercept: func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
+	h, e := newWireHandler(wireHandlers{Intercept: func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
 		calls++
 		return noEffect(), nil
 	}}, Options{})
@@ -60,7 +60,7 @@ func TestHandlerCanonicalAndRedaction(t *testing.T) {
 		t.Fatalf("invalid reached callback: %s", w.Body)
 	}
 	for _, panicNow := range []bool{false, true} {
-		h, e = NewHandler(Handlers{Intercept: func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
+		h, e = newWireHandler(wireHandlers{Intercept: func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
 			if panicNow {
 				panic("SECRET")
 			}
@@ -77,7 +77,7 @@ func TestHandlerCanonicalAndRedaction(t *testing.T) {
 }
 func TestNotificationSilence(t *testing.T) {
 	for _, panicNow := range []bool{false, true} {
-		h, e := NewHandler(Handlers{Observe: func(context.Context, ahp.ObserveNotification) error {
+		h, e := newWireHandler(wireHandlers{Observe: func(context.Context, ahp.ObserveNotification) error {
 			if panicNow {
 				panic("SECRET")
 			}
@@ -93,7 +93,7 @@ func TestNotificationSilence(t *testing.T) {
 	}
 }
 func TestInvalidResultAndLimits(t *testing.T) {
-	h, e := NewHandler(Handlers{Intercept: func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
+	h, e := newWireHandler(wireHandlers{Intercept: func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
 		return ahp.InterceptResponseResult{}, nil
 	}}, Options{})
 	if e != nil {
@@ -102,14 +102,14 @@ func TestInvalidResultAndLimits(t *testing.T) {
 	if w := request(h, fixture(t, "intercept")); !strings.Contains(w.Body.String(), "-32004") {
 		t.Fatal(w.Body.String())
 	}
-	h, e = NewHandler(Handlers{}, Options{MaxRequestBytes: 2})
+	h, e = newWireHandler(wireHandlers{}, Options{MaxRequestBytes: 2})
 	if e != nil {
 		t.Fatal(e)
 	}
 	if w := request(h, []byte("123")); w.Code != 413 {
 		t.Fatal(w.Code)
 	}
-	if _, e := NewHandler(Handlers{}, Options{MaxResponseBytes: 1}); e == nil {
+	if _, e := newWireHandler(wireHandlers{}, Options{MaxResponseBytes: 1}); e == nil {
 		t.Fatal("accepted unusable ceiling")
 	}
 }
@@ -272,7 +272,7 @@ func TestUploadFailures(t *testing.T) {
 
 func TestRequestCorrelationAndVersion(t *testing.T) {
 	calls := 0
-	h, e := NewHandler(Handlers{Intercept: func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
+	h, e := newWireHandler(wireHandlers{Intercept: func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
 		calls++
 		return noEffect(), nil
 	}}, Options{})
@@ -290,7 +290,7 @@ func TestRequestCorrelationAndVersion(t *testing.T) {
 	}
 }
 func TestUnadvertisedCallbackEffectRejected(t *testing.T) {
-	h, e := NewHandler(Handlers{Intercept: func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
+	h, e := newWireHandler(wireHandlers{Intercept: func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
 		var result ahp.InterceptResponseResult
 		if e := json.Unmarshal([]byte(`{"protocolVersion":"draft","effects":[{"type":"message","text":"not advertised"}]}`), &result); e != nil {
 			t.Fatal(e)
@@ -325,7 +325,7 @@ func TestEffectOperationAndMergeValidation(t *testing.T) {
 	}
 }
 func TestInvalidEnvelopeStillEmitsStdioError(t *testing.T) {
-	h, e := NewHandler(Handlers{}, Options{})
+	h, e := newWireHandler(wireHandlers{}, Options{})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -340,7 +340,7 @@ func TestInvalidEnvelopeStillEmitsStdioError(t *testing.T) {
 }
 func TestInvalidUTF8DoesNotReachCallback(t *testing.T) {
 	calls := 0
-	h, e := NewHandler(Handlers{Intercept: func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
+	h, e := newWireHandler(wireHandlers{Intercept: func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
 		calls++
 		return noEffect(), nil
 	}}, Options{})
@@ -422,7 +422,7 @@ func TestStdioBlockedWriteCancellation(t *testing.T) {
 }
 
 func TestHandlerDefaultsNilEffects(t *testing.T) {
-	h, err := NewHandler(Handlers{Intercept: func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
+	h, err := newWireHandler(wireHandlers{Intercept: func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
 		v := ahp.ProtocolVersion("draft")
 		return ahp.InterceptResponseResult{ProtocolVersion: &v}, nil
 	}}, Options{})

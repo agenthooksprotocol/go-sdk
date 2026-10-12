@@ -28,25 +28,7 @@ type backendTransport interface {
 	Close() error
 }
 
-// EventTransportResolver supplies an explicitly authenticated HTTP client for a
-// backend's registered authentication binding. It runs for each delivery, within
-// that delivery's context and serialized backend exchange. It must honor context
-// cancellation. Returning a client affirms that its transport implements and
-// validates the configured binding, including credential acquisition and refresh.
-// The backend is a detached snapshot that the resolver may retain or modify.
-// Errors are redacted and never cause fallback to unauthenticated delivery.
-// The returned client is cloned, redirects are disabled, and its transport is not
-// closed by the SDK. Resolvers apply only to authenticated HTTP backends.
-type EventTransportResolver func(context.Context, *ahp.Backend) (*http.Client, error)
-
-func newBackendTransport(backend *ahp.Backend, eventClient *http.Client, resolvers ...EventTransportResolver) (backendTransport, error) {
-	if len(resolvers) > 1 {
-		return nil, errors.New("at most one event transport resolver is permitted")
-	}
-	var resolver EventTransportResolver
-	if len(resolvers) == 1 {
-		resolver = resolvers[0]
-	}
+func newBackendTransport(backend *ahp.Backend, eventClient *http.Client) (backendTransport, error) {
 	if backend == nil {
 		return nil, errors.New("nil backend")
 	}
@@ -83,15 +65,8 @@ func newBackendTransport(backend *ahp.Backend, eventClient *http.Client, resolve
 		}
 		// Registration has no redirect opt-in; never forward payloads to another URL.
 		c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-		var snapshot []byte
-		if credential != nil && resolver != nil {
-			snapshot, err = json.Marshal(backend)
-			if err != nil {
-				return nil, errors.New("invalid backend configuration")
-			}
-		}
 		ctx, cancel := context.WithCancel(context.Background())
-		return &httpBackend{url: cfg.URL, client: &c, ctx: ctx, cancel: cancel, gate: make(chan struct{}, 1), credential: credential, resolver: resolver, snapshot: snapshot}, nil
+		return &httpBackend{url: cfg.URL, client: &c, ctx: ctx, cancel: cancel, gate: make(chan struct{}, 1), credential: credential}, nil
 	}
 	cfg := t.StdioTransport.Value
 	if cfg == nil || cfg.Type != ahp.StdioTransportTypeStdio || cfg.Command == "" || (cfg.Lifecycle != ahp.StdioTransportLifecyclePersistent && cfg.Lifecycle != ahp.StdioTransportLifecyclePerEvent) {
@@ -133,8 +108,6 @@ func (c *backendCredential) resolve(ctx context.Context) (string, error) {
 type httpBackend struct {
 	provider    auth.Provider
 	authRequest *auth.Request
-	resolver    EventTransportResolver
-	snapshot    []byte
 	gate        chan struct{}
 	credential  *backendCredential
 	url         string
@@ -168,22 +141,7 @@ func (t *httpBackend) Exchange(ctx context.Context, body []byte, notification bo
 		return nil, errors.New("invalid HTTP request")
 	}
 	client := t.client
-	if t.credential != nil && t.resolver != nil && t.provider == nil {
-		var backend ahp.Backend
-		if err := json.Unmarshal(t.snapshot, &backend); err != nil {
-			return nil, errors.New("invalid backend authentication configuration")
-		}
-		resolved, err := t.resolver(ctx, &backend)
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		if err != nil || resolved == nil {
-			return nil, errors.New("backend authentication resolution failed")
-		}
-		copied := *resolved
-		copied.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-		client = &copied
-	} else if t.authRequest == nil {
+	if t.authRequest == nil {
 		token, err := t.credential.resolve(ctx)
 		if err != nil {
 			return nil, err
@@ -194,7 +152,7 @@ func (t *httpBackend) Exchange(ctx context.Context, body []byte, notification bo
 	}
 	req.Header.Set("Content-Type", "application/json")
 	var resp *http.Response
-	if t.authRequest != nil && (t.provider != nil || t.resolver == nil) {
+	if t.authRequest != nil {
 		resp, err = auth.Do(client, req, *t.authRequest, t.provider, !notification)
 	} else {
 		resp, err = client.Do(req)

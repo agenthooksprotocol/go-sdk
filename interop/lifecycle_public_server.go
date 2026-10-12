@@ -31,21 +31,19 @@ func lifecycleMessage(ctx context.Context, value any) Object {
 
 func (s *lifecycleReceiver) publicHandler() (http.Handler, error) {
 	callbacks := server.Handlers{
-		Intercept: func(ctx context.Context, request ahp.InterceptRequest) (ahp.InterceptResponseResult, error) {
-			message := lifecycleMessage(ctx, request)
+		Intercept: fixtureInterceptHandlers(func(ctx context.Context, message Object) (Object, error) {
+			ctx.Value(lifecycleAcceptanceKey{}).(*lifecycleAcceptance).entered = true
 			if s.suite == "catalogue" {
-				return ahp.InterceptResponseResult{}, fmt.Errorf("unsupported catalogue method")
+				return nil, fmt.Errorf("unsupported catalogue method")
 			}
 			reply, err := s.acceptedDispatch(ctx, message)
 			if err != nil {
-				return ahp.InterceptResponseResult{}, err
+				return nil, err
 			}
-			var result ahp.InterceptResponseResult
-			err = json.Unmarshal(jsonBytes(reply["result"]), &result)
-			return result, err // NewHandler owns full response and effect acceptance.
-		},
-		Observe: func(ctx context.Context, notification ahp.ObserveNotification) error {
-			message := lifecycleMessage(ctx, notification)
+			return reply, nil // NewHandler owns response/effect acceptance.
+		}),
+		Observe: fixtureObserveHandlers(func(ctx context.Context, message Object) error {
+			ctx.Value(lifecycleAcceptanceKey{}).(*lifecycleAcceptance).entered = true
 			if s.suite != "catalogue" {
 				_, err := s.acceptedDispatch(ctx, message)
 				return err
@@ -68,7 +66,7 @@ func (s *lifecycleReceiver) publicHandler() (http.Handler, error) {
 			}
 			s.record(Object{"kind": "observed", "eventId": event["id"], "event": clone(event), "message": clone(message)})
 			return nil
-		},
+		}),
 	}
 	if s.suite == "catalogue" {
 		callbacks.Capabilities = func(ctx context.Context, request ahp.CapabilitiesRequest) (ahp.CapabilitiesResponseResult, error) {
@@ -85,7 +83,7 @@ func (s *lifecycleReceiver) publicHandler() (http.Handler, error) {
 			return result, nil
 		}
 	}
-	handler, err := server.NewHandler(callbacks, server.Options{})
+	handler, err := newFixtureHandler(callbacks)
 	if err != nil {
 		return nil, err
 	}

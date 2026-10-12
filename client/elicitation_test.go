@@ -1,6 +1,7 @@
 package client
 
 import (
+	"github.com/agenthooksprotocol/go-sdk/content"
 	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 	"testing"
 )
@@ -200,8 +201,8 @@ func TestElicitationOptionalContentAndAbsentSession(t *testing.T) {
 	}
 }
 
-func elicitationOwners(event map[string]any, bodies map[string][]byte) map[string]*ContentSource {
-	sources := map[string]*ContentSource{}
+func elicitationOwners(event map[string]any, bodies map[string][]byte) map[string]*content.Source {
+	sources := map[string]*content.Source{}
 	for _, stage := range []string{"request", "result"} {
 		item := preparedAt(event, "/elicitation/"+stage)
 		ref := compositionString(sdkObj(item["body"])["ref"])

@@ -51,12 +51,14 @@ func TestPreparedCompactionSerialAndObservedInlineText(t *testing.T) {
 				}
 			}
 			c.backends[2].subscriptions[0]["mode"] = "observe"
+			delete(c.backends[2].subscriptions[0], "failurePolicy")
+			delete(c.backends[2].subscriptions[0], "timeoutMs")
 			trs[0].reply = func(map[string]any) []any {
 				return []any{map[string]any{"type": "modify", "target": target, "operation": "replace", "value": []any{part("effective " + target)}}}
 			}
 			trs[1].reply = func(map[string]any) []any { return []any{} }
 			result, err := c.intercept(context.Background(), name, input)
-			if err != nil || result == nil || len(result.Errors) != 0 {
+			if err != nil || result == nil || len(result.Diagnostics) != 0 {
 				t.Fatalf("result: %+v %v", result, err)
 			}
 			defer result.Close()
@@ -86,7 +88,7 @@ func TestPreparedCompactionSerialAndObservedInlineText(t *testing.T) {
 				t.Fatal("host input mutated")
 			}
 			if stage == "after" {
-				event := compositionObject(result.Event)
+				event := compositionObject(sdkJSON(result.Event))
 				if sdkObj(event["execution"])["status"] != "executed" || len(sdkArray(event["removed"])) != 0 {
 					t.Fatal("compaction fabricated execution or installation")
 				}

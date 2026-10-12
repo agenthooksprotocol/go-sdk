@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/event"
 	"testing"
 )
 
@@ -24,11 +25,11 @@ func TestSessionCountersLosslessFullPublicDecode(t *testing.T) {
 		t.Fatalf("public decode: %v", err)
 	}
 	defer result.Close()
-	if len(result.Errors) != 0 {
-		t.Fatalf("counter admission: %+v", result.Errors)
+	if len(result.Diagnostics) != 0 {
+		t.Fatalf("counter admission: %+v", result.Diagnostics)
 	}
 	var event ahp.Event
-	if err := json.Unmarshal(result.Event, &event); err != nil {
+	if err := json.Unmarshal(sdkJSON(result.Event), &event); err != nil {
 		t.Fatal(err)
 	}
 	decoded := event.ToolBeforeEvent.Value.Session.Value.Counters.Value
@@ -47,7 +48,7 @@ func TestSessionCountersRejectNonIntegerAndNegative(t *testing.T) {
 	c, transports := testClient(t, "fail-closed")
 	input := testInput()
 	input["session"] = map[string]any{"id": "session", "counters": map[string]any{"future": json.Number("-1")}}
-	if result, err := c.Dispatch(context.Background(), "tool.before", input); err == nil || result != nil || len(transports[0].calls) != 0 {
+	if result, err := c.Dispatch(context.Background(), event.ToolBefore, input); err == nil || result != nil || len(transports[0].calls) != 0 {
 		t.Fatal("invalid full counter input reached backend")
 	}
 }

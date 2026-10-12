@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/agenthooksprotocol/go-sdk/content"
 
 	ahp "github.com/agenthooksprotocol/go-sdk"
 )
@@ -23,10 +24,10 @@ func (c *Hooks) projectReceiverState(ctx context.Context, event, state, sub map[
 		}
 		wrapper := map[string]any{field: compositionValue(value)}
 		indexed := prepared.clone()
-		indexed.sources = map[string]*ContentSource{}
+		indexed.sources = map[string]*content.Source{}
 		if messages, ok := value.(*ahp.CanonicalMessages); ok {
 			for nextPath, part := range canonicalAttachments(messages, "/"+field) {
-				var owner *ContentSource
+				var owner *content.Source
 				for oldPath, source := range prepared.sources {
 					if wireEqual(part, preparedAt(event, oldPath)) {
 						if owner != nil && owner != source {
@@ -78,8 +79,10 @@ func (c *Hooks) projectReceiverState(ctx context.Context, event, state, sub map[
 			if c.opts.Content.ProjectOpaque == nil {
 				decoded.Candidate = ahp.Null[ahp.InterceptRequestParamsStateCandidateValue]()
 			} else {
-				scope := ContentAuthorization{Operation: "read", BackendID: backendID, Subscription: contentClone(sub).(map[string]any)}
-				scope.SubscriptionID, _ = sub["id"].(string)
+				scope, err := contentAuthorization("read", backendID, sub)
+				if err != nil {
+					return nil, err
+				}
 				opaque, err := contractJSON(decoded.Candidate.Value.Value)
 				if err != nil {
 					return nil, err

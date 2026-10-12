@@ -63,8 +63,8 @@ func TestContractToolBeforeWholeStagedMerge(t *testing.T) {
 		t.Fatalf("tool: %v", err)
 	}
 	defer result.Close()
-	if len(result.Errors) != 0 || !result.InputAvailable || result.Input.Count != 2 || result.Input.Name != "required" || result.Input.Nullable != nil || result.Input.Exact != "9007199254740993" || !reflect.DeepEqual(result.Input.Nested, map[string]int{"new": 3}) {
-		t.Fatalf("whole staged input: %+v errors=%+v", result.Input, result.Errors)
+	if len(result.Diagnostics) != 0 || !result.InputAvailable || result.Input.Count != 2 || result.Input.Name != "required" || result.Input.Nullable != nil || result.Input.Exact != "9007199254740993" || !reflect.DeepEqual(result.Input.Nested, map[string]int{"new": 3}) {
+		t.Fatalf("whole staged input: %+v errors=%+v", result.Input, result.Diagnostics)
 	}
 	if !result.Candidate.Present || result.Candidate.Value.Value.Answer != "yes" {
 		t.Fatal("result type was not independent of argument type")
@@ -120,10 +120,10 @@ func TestContractInvalidResponseRollbackBeforeLaterInterceptor(t *testing.T) {
 				t.Fatalf("tool: %v", err)
 			}
 			defer result.Close()
-			if len(result.Errors) != 1 || result.Input.Count != 2 || len(result.Response.Effects.Value) != 2 || !result.Candidate.Present || result.Candidate.Value.Value.Answer != "valid" {
-				t.Fatalf("rollback: count=%d errors=%d effects=%d", result.Input.Count, len(result.Errors), len(result.Response.Effects.Value))
+			if len(result.Diagnostics) != 1 || result.Input.Count != 2 || len(result.response.Effects.Value) != 2 || !result.Candidate.Present || result.Candidate.Value.Value.Answer != "valid" {
+				t.Fatalf("rollback: count=%d errors=%d effects=%d", result.Input.Count, len(result.Diagnostics), len(result.response.Effects.Value))
 			}
-			if strings.Contains(result.Errors[0].Error(), "private values") {
+			if strings.Contains(result.Diagnostics[0].Error(), "private values") {
 				t.Fatal("validator payload leaked")
 			}
 		})
@@ -170,8 +170,8 @@ func TestContractCandidateNullAndProvenanceReplacement(t *testing.T) {
 				t.Fatalf("tool: %v", err)
 			}
 			defer result.Close()
-			if len(result.Errors) != 0 {
-				t.Fatalf("errors: %+v", result.Errors)
+			if len(result.Diagnostics) != 0 {
+				t.Fatalf("errors: %+v", result.Diagnostics)
 			}
 			if mode == "absent" || mode == "input-change" {
 				if result.Candidate.Present {
@@ -240,7 +240,7 @@ func TestContractPublicHostCodecsOptInOnly(t *testing.T) {
 			if mode == "missing" {
 				options = append(options, WithHostValueCodec("/absent", JSONCodec[int](nil)))
 			}
-			result, err := c.Dispatch(context.Background(), "tool.before", input, options...)
+			result, err := c.Dispatch(context.Background(), event.ToolBefore, input, options...)
 			if mode == "invalid" {
 				if err == nil || result != nil || len(transports[0].calls) != 0 {
 					t.Fatal("invalid host contract reached backend")
@@ -251,7 +251,7 @@ func TestContractPublicHostCodecsOptInOnly(t *testing.T) {
 				t.Fatalf("dispatch: %v", err)
 			}
 			defer result.Close()
-			if len(result.Errors) != 0 || !compositionEqual(compositionObject(result.Event)["native"], compositionObject(sdkJSON(input))["native"]) {
+			if len(result.Diagnostics) != 0 || !compositionEqual(compositionObject(sdkJSON(result.Event))["native"], compositionObject(sdkJSON(input))["native"]) {
 				t.Fatal("opaque host value reshaped")
 			}
 		})

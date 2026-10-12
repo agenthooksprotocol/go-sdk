@@ -5,6 +5,7 @@ import (
 	"errors"
 	ahp "github.com/agenthooksprotocol/go-sdk"
 	"github.com/agenthooksprotocol/go-sdk/content"
+	"github.com/agenthooksprotocol/go-sdk/diagnostic"
 	"github.com/agenthooksprotocol/go-sdk/event"
 	"strings"
 	"sync"
@@ -34,6 +35,8 @@ func (t *ownedDeliveryTransport) Close() error { return nil }
 func TestBoundaryOwnsObservationCompletion(t *testing.T) {
 	c, _ := testClient(t, "fail-open")
 	c.backends[0].subscriptions[0]["mode"] = "observe"
+	delete(c.backends[0].subscriptions[0], "failurePolicy")
+	delete(c.backends[0].subscriptions[0], "timeoutMs")
 	tr := &ownedDeliveryTransport{started: make(chan struct{}), release: make(chan struct{}), finished: make(chan struct{})}
 	c.backends[0].transport = tr
 	done := make(chan *Result, 1)
@@ -57,11 +60,6 @@ func TestBoundaryOwnsObservationCompletion(t *testing.T) {
 	default:
 		t.Fatal("owned transport not retired")
 	}
-	select {
-	case <-r.Observations.Done():
-	default:
-		t.Fatal("compatibility observations handle incomplete")
-	}
 	if r.Permission != "none" || r.Interrupted || len(r.Diagnostics) != 0 {
 		t.Fatalf("unexpected settlement: %+v", r)
 	}
@@ -70,6 +68,8 @@ func TestBoundaryOwnsObservationCompletion(t *testing.T) {
 func TestObservationUsesRemainingOperationBudget(t *testing.T) {
 	c, _ := testClient(t, "fail-open")
 	c.backends[0].subscriptions[0]["mode"] = "observe"
+	delete(c.backends[0].subscriptions[0], "failurePolicy")
+	delete(c.backends[0].subscriptions[0], "timeoutMs")
 	c.opts.ObservationTimeout = time.Hour
 	tr := &ownedDeliveryTransport{started: make(chan struct{}), release: make(chan struct{}), finished: make(chan struct{})}
 	c.backends[0].transport = tr
@@ -79,7 +79,7 @@ func TestObservationUsesRemainingOperationBudget(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) || r == nil || !r.Interrupted {
 		t.Fatalf("result %+v error %v", r, err)
 	}
-	if len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != DeliveryDeadlineExceeded || r.Diagnostics[0].BackendID != c.backends[0].id {
+	if len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != diagnostic.DeadlineExceeded || r.Diagnostics[0].BackendID != c.backends[0].id {
 		t.Fatalf("diagnostics: %+v", r.Diagnostics)
 	}
 	if r.Permission != "none" {
@@ -95,6 +95,8 @@ func TestObservationUsesRemainingOperationBudget(t *testing.T) {
 func TestCancelledBoundaryDoesNotStartObservers(t *testing.T) {
 	c, transports := testClient(t, "fail-open")
 	c.backends[0].subscriptions[0]["mode"] = "observe"
+	delete(c.backends[0].subscriptions[0], "failurePolicy")
+	delete(c.backends[0].subscriptions[0], "timeoutMs")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	r, err := c.intercept(ctx, "tool.before", testInput())
@@ -147,7 +149,7 @@ func (r *retirementReader) Close() error             { close(r.started); <-r.rel
 func TestCloseIncludesUnusedSourceCleanup(t *testing.T) {
 	c, _ := testClient(t, "fail-open")
 	reader := &retirementReader{started: make(chan struct{}), release: make(chan struct{})}
-	source := NewContentSource(reader)
+	source := content.NewSource(reader)
 	call := make(chan error, 1)
 	go func() {
 		_, err := c.intercept(context.Background(), "tool.before", testInput(), WithContentSource("/items/0", source))

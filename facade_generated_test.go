@@ -203,107 +203,60 @@ func TestGeneratedConstructorLiteralsAndOptionalDefaults(t *testing.T) {
 	}
 }
 
-func TestGeneratedCapabilityHelpers(t *testing.T) {
-	absent := capability.New([]string{})
-	if absent.Elicitation.Present || absent.Modify.Present || absent.Flow.Present || absent.Inject.Present || len(absent.Effects) != 0 {
-		t.Fatal("constructor invented grants")
+func TestTypedCapabilityConstruction(t *testing.T) {
+	var _ func(capability.Host) map[event.Type]capability.WireDeclaration = capability.Host.Wire
+	if len((capability.Host{}).Wire()) != 0 {
+		t.Fatal("zero host grants")
 	}
-	empty := capability.New(nil, capability.WithElicitation(ahp.CapabilitiesElicitation{}))
-	if !empty.Elicitation.Present || empty.Elicitation.Value.Form.Present || empty.Elicitation.Value.URL.Present {
-		t.Fatal("empty elicitation inferred a mode")
+	if len((capability.Host{ToolBefore: capability.ToolBefore{ModifyInput: capability.Modify{}}}).Wire()) != 0 {
+		t.Fatal("zero event grants")
 	}
-	grants := capability.New([]string{"modify", "dev.example.extension"},
-		capability.WithInputModification(false, true),
-		capability.WithOutputModification(true, false),
-		capability.WithElicitationForm(), capability.WithElicitationURL())
-	if !grants.Elicitation.Value.Form.Present || !grants.Elicitation.Value.URL.Present {
-		t.Fatal("explicit elicitation grant absent")
+	host := capability.Host{ToolBefore: capability.ToolBefore{Allow: true, Deny: true, ReturnResult: true, ModifyInput: capability.ReplaceAndMerge(), Observe: true}, SessionEnd: capability.Observe{}, SessionStart: capability.Observe{}}
+	wire := host.Wire()
+	session := wire["session.start"]
+	if len(session.Modes) != 1 || session.Modes[0] != "observe" || session.Capabilities != nil {
+		t.Fatal("explicit session observation", session)
 	}
-	raw, err := json.Marshal(grants)
-	if err != nil {
-		t.Fatal(err)
+	var nilTool *capability.ToolBefore
+	if len((capability.Host{ToolBefore: nilTool}).Wire()) != 0 {
+		t.Fatal("typed nil event granted")
 	}
-	var decoded struct {
-		Effects     []string                   `json:"effects"`
-		Modify      map[string]map[string]bool `json:"modify"`
-		Elicitation map[string]map[string]any  `json:"elicitation"`
+	tool := wire["tool.before"]
+	if len(tool.Modes) != 2 || tool.Modes[0] != "intercept" || tool.Modes[1] != "observe" {
+		t.Fatal(tool)
 	}
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		t.Fatal(err)
+	if len(tool.Capabilities.Effects) != 4 {
+		t.Fatal(tool.Capabilities)
 	}
-	if len(decoded.Effects) != 2 || decoded.Effects[0] != "modify" || decoded.Effects[1] != "dev.example.extension" {
-		t.Fatalf("effects changed: %s", raw)
+	input := tool.Capabilities.Modify["input"]
+	if !input.Replace || !input.Merge {
+		t.Fatal(input)
 	}
-	input := decoded.Modify["input"]
-	if value, present := input["replace"]; !present || value {
-		t.Fatalf("explicit false lost: %s", raw)
+	if wire["session.end"].Capabilities != nil {
+		t.Fatal("observation granted controls")
 	}
-	if !input["merge"] || !decoded.Modify["output"]["replace"] {
-		t.Fatalf("target operation lost: %s", raw)
+	only := (capability.Host{ToolBefore: capability.ToolBefore{Deny: true}}).Wire()["tool.before"]
+	if len(only.Modes) != 1 || only.Modes[0] != "intercept" {
+		t.Fatal("implicit observation", only)
 	}
-	for _, mode := range []string{"form", "url"} {
-		if value, ok := decoded.Elicitation[mode]; !ok || value == nil || len(value) != 0 {
-			t.Fatalf("grant must be explicit empty object: %s", raw)
-		}
-	}
-	overridden := capability.New(nil, capability.WithEffects("allow"), capability.WithEffects("deny"), capability.WithInputModification(true, false), capability.WithInputModification(false, true))
-	if len(overridden.Effects) != 1 || overridden.Modify.Value.Input.Value.Replace || !overridden.Modify.Value.Input.Value.Merge {
-		t.Fatal("last option did not win")
-	}
-	noImplicitEffects := capability.New(nil, capability.WithInputModification(false, false), capability.WithElicitationForm())
-	if len(noImplicitEffects.Effects) != 0 {
-		t.Fatal("nested helper implicitly granted an effect")
-	}
-	// Options produce independent typed values for each use.
-	option := capability.WithInputModification(true, false)
-	first, second := capability.New(nil, option), capability.New(nil, option)
-	first.Modify.Value.Input.Value.Replace = false
-	if !second.Modify.Value.Input.Value.Replace {
-		t.Fatal("shared modification backing storage")
-	}
-}
-
-func TestFunctionalCapabilityComposition(t *testing.T) {
-	operations := []capability.ModifyOperation{capability.Replace}
-	grant := capability.ModifyInput(operations...)
-	operations[0] = capability.ModifyOperation("invalid")
-	first, err := capability.Intercept(capability.Deny(), grant, capability.ModifyInput(capability.Merge))
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := capability.Intercept(grant)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(first.Modes) != 2 || first.Modes[0] != capability.InterceptMode || first.Modes[1] != capability.ObserveMode {
-		t.Fatal(first.Modes)
-	}
-	combined := first.Capabilities.Modify.Value.Input.Value
-	independent := second.Capabilities.Modify.Value.Input.Value
-	if !combined.Replace || !combined.Merge || !independent.Replace || independent.Merge {
-		t.Fatal("reused grant was mutated")
-	}
-	if len(first.Capabilities.Effects) != 2 || len(second.Capabilities.Effects) != 1 {
-		t.Fatal("effect grants not deduplicated")
-	}
-	first.Capabilities.Modify.Value.Input.Value.Replace = false
-	if !second.Capabilities.Modify.Value.Input.Value.Replace {
-		t.Fatal("compositions alias storage")
-	}
-	for _, invalid := range []capability.Grant{{}, capability.ModifyInput(), capability.ModifyInput("invalid"), capability.InjectContextAppend()} {
-		if _, err := capability.Intercept(invalid); err == nil {
-			t.Fatal("invalid grant accepted")
-		}
-	}
-	if _, err := capability.Intercept(); err == nil {
-		t.Fatal("empty intercept accepted")
-	}
-	observe := capability.Observe()
-	if len(observe.Modes) != 1 || observe.Modes[0] != capability.ObserveMode || observe.Capabilities != nil {
+	observe := (capability.Host{ToolBefore: capability.ToolBefore{Observe: true}}).Wire()["tool.before"]
+	if len(observe.Modes) != 1 || observe.Modes[0] != "observe" || observe.Capabilities != nil {
 		t.Fatal(observe)
 	}
-	if _, err := capability.Intercept(capability.FlowStop(), capability.InjectContextAppend(capability.Now), capability.Ask(), capability.ElicitationForm()); err != nil {
+	tool.Capabilities.Modify["input"] = capability.WireModification{}
+	if !host.Wire()["tool.before"].Capabilities.Modify["input"].Replace {
+		t.Fatal("wire aliases typed host")
+	}
+	data, err := json.Marshal(host.Wire())
+	if err != nil {
 		t.Fatal(err)
+	}
+	var object map[string]map[string]json.RawMessage
+	if err := json.Unmarshal(data, &object); err != nil {
+		t.Fatal(err)
+	}
+	if len(object) != 3 || object["session.start"] == nil || object["session.end"] == nil || len(object["tool.before"]["modes"]) == 0 || len(object["tool.before"]["capabilities"]) == 0 {
+		t.Fatal(string(data))
 	}
 }
 
@@ -387,6 +340,49 @@ func TestInitialAndTypedEffectOperations(t *testing.T) {
 	var _ event.Type = event.ToolBefore
 }
 
+func TestTypedContextualResponseDispatch(t *testing.T) {
+	raw := []byte(`{"jsonrpc":"2.0","id":"typed-context","result":{"protocolVersion":"draft","effects":[]}}`)
+	parsed := event.ResponseForRequest(event.ToolBefore, raw)
+	if !parsed.OK {
+		t.Fatal(parsed.Diagnostics)
+	}
+	if _, ok := parsed.Value.(*ahp.ToolBeforeInterceptResponse); !ok {
+		t.Fatalf("wrong correlated model: %T", parsed.Value)
+	}
+	called := false
+	staged := event.StageResponseForRequest(event.ToolBefore, raw, func(value ahp.ContextualResponse) error { called = true; return nil })
+	if !called || !staged.OK {
+		t.Fatal("typed staging failed", staged.Diagnostics)
+	}
+	observed := event.ResponseForRequest(event.SessionEnd, raw)
+	if observed.OK || len(observed.Diagnostics) == 0 {
+		t.Fatal("observation granted interception")
+	}
+	unknown := event.ResponseForRequest(event.Type("unknown"), raw)
+	if unknown.OK || len(unknown.Diagnostics) == 0 {
+		t.Fatal("explicit invalid conversion granted authority")
+	}
+}
+func TestDefinedEventTypeKeepsCanonicalWire(t *testing.T) {
+	matches := func(selected event.Type) bool { return selected == event.ToolBefore }
+	if !matches(event.ToolBefore) || matches(event.ToolAfter) {
+		t.Fatal("typed event constants do not match")
+	}
+	dynamic := "tool.before"
+	if !matches(event.Type(dynamic)) || string(event.ToolBefore) != dynamic {
+		t.Fatal("explicit event/string conversion failed")
+	}
+	raw, err := json.Marshal(struct {
+		Type event.Type `json:"type"`
+	}{Type: event.ToolBefore})
+	if err != nil || string(raw) != `{"type":"tool.before"}` {
+		t.Fatalf("event wire changed: %s %v", raw, err)
+	}
+	var parsed event.Type
+	if err := json.Unmarshal([]byte(`"tool.before"`), &parsed); err != nil || parsed != event.ToolBefore {
+		t.Fatal("event JSON decoding failed", parsed, err)
+	}
+}
 func TestNamedContentSourceBindingsAreOutOfBand(t *testing.T) {
 	source := content.NewSource(io.NopCloser(strings.NewReader("owned content")))
 	messages := []*event.ModelVisibleItemInput{
@@ -440,16 +436,129 @@ func TestNamedContentSourceBindingsAreOutOfBand(t *testing.T) {
 	}
 }
 
-func TestContinuationCountsRejectInvalidComposition(t *testing.T) {
-	for _, pair := range [][2]int64{{-1, 0}, {0, -1}, {9007199254740992, 0}, {0, 9007199254740992}} {
-		if _, err := capability.Intercept(capability.FlowContinue(pair[0], pair[1])); err == nil {
-			t.Fatalf("invalid continuation counts accepted: %v", pair)
+func TestFlowMaxContinuations(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		host  capability.Host
+		event string
+		want  string
+	}{
+		{"stop", capability.Host{ToolBefore: capability.ToolBefore{Flow: capability.Stop().WithMaxContinuations(0)}}, "tool.before", `{"effects":["flow"],"flow":{"operations":["stop"],"maxContinuations":0}}`},
+		{"continue", capability.Host{TurnFinishBefore: capability.TurnFinishBefore{Flow: capability.Continue(2, 1).WithMaxContinuations(3)}}, "turn.finish.before", `{"effects":["flow"],"flow":{"operations":["continue"],"remainingContinuations":2,"continuationCount":1,"maxContinuations":3}}`},
+		{"both", capability.Host{TurnFinishBefore: capability.TurnFinishBefore{Flow: capability.ContinueAndStop(2, 1).WithMaxContinuations(3)}}, "turn.finish.before", `{"effects":["flow"],"flow":{"operations":["continue","stop"],"remainingContinuations":2,"continuationCount":1,"maxContinuations":3}}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			data, err := json.Marshal(test.host.Wire()[event.Type(test.event)].Capabilities)
+			if err != nil || string(data) != test.want {
+				t.Fatalf("configured maximum: %s %v", data, err)
+			}
+			if parsed := ahp.ParseCapabilities(data); !parsed.OK {
+				t.Fatal(parsed.Diagnostics)
+			}
+		})
+	}
+	for _, host := range []capability.Host{
+		{ToolBefore: capability.ToolBefore{Flow: (capability.StopFlow{}).WithMaxContinuations(3)}},
+		{TurnFinishBefore: capability.TurnFinishBefore{Flow: (capability.ContinueFlow{}).WithMaxContinuations(3)}},
+		{TurnFinishBefore: capability.TurnFinishBefore{Flow: (capability.StopContinueFlow{}).WithMaxContinuations(3)}},
+	} {
+		if len(host.Wire()) != 0 {
+			t.Fatal("maximum created flow authority")
 		}
 	}
-	for _, pair := range [][2]int64{{0, 0}, {1, 2}, {9007199254740991, 9007199254740991}} {
-		if _, err := capability.Intercept(capability.FlowContinue(pair[0], pair[1])); err != nil {
-			t.Fatal(err)
-		}
+	base := capability.Continue(2, 1)
+	limited := base.WithMaxContinuations(3)
+	limited = limited.WithMaxContinuations(4)
+	original := (capability.Host{TurnFinishBefore: capability.TurnFinishBefore{Flow: base}}).Wire()["turn.finish.before"].Capabilities.Flow
+	wire := (capability.Host{TurnFinishBefore: capability.TurnFinishBefore{Flow: limited}}).Wire()["turn.finish.before"].Capabilities.Flow
+	if original.MaxContinuations != nil || wire.MaxContinuations == nil || *wire.MaxContinuations != 4 {
+		t.Fatal("maximum mutation or missing maximum")
+	}
+	*wire.MaxContinuations = 9
+	if *(capability.Host{TurnFinishBefore: capability.TurnFinishBefore{Flow: limited}}).Wire()["turn.finish.before"].Capabilities.Flow.MaxContinuations != 4 {
+		t.Fatal("wire maximum aliases typed value")
+	}
+}
+func TestDependentFlowConstruction(t *testing.T) {
+	stop := (capability.Host{ToolBefore: capability.ToolBefore{Flow: capability.Stop()}}).Wire()["tool.before"]
+	if stop.Capabilities.Flow == nil || len(stop.Capabilities.Flow.Operations) != 1 || stop.Capabilities.Flow.Operations[0] != "stop" {
+		t.Fatal(stop)
+	}
+	if len((capability.Host{ToolBefore: capability.ToolBefore{Flow: capability.StopFlow{}}}).Wire()) != 0 {
+		t.Fatal("zero stop granted")
+	}
+	continuation := capability.Continue(1, 2)
+	wire := (capability.Host{TurnFinishBefore: capability.TurnFinishBefore{Flow: continuation}}).Wire()["turn.finish.before"].Capabilities.Flow
+	if wire == nil || len(wire.Operations) != 1 || wire.Operations[0] != "continue" || wire.RemainingContinuations == nil || *wire.RemainingContinuations != 1 || wire.ContinuationCount == nil || *wire.ContinuationCount != 2 {
+		t.Fatal(wire)
+	}
+	combined := (capability.Host{TurnFinishBefore: capability.TurnFinishBefore{Flow: capability.ContinueAndStop(0, 0)}}).Wire()["turn.finish.before"].Capabilities.Flow
+	if combined == nil || len(combined.Operations) != 2 || combined.RemainingContinuations == nil || combined.ContinuationCount == nil {
+		t.Fatal(combined)
+	}
+	var nilFlow *capability.ContinueFlow
+	if len((capability.Host{TurnFinishBefore: capability.TurnFinishBefore{Flow: nilFlow}}).Wire()) != 0 {
+		t.Fatal("typed nil flow granted")
+	}
+	var nilObserve *capability.Observe
+	if len((capability.Host{SessionEnd: nilObserve}).Wire()) != 0 {
+		t.Fatal("typed nil observer granted")
+	}
+	if len((capability.Host{ToolBefore: capability.ToolBefore{InjectContext: capability.Injection{}}}).Wire()) != 0 {
+		t.Fatal("zero injection granted")
+	}
+	injection := capability.InjectNow().WithNextTurn().WithNow()
+	host := capability.Host{ToolBefore: capability.ToolBefore{InjectContext: injection}}
+	delivery := host.Wire()["tool.before"].Capabilities.Inject.Context
+	if !delivery.Append || len(delivery.DeliverAt) != 2 || delivery.DeliverAt[0] != "now" || delivery.DeliverAt[1] != "next_turn" {
+		t.Fatal(delivery)
+	}
+	delivery.DeliverAt[0] = "invalid"
+	if host.Wire()["tool.before"].Capabilities.Inject.Context.DeliverAt[0] != "now" {
+		t.Fatal("wire mutated typed injection")
+	}
+	data, err := json.Marshal(host.Wire()["tool.before"].Capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed := ahp.ParseCapabilities(data); !parsed.OK {
+		t.Fatal("typed grant rendered invalid wire", parsed.Diagnostics)
+	}
+
+}
+
+func TestIndependentElicitationFacilities(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		host  capability.Host
+		event string
+		want  string
+	}{
+		{"form-only", capability.Host{UserElicitationRequest: capability.UserElicitationRequest{ElicitationForm: true}}, "user.elicitation.request", `{"modes":["intercept"],"capabilities":{"effects":[],"elicitation":{"form":{}}}}`},
+		{"tool-facilities-only", capability.Host{ToolBefore: capability.ToolBefore{ElicitationForm: true, ElicitationURL: true}}, "tool.before", `{"modes":["intercept"],"capabilities":{"effects":[],"elicitation":{"form":{},"url":{}}}}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			wire := test.host.Wire()[event.Type(test.event)]
+			data, err := json.Marshal(wire)
+			if err != nil || string(data) != test.want {
+				t.Fatalf("facility-only declaration: %s %v", data, err)
+			}
+			caps, err := json.Marshal(wire.Capabilities)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if parsed := ahp.ParseCapabilities(caps); !parsed.OK {
+				t.Fatal("facility-only capabilities rejected", parsed.Diagnostics)
+			}
+		})
+	}
+	if len((capability.Host{UserElicitationRequest: capability.UserElicitationRequest{}}).Wire()) != 0 {
+		t.Fatal("all-absent facilities activated interception")
+	}
+	observe := (capability.Host{UserElicitationRequest: capability.Observe{}}).Wire()["user.elicitation.request"]
+	data, err := json.Marshal(observe)
+	if err != nil || string(data) != `{"modes":["observe"]}` {
+		t.Fatalf("observation-only declaration: %s %v", data, err)
 	}
 }
 

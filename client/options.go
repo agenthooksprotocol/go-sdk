@@ -1,20 +1,24 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/content"
+	"github.com/agenthooksprotocol/go-sdk/event"
 	"github.com/agenthooksprotocol/go-sdk/internal/canonical"
+	"github.com/agenthooksprotocol/go-sdk/internal/inputsources"
 	"reflect"
 )
 
 type interceptConfig struct {
 	declared           *declaredContracts
-	sources            map[string]*ContentSource
+	sources            map[string]*content.Source
 	hostSources        map[string]bool
-	ownedSources       []*ContentSource
-	claimedSources     map[*ContentSource]bool
-	transferredSources map[*ContentSource]bool
+	ownedSources       []*content.Source
+	claimedSources     map[*content.Source]bool
+	transferredSources map[*content.Source]bool
 	instructionsAbsent bool
 	targets            map[string]ModificationTarget
 	elicitation        *ElicitationRequest
@@ -166,8 +170,11 @@ func decodeToolBefore[T any](result *Result, err error) (*ToolBeforeResult[T], e
 		return nil, err
 	}
 	out := &ToolBeforeResult[T]{Result: result}
-	var input T
-	if e := json.Unmarshal(result.EffectiveInput, &input); e != nil {
+	if e := result.requireSettledEvent("tool.before"); e != nil {
+		return out, errors.Join(err, e)
+	}
+	input, e := JSONCodec[T](nil).DecodeJSON(sdkJSON(result.Event.ToolBeforeEvent.Value.Tool.Input))
+	if e != nil {
 		// Accepted wire settlement is retained, but cannot authorize native
 		// execution with an unavailable application input.
 		result.Interrupted = true
@@ -177,4 +184,23 @@ func decodeToolBefore[T any](result *Result, err error) (*ToolBeforeResult[T], e
 	out.Input = input
 	out.InputAvailable = true
 	return out, err
+}
+
+// interceptToolBefore validates the application's inferred argument type during
+// atomic staging, before publishing any effects from a receiver response.
+func interceptToolBefore[T any](ctx context.Context, hooks *Hooks, input event.ToolBeforeInput[T], options ...InterceptOption) (*ToolBeforeResult[T], error) {
+	options = append(options, func(cfg *interceptConfig) {
+		declared := configureDeclared(cfg)
+		supplied := declared.targets["input"]
+		declared.targets["input"] = func(raw json.RawMessage) error {
+			if _, err := JSONCodec[T](nil).DecodeJSON(raw); err != nil {
+				return err
+			}
+			if supplied != nil {
+				return supplied(raw)
+			}
+			return nil
+		}
+	})
+	return decodeToolBefore[T](hooks.intercept(ctx, "tool.before", inputsources.PrepareToolBefore(input), options...))
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	eventtype "github.com/agenthooksprotocol/go-sdk/event"
 )
 
 // authorizeInlineEffects visits only generated contextual payload variants.
@@ -11,7 +12,7 @@ import (
 // or acquire text-write authority merely by resembling protocol JSON.
 func (c *Hooks) authorizeInlineEffects(ctx context.Context, event, projected, sub map[string]any, backendID string, response ahp.InterceptResponse) (ahp.InterceptResponse, error) {
 	kind := compositionString(event["type"])
-	decoded := ahp.ResponseForRequest(kind, sdkJSON(response))
+	decoded := eventtype.ResponseForRequest(eventtype.Type(kind), sdkJSON(response))
 	if !decoded.OK {
 		return ahp.InterceptResponse{}, errors.New("invalid correlated response")
 	}
@@ -134,7 +135,7 @@ func wireEqual(a, b any) bool {
 }
 
 // authorizeInlineWrite is a host-local authorization callback boundary. Serialized
-// Item is a generated known text-body variant, never an opaque field traversal.
+// Item is a pre-disclosure descriptor, never an opaque field traversal.
 func (c *Hooks) authorizeInlineWrite(ctx context.Context, part, sub map[string]any, backendID string) error {
 	selection := sdkObj(sub["content"])
 	mode, _ := selection["default"].(string)
@@ -144,8 +145,14 @@ func (c *Hooks) authorizeInlineWrite(ctx context.Context, part, sub map[string]a
 	if mode != "body" || part["selection"] != "body" || c.opts.Content.AuthorizeContent == nil {
 		return errors.New("inline text write is not authorized")
 	}
-	scope := ContentAuthorization{Operation: "write", BackendID: backendID, Subscription: contentClone(sub).(map[string]any), Item: contentClone(part).(map[string]any)}
-	scope.SubscriptionID, _ = sub["id"].(string)
+	scope, err := contentAuthorization("write", backendID, sub)
+	if err != nil {
+		return err
+	}
+	scope.Item, err = contentDescriptor(part, "body")
+	if err != nil {
+		return err
+	}
 	allowed, err := c.opts.Content.AuthorizeContent(ctx, scope)
 	if err != nil {
 		return err

@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"github.com/agenthooksprotocol/go-sdk/content"
 	"math"
 	"net"
 	"net/url"
@@ -29,7 +30,7 @@ type uploadPlan struct {
 }
 type receiverUploads struct {
 	mu   sync.Mutex
-	refs map[*ContentSource]string
+	refs map[*content.Source]string
 	err  error
 }
 
@@ -49,7 +50,7 @@ func (p *uploadPlan) failure(receiver uploadReceiver) error {
 	defer r.mu.Unlock()
 	return r.err
 }
-func plannedUpload(ctx context.Context, owner *ContentSource) (string, bool, error) {
+func plannedUpload(ctx context.Context, owner *content.Source) (string, bool, error) {
 	plan, _ := ctx.Value(uploadPlanContextKey{}).(*uploadPlan)
 	if plan == nil {
 		return "", false, nil
@@ -77,7 +78,7 @@ func plannedUpload(ctx context.Context, owner *ContentSource) (string, bool, err
 type plannedTransfer struct {
 	receiver uploadReceiver
 	sub      map[string]any
-	owner    *ContentSource
+	owner    *content.Source
 	items    []map[string]any
 }
 
@@ -97,7 +98,7 @@ func (c *Hooks) planUploads(ctx context.Context, event map[string]any, p *prepar
 				continue
 			}
 			key := uploadReceiver{backend.id, index}
-			r := &receiverUploads{refs: map[*ContentSource]string{}}
+			r := &receiverUploads{refs: map[*content.Source]string{}}
 			plan.receivers[key] = r
 			selection := sdkObj(sub["content"])
 			if !contentMode(compositionString(selection["default"])) {
@@ -114,7 +115,7 @@ func (c *Hooks) planUploads(ctx context.Context, event map[string]any, p *prepar
 				r.fail(errors.New("invalid content selection"))
 				continue
 			}
-			groups := map[*ContentSource]int{}
+			groups := map[*content.Source]int{}
 			selected := []plannedTransfer{}
 			for _, path := range paths {
 				owner := p.sources[path]
@@ -134,8 +135,16 @@ func (c *Hooks) planUploads(ctx context.Context, event map[string]any, p *prepar
 				if mode != "body" {
 					continue
 				}
-				scope := ContentAuthorization{Operation: "read", BackendID: backend.id, Subscription: contentClone(sub).(map[string]any), Item: contentDescriptor(item, "body")}
-				scope.SubscriptionID, _ = sub["id"].(string)
+				scope, err := contentAuthorization("read", backend.id, sub)
+				if err != nil {
+					r.fail(err)
+					break
+				}
+				scope.Item, err = contentDescriptor(item, "body")
+				if err != nil {
+					r.fail(err)
+					break
+				}
 				if c.opts.Content.AuthorizeContent == nil {
 					continue
 				}
@@ -174,12 +183,12 @@ func (c *Hooks) planUploads(ctx context.Context, event map[string]any, p *prepar
 	type demand struct {
 		tasks   []plannedTransfer
 		limit   int64
-		owner   *ContentSource
+		owner   *content.Source
 		timeout time.Duration
 		started time.Time
 		err     error
 	}
-	demands := map[*ContentSource]*demand{}
+	demands := map[*content.Source]*demand{}
 	ordered := []*demand{}
 	for _, task := range tasks {
 		ms, _ := contentInt(sdkObj(task.sub["upload"])["timeoutMs"])
@@ -226,7 +235,12 @@ func (c *Hooks) planUploads(ctx context.Context, event map[string]any, p *prepar
 				ms, _ := contentInt(sdkObj(task.sub["upload"])["timeoutMs"])
 				deadlineCtx, cancel := context.WithDeadline(ctx, d.started.Add(time.Duration(ms)*time.Millisecond))
 				transferCtx := context.WithValue(deadlineCtx, uploadPreparationContextKey{}, true)
-				scope := ContentAuthorization{Operation: "read", BackendID: task.receiver.backendID, Subscription: contentClone(task.sub).(map[string]any)}
+				scope, err := contentAuthorization("read", task.receiver.backendID, task.sub)
+				if err != nil {
+					cancel()
+					r.fail(err)
+					continue
+				}
 				validate := func(raw []byte) error {
 					for _, item := range task.items {
 						if err := contentMatches(item, raw); err != nil {
@@ -289,17 +303,6 @@ func (c *Hooks) planUploads(ctx context.Context, event map[string]any, p *prepar
 	close(work)
 	wg.Wait()
 	return plan
-}
-
-func contentDescriptor(item map[string]any, selection string) map[string]any {
-	out := map[string]any{}
-	for _, key := range []string{"id", "kind", "mediaType", "category", "size", "sha256", "synthesized"} {
-		if v, ok := item[key]; ok {
-			out[key] = contentClone(v)
-		}
-	}
-	out["selection"] = selection
-	return out
 }
 
 // Reject invalid destination configuration before materializing any source.

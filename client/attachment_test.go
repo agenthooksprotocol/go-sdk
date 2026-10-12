@@ -76,11 +76,11 @@ func TestOwnedAttachmentUnopenedCleanupAndReuse(t *testing.T) {
 	delete(item, "body")
 	item["selection"] = "metadata"
 	input["items"] = []any{item}
-	result, err := c.Dispatch(context.Background(), "tool.before", input, WithContentSource("/items/0", a))
+	result, err := c.Dispatch(context.Background(), event.ToolBefore, input, WithContentSource("/items/0", a))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = c.Dispatch(context.Background(), "tool.before", input, WithContentSource("/items/0", a)); err == nil {
+	if _, err = c.Dispatch(context.Background(), event.ToolBefore, input, WithContentSource("/items/0", a)); err == nil {
 		t.Fatal("reuse accepted")
 	}
 	if closes != 0 {
@@ -106,7 +106,7 @@ func TestOwnedAttachmentCopiesAndLimits(t *testing.T) {
 		delete(item, "body")
 		item["selection"] = "metadata"
 		input["items"] = []any{item, item}
-		result, err := c.Dispatch(context.Background(), "tool.before", input, WithContentSource("/items/0", a), WithContentSource("/items/1", a))
+		result, err := c.Dispatch(context.Background(), event.ToolBefore, input, WithContentSource("/items/0", a), WithContentSource("/items/1", a))
 		if limit == 2 {
 			if err == nil || result != nil {
 				t.Fatal("oversized eager owner admitted")
@@ -137,7 +137,7 @@ func TestOwnedAttachmentAdmissionFailure(t *testing.T) {
 	c, _ := testClient(t, "fail-open")
 	opens, closes := 0, 0
 	a := content.NewLazyAttachment(func(context.Context) (io.ReadCloser, error) { opens++; return nil, nil }, func() error { closes++; return nil })
-	if _, err := c.Dispatch(context.Background(), "tool.before", nil, WithContentSource("/items/0", a)); err == nil {
+	if _, err := c.Dispatch(context.Background(), event.ToolBefore, nil, WithContentSource("/items/0", a)); err == nil {
 		t.Fatal("bad input admitted")
 	}
 	if opens != 0 || closes != 1 {
@@ -156,7 +156,7 @@ func TestOwnedAttachmentAggregateLimit(t *testing.T) {
 	delete(item, "body")
 	item["selection"] = "metadata"
 	input["items"] = []any{item, item}
-	result, err := c.Dispatch(context.Background(), "tool.before", input, WithContentSource("/items/0", a), WithContentSource("/items/1", b))
+	result, err := c.Dispatch(context.Background(), event.ToolBefore, input, WithContentSource("/items/0", a), WithContentSource("/items/1", b))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestSelectedUploadAndResultShareAttachmentOwner(t *testing.T) {
 	delete(item, "body")
 	item["selection"] = "metadata"
 	input["items"] = []any{item}
-	result, err := c.Dispatch(context.Background(), "tool.before", input, WithContentSource("/items/0", a))
+	result, err := c.Dispatch(context.Background(), event.ToolBefore, input, WithContentSource("/items/0", a))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +261,7 @@ func TestCanonicalFileReferencesUseSharedOwners(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	result := &Result{Event: sdkJSON(event)}
+	result := &Result{Event: parsedFixtureEvent(t, event)}
 	result.retainAttachments(cfg, ctx, p, 64)
 	defer result.Close()
 	if opens.Load() != 1 {
@@ -286,7 +286,7 @@ func TestEagerAdmissionEnforcesLimits(t *testing.T) {
 	delete(item, "body")
 	item["selection"] = "metadata"
 	input["items"] = []any{item}
-	result, err := c.Dispatch(context.Background(), "tool.before", input, WithContentSource("/items/0", a))
+	result, err := c.Dispatch(context.Background(), event.ToolBefore, input, WithContentSource("/items/0", a))
 	if err == nil || result != nil {
 		t.Fatal("oversized eager owner admitted")
 	}
@@ -320,7 +320,7 @@ func TestMetadataEagerOwnerCountsAgainstSelectedLazyUpload(t *testing.T) {
 	second := map[string]any{"id": "file", "kind": "attachment", "mediaType": "application/octet-stream", "category": "files", "selection": "metadata"}
 	input := testInput()
 	input["items"] = []any{first, second}
-	result, err := c.Dispatch(context.Background(), "tool.before", input, WithContentSource("/items/0", a), WithContentSource("/items/1", b))
+	result, err := c.Dispatch(context.Background(), event.ToolBefore, input, WithContentSource("/items/0", a), WithContentSource("/items/1", b))
 	if err != nil {
 		t.Fatal(err)
 	}

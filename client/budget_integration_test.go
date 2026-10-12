@@ -208,13 +208,9 @@ func TestNamedSourceOuterBudgetThroughAuthRetryAndOwnedObservation(t *testing.T)
 	if !registration.OK {
 		t.Fatal(registration.Diagnostics)
 	}
-	declaration, err := capability.Intercept(capability.Deny())
-	if err != nil {
-		t.Fatal(err)
-	}
 	transport := &budgetIntegrationTransport{check: checkDeadline}
 	hooks, err := New(registration.Value, Options{
-		Source: "urn:test:budget", Events: map[event.Type]capability.Event{event.ToolBefore: declaration}, AuthProvider: provider,
+		Source: "urn:test:budget", Events: capability.Host{ToolBefore: capability.ToolBefore{Deny: true, Observe: true}}, AuthProvider: provider,
 		EventClient: &http.Client{Transport: transport}, UploadClient: &http.Client{Transport: transport}, ObservationTimeout: time.Minute,
 		Content: ContentOptions{AllowLoopbackHTTP: true,
 			AuthorizeContent: func(ctx context.Context, scope ContentAuthorization) (bool, error) {
@@ -241,11 +237,6 @@ func TestNamedSourceOuterBudgetThroughAuthRetryAndOwnedObservation(t *testing.T)
 	}
 	if result.Interrupted || !result.InputAvailable || result.Input["count"] != 1 || len(result.Diagnostics) != 0 {
 		t.Fatalf("unexpected settlement: %+v", result)
-	}
-	select {
-	case <-result.Observations.Done():
-	default:
-		t.Fatal("observer still running after owned operation returned")
 	}
 	if reader.reads.Load() != 2 || reader.closes.Load() != 1 {
 		t.Fatalf("source was reread or not closed: reads=%d closes=%d", reader.reads.Load(), reader.closes.Load())

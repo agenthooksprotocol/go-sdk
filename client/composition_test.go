@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	eventtype "github.com/agenthooksprotocol/go-sdk/event"
 )
 
 func compositionTestRequest(t *testing.T) ahp.InterceptRequest {
@@ -219,13 +220,16 @@ func compositionDescriptor() map[string]any {
 // raw effect bytes replacing its descriptor. Mutation grants are rejected during
 // admission, before a backend could be asked to supply an unpublishable result.
 func TestCompositionDescriptorBoundariesSerial(t *testing.T) {
-	for _, tc := range []struct{ event, target string }{
-		{"context.compact.before", "instructions"},
-		{"context.compact.after", "summary"},
+	for _, tc := range []struct {
+		event  eventtype.Type
+		target string
+	}{
+		{eventtype.ContextCompactBefore, "instructions"},
+		{eventtype.ContextCompactAfter, "summary"},
 	} {
 		t.Run(tc.target, func(t *testing.T) {
 			event := map[string]any{"id": "test", "source": "urn:test", "type": tc.event, "time": "2026-01-01T00:00:00Z", tc.target: []any{compositionDescriptor()}}
-			if tc.event == "context.compact.before" {
+			if tc.event == eventtype.ContextCompactBefore {
 				event["trigger"] = "manual"
 				event["items"] = []any{}
 			} else {
@@ -251,7 +255,7 @@ func TestCompositionDescriptorBoundariesSerial(t *testing.T) {
 			caps["modify"] = map[string]any{tc.target: map[string]any{"replace": true, "merge": false}}
 			unsupported := compositionBoundaryRequest(t, compositionObject(second.Event), caps)
 			var admission *CapabilityAdmissionError
-			if err := validateInitial(unsupported); !errors.As(err, &admission) || admission.Target != tc.target || admission.Effect != "modify" {
+			if err := validateInitial(unsupported); !errors.As(err, &admission) || admission.Event != tc.event || admission.Target != tc.target || admission.Effect != "modify" {
 				t.Fatalf("expected protocol-only admission rejection, got %v", err)
 			}
 			if c, err := compose(unsupported, compositionTestResponse(t, `[{"type":"modify","target":"`+tc.target+`","operation":"replace","value":[{"id":"new","kind":"text","mediaType":"text/plain","selection":"body","text":"new body"}]}]`)); !errors.As(err, &admission) || c != nil {
@@ -295,7 +299,7 @@ func TestCompositionElicitationReturnRequiresRequestBodyCorrelation(t *testing.T
 			caps := map[string]any{"effects": []any{"return", "deny", "message"}, "elicitation": map[string]any{mode: map[string]any{}}}
 			req := compositionBoundaryRequest(t, event, caps)
 			var admission *CapabilityAdmissionError
-			if err := validateInitial(req); !errors.As(err, &admission) || admission.Effect != "return" {
+			if err := validateInitial(req); !errors.As(err, &admission) || admission.Event != eventtype.UserElicitationRequest || admission.Effect != "return" {
 				t.Fatal("uncorrelated return grant reached dispatch", err)
 			}
 			for _, answer := range []string{`{"action":"accept","content":{"answer":"unvalidated"}}`, `{"action":"accept"}`, `{"action":"decline","content":{"answer":"forbidden"}}`, `{"action":"cancel"}`} {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/agenthooksprotocol/go-sdk/content"
 
 	"github.com/agenthooksprotocol/go-sdk/internal/canonical"
 )
@@ -22,7 +23,7 @@ type ElicitationRequest struct {
 // prepareElicitation runs before any effects or receiver-specific projection.
 // sources indexes attachment owners by canonical item path.
 // Envelope/schema validation and body authorization remain the caller's job.
-func prepareElicitation(event map[string]any, original *ElicitationRequest, sources map[string]*ContentSource) (*ElicitationRequest, error) {
+func prepareElicitation(event map[string]any, original *ElicitationRequest, sources map[string]*content.Source) (*ElicitationRequest, error) {
 	kind, _ := event["type"].(string)
 	if kind != "user.elicitation.request" && kind != "user.elicitation.result" {
 		return nil, nil
@@ -83,7 +84,7 @@ func prepareElicitation(event map[string]any, original *ElicitationRequest, sour
 	return snapshot, nil
 }
 
-func selectedElicitation(meta map[string]any, stage string, sources map[string]*ContentSource) (map[string]any, error) {
+func selectedElicitation(meta map[string]any, stage string, sources map[string]*content.Source) (map[string]any, error) {
 	item, _ := meta[stage].(map[string]any)
 	if item == nil {
 		return nil, nil

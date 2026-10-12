@@ -20,9 +20,20 @@ func TestCapabilitySupports(t *testing.T) {
 			t.Fatal("family membership")
 		}
 	}
-	extension := capability.New([]string{"vendor.custom"})
+	extension := ahp.Capabilities{Effects: []ahp.CapabilitiesEffectsItem{{Custom: ahp.Some("vendor.custom")}}}
 	if !extension.Supports(ahp.EffectName("vendor.custom")) || extension.Supports(ahp.EffectDeny) {
 		t.Fatal("custom family")
+	}
+	rawExtension, err := json.Marshal(extension)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decodedExtension ahp.Capabilities
+	if err := json.Unmarshal(rawExtension, &decodedExtension); err != nil {
+		t.Fatal(err)
+	}
+	if !decodedExtension.Supports(ahp.EffectName("vendor.custom")) || decodedExtension.Supports(ahp.EffectDeny) {
+		t.Fatal("codec changed custom family")
 	}
 	// Queries follow the encoder's known-arm precedence, even for malformed manual unions.
 	invalid := ahp.Capabilities{Effects: []ahp.CapabilitiesEffectsItem{{Known: ahp.Some(ahp.CapabilitiesEffectsItemKnownAllow), Custom: ahp.Some("deny")}}}
@@ -42,28 +53,27 @@ func TestCapabilitySupports(t *testing.T) {
 	if !req.Params.Capabilities.Supports(ahp.EffectDeny) {
 		t.Fatal("request custom representation")
 	}
-	event, err := capability.Intercept(capability.Deny(), capability.Deny(), capability.ModifyInput(capability.Replace))
+	wire := capability.Host{ToolBefore: capability.ToolBefore{Deny: true, ModifyInput: capability.Replace()}}.Wire()["tool.before"]
+	raw, err := json.Marshal(wire.Capabilities)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !event.Capabilities.Supports(ahp.EffectDeny) || !event.Capabilities.Supports(ahp.EffectNameModify) || len(event.Capabilities.Effects) != 2 {
+	var caps ahp.Capabilities
+	if err := json.Unmarshal(raw, &caps); err != nil {
+		t.Fatal(err)
+	}
+	if !caps.Supports(ahp.EffectDeny) || !caps.Supports(ahp.EffectNameModify) || len(caps.Effects) != 2 {
 		t.Fatal("shared grant membership")
 	}
 	// Family support is deliberately not an operation or target authorization query.
-	if event.Capabilities.Modify.Value.Input.Value.Merge || event.Capabilities.Modify.Value.Output.Present {
+	if caps.Modify.Value.Input.Value.Merge || caps.Modify.Value.Output.Present {
 		t.Fatal("ungranted operations/targets")
 	}
-	if _, err := capability.Intercept(capability.ModifyInput(capability.ModifyOperation("unknown"))); err == nil {
-		t.Fatal("unknown operation accepted")
-	}
-	if _, err := capability.Intercept(capability.ModifyInput()); err == nil {
-		t.Fatal("empty operation grant accepted")
-	}
-	nestedOnly := capability.New([]string{}, capability.WithModify(event.Capabilities.Modify.Value))
+	nestedOnly := ahp.Capabilities{Modify: caps.Modify}
 	if nestedOnly.Supports(ahp.EffectNameModify) {
 		t.Fatal("nested grant implied family support")
 	}
-	familyOnly := capability.New([]string{"modify"})
+	familyOnly := ahp.Capabilities{Effects: []ahp.CapabilitiesEffectsItem{{Known: ahp.Some(ahp.CapabilitiesEffectsItemKnownModify)}}}
 	if !familyOnly.Supports(ahp.EffectNameModify) || familyOnly.Modify.Present {
 		t.Fatal("family query implied nested grant")
 	}

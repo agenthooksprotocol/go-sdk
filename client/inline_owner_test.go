@@ -44,7 +44,7 @@ func TestInlineDirectHostOwnedAttachment(t *testing.T) {
 		t.Fatalf("conversion/metadata opened attachment: %d", opened)
 	}
 	if len(transports[0].calls) != 1 {
-		t.Fatalf("delivery: %+v", result.Errors)
+		t.Fatalf("delivery: %+v", result.Diagnostics)
 	}
 	if bytes.Contains(sdkJSON(transports[0].calls[0]), []byte("ahp:owned:pending")) {
 		t.Fatal("pending reference reached wire")
@@ -131,8 +131,8 @@ func TestInlineDirectHostSelectedUploadUsesExactOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer result.Close()
-	if len(result.Errors) != 0 || uploads.Load() != 2 || opens != 1 {
-		t.Fatalf("selected fan-out: uploads=%d opens=%d errors=%v", uploads.Load(), opens, result.Errors)
+	if len(result.Diagnostics) != 0 || uploads.Load() != 2 || opens != 1 {
+		t.Fatalf("selected fan-out: uploads=%d opens=%d errors=%v", uploads.Load(), opens, result.Diagnostics)
 	}
 	if result.attachments["/items/1/parts/1"] != owner {
 		t.Fatal("upload/result owner differs")

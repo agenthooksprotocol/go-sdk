@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	ahp "github.com/agenthooksprotocol/go-sdk"
-	hooks "github.com/agenthooksprotocol/go-sdk/client"
 	"net/http"
 	"reflect"
 )
@@ -122,9 +121,9 @@ func catalogueClient(ctx context.Context, c LifecycleConfig, v *lifecycleValidat
 			switch step["op"] {
 			case "register":
 				registration := obj(step["registration"])
-				// Public configuration admission owns protocol registration validity;
-				// the synthetic host additionally enforces native requirements/policy.
-				accepted := admitCatalogueRegistration(registration, manifest) == nil && validateRegistration(v.core, registration, manifest, array(step["requirements"]), obj(step["context"])) == nil
+				// External wire admission checks the original discovered catalogue,
+				// registration, and native requirements/policy without rebuilding grants.
+				accepted := admitCatalogueRegistration(v.core, registration, manifest, array(step["requirements"]), obj(step["context"])) == nil
 				actual["registrations"] = append(array(actual["registrations"]), Object{"accepted": accepted})
 			case "notify", "rawNotify":
 				m := obj(clone(step["message"]))
@@ -190,20 +189,15 @@ func catalogueClient(ctx context.Context, c LifecycleConfig, v *lifecycleValidat
 	return writeAtomic(c.ReportFile, Object{"language": "go", "discovery": discovery, "results": results, "receipts": receipts})
 }
 
-// Construction validates the discovered static manifest and portable registration
-// through the public runtime. No delivery occurs and no fixture backend starts.
-func admitCatalogueRegistration(registration, manifest Object) error {
-	parsed := ahp.ParseRegistration(jsonBytes(registration))
-	if !parsed.OK {
+// Catalogue discovery is an independent external wire admission boundary, not
+// fixture host construction. Validate the original manifest and registration;
+// never manufacture safe grants or modes to admit a discovered catalogue.
+func admitCatalogueRegistration(v *Validator, registration, manifest Object, requirements []any, policyContext Object) error {
+	if err := validateFixtureManifest(manifest); err != nil {
+		return err
+	}
+	if !ahp.ParseRegistration(jsonBytes(registration)).OK {
 		return fmt.Errorf("invalid catalogue registration")
 	}
-	var typed ahp.StaticCapabilityManifest
-	if err := json.Unmarshal(jsonBytes(manifest), &typed); err != nil {
-		return err
-	}
-	c, err := hooks.New(parsed.Value, hooks.Options{Source: "urn:ahp:catalogue", Manifest: typed})
-	if err != nil {
-		return err
-	}
-	return c.Close()
+	return validateRegistration(v, registration, manifest, requirements, policyContext)
 }

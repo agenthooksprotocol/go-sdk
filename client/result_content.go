@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/agenthooksprotocol/go-sdk/content"
 	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 	"math"
 )
@@ -88,19 +89,11 @@ func (r *Result) retainAttachments(cfg interceptConfig, ctx context.Context, pre
 		return
 	}
 	var event map[string]any
-	if json.Unmarshal(r.Event, &event) != nil {
+	if json.Unmarshal(sdkJSON(r.Event), &event) != nil {
 		return
 	}
-	r.attachments = map[string]*ContentSource{}
+	r.attachments = map[string]*content.Source{}
 	r.attachmentItems = map[string]map[string]any{}
-	r.effectiveTargets = map[string][]string{}
-	r.effectiveBindings = map[string]ModificationTarget{}
-	for target, paths := range prepared.slots {
-		r.effectiveTargets[target] = append([]string(nil), paths...)
-	}
-	for target, binding := range prepared.bindings {
-		r.effectiveBindings[target] = binding
-	}
 	if limit == 0 {
 		limit = 4 << 20
 	}
@@ -110,7 +103,7 @@ func (r *Result) retainAttachments(cfg interceptConfig, ctx context.Context, pre
 	r.attachmentLimit = limit
 	r.attachmentBudget, _ = ctx.Value(contentSourceBudgetKey{}).(*contentSourceBudget)
 	if r.attachmentBudget == nil {
-		r.attachmentBudget = &contentSourceBudget{seen: map[*ContentSource]bool{}}
+		r.attachmentBudget = &contentSourceBudget{seen: map[*content.Source]bool{}}
 	}
 	for path, source := range prepared.sources {
 		item := preparedAt(event, path)
@@ -121,33 +114,4 @@ func (r *Result) retainAttachments(cfg interceptConfig, ctx context.Context, pre
 		r.attachmentItems[path] = item
 		cfg.transferredSources[source] = true
 	}
-}
-
-// EffectiveValue encodes an already available effective text/JSON or native
-// target on demand. It replaces the former retained EffectiveValues byte map.
-// Call ReadContent first to demand an unread attachment. No encoded value is cached.
-func (r *Result) EffectiveValue(target string) (json.RawMessage, error) {
-	if r == nil {
-		return nil, errors.New("nil result")
-	}
-	r.contentMu.Lock()
-	if r.contentClosed {
-		r.contentMu.Unlock()
-		return nil, errors.New("result is closed")
-	}
-	p := &preparedBoundary{sources: r.attachments, slots: r.effectiveTargets, bindings: r.effectiveBindings, limit: r.attachmentLimit, snapshot: r.Snapshot}
-	r.contentMu.Unlock()
-	var event map[string]any
-	if err := json.Unmarshal(r.Event, &event); err != nil {
-		return nil, err
-	}
-	values, err := p.values(event)
-	if err != nil {
-		return nil, err
-	}
-	value, ok := values[target]
-	if !ok {
-		return nil, errors.New("effective target is unavailable")
-	}
-	return sdkJSON(value), nil
 }
