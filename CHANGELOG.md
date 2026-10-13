@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.6.0...v0.7.0) (2026-10-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* report harness identity on every event ([#36](https://github.com/agenthooksprotocol/go-sdk/issues/36))
+
+### Features
+
+* report harness identity on every event ([#36](https://github.com/agenthooksprotocol/go-sdk/issues/36)) ([d12d155](https://github.com/agenthooksprotocol/go-sdk/commit/d12d1552b74f2d2e35b578cb4896307daf81f3ab))
+
 ## [0.6.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.5.0...v0.6.0) (2026-10-13)
 
 
