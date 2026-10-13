@@ -69,8 +69,8 @@ The `client` package composes protocol decisions; it does **not** run tools,
 define application argument schemas, grant native permissions, or commit
 compaction changes. The host remains responsible for those operations.
 
-- Configure `client.Hooks` with JSON registration, stable host `Source`, and
-  explicit event modes/capability grants through `capability.Host`. Optional
+- Configure `client.Hooks` with JSON registration, stable host `Source`, required
+  `Harness` name/version, and explicit event modes/capability grants through `capability.Host`. Optional
   `Metadata` customizes non-event advertisement fields. Registration order,
   selectors, deadlines, and failure policies
   govern delivery. Construction performs no network or process I/O.
@@ -126,6 +126,7 @@ if err := json.Unmarshal(data, &reg); err != nil { return err }
 
 hooks, err := client.New(reg, client.Options{
     Source: "urn:example:host",
+    Harness: ahp.Harness{Name: "example", Version: "1.0.0"},
     Events: capability.Host{
         ToolBefore: capability.ToolBefore{
             Deny: true, ModifyInput: capability.Replace(), Observe: true,
@@ -160,6 +161,7 @@ form decisions to advertise that mode.
 ```go
 client.Options{
     Source: "urn:example:host",
+    Harness: ahp.Harness{Name: "example", Version: "1.0.0"},
     Events: capability.Host{
         ContextCompactBefore: capability.ContextCompactBefore{
             ModifyInstructions: capability.Replace(),

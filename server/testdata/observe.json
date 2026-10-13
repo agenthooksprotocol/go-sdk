@@ -31,7 +31,11 @@
         "message": "Operation failed"
       },
       "path": "example",
-      "items": []
+      "items": [],
+      "harness": {
+        "name": "test",
+        "version": "1"
+      }
     }
   }
 }

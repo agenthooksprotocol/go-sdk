@@ -337,7 +337,7 @@ func acceptElicitationEffectsObserved(request, result Object, resolve func(Objec
 		}
 		return jsonBytes(Object{"jsonrpc": "2.0", "id": req["id"], "result": Object{"protocolVersion": "draft", "effects": selected}}), nil
 	}}
-	c, err := hooks.New(reg.Value, hooks.Options{Source: str(obj(obj(request["params"])["event"])["source"]), Events: host, Metadata: metadata, EventClient: &http.Client{Transport: transport}, Content: hooks.ContentOptions{
+	c, err := hooks.New(reg.Value, hooks.Options{Harness: ahp.Harness{Name: "test", Version: "1"}, Source: str(obj(obj(request["params"])["event"])["source"]), Events: host, Metadata: metadata, EventClient: &http.Client{Transport: transport}, Content: hooks.ContentOptions{
 		// This isolated host grants body disclosure and structured answer edits only
 		// to its registered elicitation receiver. Metadata/omit parts do not acquire
 		// body authority, and no resolver or upload is involved.

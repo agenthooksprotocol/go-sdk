@@ -49,14 +49,14 @@ func TestSharedRequestEventConsumer(t *testing.T) {
 		}
 		return raw
 	}
-	event := `{"id":"event","source":"urn:test:host","time":"2026-09-15T12:00:00Z","type":"user.message.inbound","session":{"id":"session"},"message":{"channel":"chat","sender":"user","messages":[{"id":"message-1","role":"user","parts":[{"id":"item","kind":"attachment","mediaType":"application/pdf","selection":"body","body":{"ref":"opaque"}}]}]}}`
+	event := `{"id":"event","harness":{"name":"test","version":"1"},"source":"urn:test:host","time":"2026-09-15T12:00:00Z","type":"user.message.inbound","session":{"id":"session"},"message":{"channel":"chat","sender":"user","messages":[{"id":"message-1","role":"user","parts":[{"id":"item","kind":"attachment","mediaType":"application/pdf","selection":"body","body":{"ref":"opaque"}}]}]}}`
 	intercept := func(event string) []byte {
 		return []byte(`{"jsonrpc":"2.0","id":"event","method":"hooks/intercept","params":{"protocolVersion":"draft","event":` + event + `,"capabilities":{"effects":[]}}}`)
 	}
 	observe := func(event string) []byte {
 		return []byte(`{"jsonrpc":"2.0","method":"hooks/observe","params":{"protocolVersion":"draft","event":` + event + `}}`)
 	}
-	observeOnly := `{"id":"event","source":"urn:test:host","time":"2026-09-15T12:00:00Z","type":"session.end","session":{"id":"session"},"outcome":"completed","reason":"done"}`
+	observeOnly := `{"id":"event","harness":{"name":"test","version":"1"},"source":"urn:test:host","time":"2026-09-15T12:00:00Z","type":"session.end","session":{"id":"session"},"outcome":"completed","reason":"done"}`
 	if !ahp.ParseEvent([]byte(observeOnly)).OK || !ahp.ParseObserveNotification(observe(observeOnly)).OK || canonical.Validate("observe-notification", observe(observeOnly)) != nil {
 		t.Fatal("valid observe-only event rejected")
 	}

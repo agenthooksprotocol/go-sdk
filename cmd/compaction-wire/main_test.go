@@ -89,7 +89,7 @@ func TestCompactionHTTPRepliesUseJSON(t *testing.T) {
 			if invalid {
 				eventID = "mismatched-event"
 			}
-			request := O{"jsonrpc": "2.0", "id": "compact", "method": "hooks/intercept", "params": O{"protocolVersion": "draft", "event": O{"id": eventID, "source": "urn:test:host", "time": "2026-09-15T12:00:00Z", "type": "context.compact.before", "trigger": "manual", "items": []any{}}, "capabilities": O{"effects": []any{}}}}
+			request := O{"jsonrpc": "2.0", "id": "compact", "method": "hooks/intercept", "params": O{"protocolVersion": "draft", "event": O{"id": eventID, "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:test:host", "time": "2026-09-15T12:00:00Z", "type": "context.compact.before", "trigger": "manual", "items": []any{}}, "capabilities": O{"effects": []any{}}}}
 			raw, err := json.Marshal(request)
 			if err != nil {
 				t.Fatal(err)

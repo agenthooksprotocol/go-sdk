@@ -19,6 +19,7 @@ import (
 func contentTestEvent(fields map[string]any) map[string]any {
 	event := testInput()
 	event["type"] = "tool.before"
+	event["harness"] = map[string]any{"name": "test", "version": "1"}
 	event["source"] = "urn:content-test"
 	for key, value := range fields {
 		event[key] = value
@@ -427,7 +428,7 @@ func TestContentFileReferencesAreReceiverAllocated(t *testing.T) {
 		return io.NopCloser(strings.NewReader("abc")), nil
 	}}}}
 	sub := contentTestSubscription(server.URL)
-	event := map[string]any{"type": "file.changed", "id": "file-event", "time": "2026-01-01T00:00:00Z", "source": "urn:content-test", "changes": []any{map[string]any{"path": "file.txt", "operation": "update", "agentCaused": true, "after": contentTestItem(map[string]any{"ref": "host-file"})}}}
+	event := map[string]any{"type": "file.changed", "id": "file-event", "time": "2026-01-01T00:00:00Z", "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:content-test", "changes": []any{map[string]any{"path": "file.txt", "operation": "update", "agentCaused": true, "after": contentTestItem(map[string]any{"ref": "host-file"})}}}
 	// FileChangedEvent.after is a ContentItem, not a bare ContentReference.
 	invalid := contentClone(event).(map[string]any)
 	invalid["changes"].([]any)[0].(map[string]any)["after"] = map[string]any{"ref": "host-file"}

@@ -176,7 +176,7 @@ func post(endpoint, token string, body []byte, headers map[string]string) ([]byt
 func exchange(plan O, sub, name string, snapshot O, v *ahp.Validator, trace *[]any) ([]ahp.Object, error) {
 	credential := obj(obj(plan["credentials"])[sub])
 	boundary := str(snapshot["boundary"])
-	event := O{"id": name + ":" + boundary, "source": "urn:ahp:compaction-host", "time": "2026-09-15T12:00:00Z", "session": O{"id": name}, "type": "context.compact." + boundary}
+	event := O{"id": name + ":" + boundary, "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:ahp:compaction-host", "time": "2026-09-15T12:00:00Z", "session": O{"id": name}, "type": "context.compact." + boundary}
 	bodies := map[string][]byte{}
 	textPart := func(id, text string) O {
 		return O{"id": id, "kind": "text", "mediaType": "text/plain", "selection": "body", "text": text}

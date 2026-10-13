@@ -157,7 +157,7 @@ func TestTypedSettlementOtherCandidateOrigins(t *testing.T) {
 			var value any
 			if kind == "context.compact.before" {
 				value = []any{inlineTestText("p", "summary")}
-				event = map[string]any{"id": "test", "source": "urn:test", "time": "2026-01-01T00:00:00Z", "type": kind, "trigger": "manual", "items": []any{}, "instructions": value}
+				event = map[string]any{"id": "test", "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:test", "time": "2026-01-01T00:00:00Z", "type": kind, "trigger": "manual", "items": []any{}, "instructions": value}
 			} else {
 				event, _ = elicitationFixture("request", "form", `{"message":"question","requestedSchema":{"type":"object","properties":{}}}`)
 				event["id"], event["source"], event["time"] = "test", "urn:test", "2026-01-01T00:00:00Z"

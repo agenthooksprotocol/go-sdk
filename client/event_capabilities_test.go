@@ -58,7 +58,7 @@ func TestEventOptionsRejectInvalidAuthority(t *testing.T) {
 	}
 	for name, events := range cases {
 		t.Run(name, func(t *testing.T) {
-			c, err := New(eventOptionsRegistration(t, "tool.before", "intercept", nil), Options{Source: "urn:test:events", Events: events})
+			c, err := New(eventOptionsRegistration(t, "tool.before", "intercept", nil), Options{Harness: ahp.Harness{Name: "test", Version: "1"}, Source: "urn:test:events", Events: events})
 			if c != nil {
 				c.Close()
 				t.Fatal("invalid configuration acquired a client")
@@ -77,7 +77,7 @@ func TestEventOptionsExplicitModesAndPolicy(t *testing.T) {
 			if mode == "intercept" {
 				events.ToolBefore = capability.ToolBefore{Deny: true}
 			}
-			c, err := New(eventOptionsRegistration(t, "tool.before", mode, nil), Options{Source: "urn:test:events", Events: events})
+			c, err := New(eventOptionsRegistration(t, "tool.before", mode, nil), Options{Harness: ahp.Harness{Name: "test", Version: "1"}, Source: "urn:test:events", Events: events})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -88,7 +88,7 @@ func TestEventOptionsExplicitModesAndPolicy(t *testing.T) {
 		})
 	}
 	for _, policy := range []map[string]any{{"scope": "project"}, {"scope": "managed", "disableable": false}, {"disableable": false}} {
-		c, err := New(eventOptionsRegistration(t, "tool.before", "intercept", policy), Options{Source: "urn:test:events", Events: capability.Host{ToolBefore: capability.ToolBefore{Deny: true}}})
+		c, err := New(eventOptionsRegistration(t, "tool.before", "intercept", policy), Options{Harness: ahp.Harness{Name: "test", Version: "1"}, Source: "urn:test:events", Events: capability.Host{ToolBefore: capability.ToolBefore{Deny: true}}})
 		if err == nil {
 			c.Close()
 			t.Fatal("ordinary options admitted stronger policy")
@@ -99,7 +99,7 @@ func TestEventOptionsExplicitModesAndPolicy(t *testing.T) {
 func TestEventOptionsSnapshotAndNarrowing(t *testing.T) {
 	declaration := &capability.ToolBefore{Deny: true, Allow: true}
 	events := capability.Host{ToolBefore: declaration}
-	c, err := New(eventOptionsRegistration(t, "tool.before", "intercept", nil), Options{Source: "urn:test:events", Events: events})
+	c, err := New(eventOptionsRegistration(t, "tool.before", "intercept", nil), Options{Harness: ahp.Harness{Name: "test", Version: "1"}, Source: "urn:test:events", Events: events})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestEventOptionsSnapshotAndNarrowing(t *testing.T) {
 
 func TestEventOptionsMetadataCannotGrantEvents(t *testing.T) {
 	reg := eventOptionsRegistration(t, "tool.before", "intercept", nil)
-	c, err := New(reg, Options{Source: "urn:test:events", Metadata: testManifestMetadata()})
+	c, err := New(reg, Options{Harness: ahp.Harness{Name: "test", Version: "1"}, Source: "urn:test:events", Metadata: testManifestMetadata()})
 	if c != nil {
 		c.Close()
 		t.Fatal("metadata acquired interception authority")
@@ -137,7 +137,7 @@ func TestEventOptionsMetadataCannotGrantEvents(t *testing.T) {
 
 func TestEventOptionsMinimalMetadata(t *testing.T) {
 	reg := eventOptionsRegistration(t, "session.start", "intercept", nil)
-	c, err := New(reg, Options{Source: "urn:test:events", Events: capability.Host{ToolBefore: capability.ToolBefore{Observe: true}, SessionStart: capability.SessionStart{Message: true}}})
+	c, err := New(reg, Options{Harness: ahp.Harness{Name: "test", Version: "1"}, Source: "urn:test:events", Events: capability.Host{ToolBefore: capability.ToolBefore{Observe: true}, SessionStart: capability.SessionStart{Message: true}}})
 	if err != nil {
 		t.Fatal(err)
 	}

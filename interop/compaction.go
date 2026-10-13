@@ -256,7 +256,7 @@ func acceptCompactionEffects(snapshot Object, effects []Object) error {
 	if boundary == "after" {
 		target = "summary"
 	}
-	ev := Object{"id": "fixture-" + boundary, "source": "urn:fixture:compaction", "time": "2026-09-15T12:00:00Z", "type": "context.compact." + boundary, target: clone(snapshot[target])}
+	ev := Object{"id": "fixture-" + boundary, "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:fixture:compaction", "time": "2026-09-15T12:00:00Z", "type": "context.compact." + boundary, target: clone(snapshot[target])}
 	if boundary == "before" {
 		ev["trigger"] = "manual"
 		ev["items"] = []any{}

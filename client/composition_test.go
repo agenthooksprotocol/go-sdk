@@ -12,7 +12,7 @@ import (
 
 func compositionTestRequest(t *testing.T) ahp.InterceptRequest {
 	t.Helper()
-	p := ahp.ParseInterceptRequest([]byte(`{"jsonrpc":"2.0","id":"test","method":"hooks/intercept","params":{"protocolVersion":"draft","event":{"id":"test","source":"urn:test","type":"tool.before","time":"2026-01-01T00:00:00Z","call":{"id":"call"},"path":"execute","tool":{"name":"task","kind":"task","origin":"native","input":{"task":1,"nested":{"a":1},"large":9007199254740993}}},"capabilities":{"effects":["allow","ask","deny","modify","return","message","inject","flow"],"modify":{"input":{"replace":true,"merge":true}},"inject":{"context":{"append":true,"deliverAt":["now","next_turn"]}},"flow":{"operations":["stop"]}},"state":{"permission":"allow","candidate":{"value":"cached"},"injections":[]}}}`))
+	p := ahp.ParseInterceptRequest([]byte(`{"jsonrpc":"2.0","id":"test","method":"hooks/intercept","params":{"protocolVersion":"draft","event":{"id":"test","harness":{"name":"test","version":"1"},"source":"urn:test","type":"tool.before","time":"2026-01-01T00:00:00Z","call":{"id":"call"},"path":"execute","tool":{"name":"task","kind":"task","origin":"native","input":{"task":1,"nested":{"a":1},"large":9007199254740993}}},"capabilities":{"effects":["allow","ask","deny","modify","return","message","inject","flow"],"modify":{"input":{"replace":true,"merge":true}},"inject":{"context":{"append":true,"deliverAt":["now","next_turn"]}},"flow":{"operations":["stop"]}},"state":{"permission":"allow","candidate":{"value":"cached"},"injections":[]}}}`))
 	if !p.OK {
 		t.Fatal(p.Diagnostics)
 	}
@@ -146,7 +146,7 @@ func TestCompositionFlowAndInjectionQueues(t *testing.T) {
 	raw, _ := ahp.EncodeInterceptRequest(req)
 	r := compositionObject(raw)
 	p := compositionMap(r["params"])
-	p["event"] = map[string]any{"id": "test", "source": "urn:test", "type": "turn.finish.before", "time": "2026-01-01T00:00:00Z", "turn": map[string]any{"id": "turn"}, "outcome": "completed", "continuationCount": json.Number("0"), "items": []any{}}
+	p["event"] = map[string]any{"id": "test", "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:test", "type": "turn.finish.before", "time": "2026-01-01T00:00:00Z", "turn": map[string]any{"id": "turn"}, "outcome": "completed", "continuationCount": json.Number("0"), "items": []any{}}
 	p["capabilities"] = map[string]any{"effects": []any{"flow", "message"}, "flow": map[string]any{"operations": []any{"stop", "continue"}, "remainingContinuations": json.Number("1"), "continuationCount": json.Number("0")}}
 	b, _ := json.Marshal(r)
 	parsed := ahp.ParseInterceptRequest(b)
@@ -228,7 +228,7 @@ func TestCompositionDescriptorBoundariesSerial(t *testing.T) {
 		{eventtype.ContextCompactAfter, "summary"},
 	} {
 		t.Run(tc.target, func(t *testing.T) {
-			event := map[string]any{"id": "test", "source": "urn:test", "type": tc.event, "time": "2026-01-01T00:00:00Z", tc.target: []any{compositionDescriptor()}}
+			event := map[string]any{"id": "test", "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:test", "type": tc.event, "time": "2026-01-01T00:00:00Z", tc.target: []any{compositionDescriptor()}}
 			if tc.event == eventtype.ContextCompactBefore {
 				event["trigger"] = "manual"
 				event["items"] = []any{}
@@ -295,7 +295,7 @@ func TestCompositionElicitationReturnRequiresRequestBodyCorrelation(t *testing.T
 	for _, mode := range []string{"form", "url"} {
 		t.Run(mode, func(t *testing.T) {
 			descriptor := compositionDescriptor()
-			event := map[string]any{"id": "test", "source": "urn:test", "type": "user.elicitation.request", "time": "2026-01-01T00:00:00Z", "elicitation": map[string]any{"server": "requester", "mode": mode, "request": descriptor}}
+			event := map[string]any{"id": "test", "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:test", "type": "user.elicitation.request", "time": "2026-01-01T00:00:00Z", "elicitation": map[string]any{"server": "requester", "mode": mode, "request": descriptor}}
 			caps := map[string]any{"effects": []any{"return", "deny", "message"}, "elicitation": map[string]any{mode: map[string]any{}}}
 			req := compositionBoundaryRequest(t, event, caps)
 			var admission *CapabilityAdmissionError
@@ -328,7 +328,7 @@ func TestCompositionElicitationReturnRequiresRequestBodyCorrelation(t *testing.T
 func TestCompositionElicitationResultMutationRequiresExchange(t *testing.T) {
 	for _, mode := range []string{"form", "url"} {
 		descriptor := compositionDescriptor()
-		event := map[string]any{"id": "test", "source": "urn:test", "type": "user.elicitation.result", "time": "2026-01-01T00:00:00Z", "parentEventId": "original-request", "elicitation": map[string]any{"server": "requester", "mode": mode, "action": "accept", "result": descriptor}}
+		event := map[string]any{"id": "test", "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:test", "type": "user.elicitation.result", "time": "2026-01-01T00:00:00Z", "parentEventId": "original-request", "elicitation": map[string]any{"server": "requester", "mode": mode, "action": "accept", "result": descriptor}}
 		caps := map[string]any{"effects": []any{"modify"}, "modify": map[string]any{"content": map[string]any{"replace": true, "merge": true}}, "elicitation": map[string]any{mode: map[string]any{}}}
 		req := compositionBoundaryRequest(t, event, caps)
 		var admission *CapabilityAdmissionError

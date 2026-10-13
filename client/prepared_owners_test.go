@@ -27,7 +27,7 @@ func preparedOwnerMessage(id string, parts ...any) map[string]any {
 	return map[string]any{"id": id, "role": "assistant", "parts": parts}
 }
 func preparedOwnerEvent(items ...any) map[string]any {
-	return map[string]any{"id": "test", "source": "urn:test", "time": "2026-01-01T00:00:00Z", "type": "model.response.after", "model": map[string]any{"id": "model", "provider": "test"}, "attempt": map[string]any{"id": "attempt", "number": 1}, "execution": map[string]any{"status": "executed"}, "finishReason": "stop", "items": items}
+	return map[string]any{"id": "test", "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:test", "time": "2026-01-01T00:00:00Z", "type": "model.response.after", "model": map[string]any{"id": "model", "provider": "test"}, "attempt": map[string]any{"id": "attempt", "number": 1}, "execution": map[string]any{"status": "executed"}, "finishReason": "stop", "items": items}
 }
 func preparedOwnerCaps(target string) map[string]any {
 	return map[string]any{"effects": []any{"modify"}, "modify": map[string]any{target: map[string]any{"replace": true, "merge": true}}}
@@ -201,7 +201,7 @@ func TestPreparedCancellationClosesReaderOnce(t *testing.T) {
 	}
 }
 func TestPreparedAbsentInstructionsTemplate(t *testing.T) {
-	event := map[string]any{"id": "test", "source": "urn:test", "time": "2026-01-01T00:00:00Z", "type": "context.compact.before", "trigger": "manual", "items": []any{}}
+	event := map[string]any{"id": "test", "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:test", "time": "2026-01-01T00:00:00Z", "type": "context.compact.before", "trigger": "manual", "items": []any{}}
 	p := preparedOwnerPrepare(t, event, "instructions", interceptConfig{})
 	values, err := p.values(event)
 	if err != nil || len(sdkArray(values["instructions"])) != 0 {

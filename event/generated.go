@@ -1431,7 +1431,6 @@ const SessionEnd Type = "session.end"
 type SessionStartInput struct {
 	Extensions     ahp.Optional[*ahp.Extensions]
 	Gaps           ahp.Optional[[]ahp.SessionStartEventGapsItem]
-	Harness        ahp.SessionStartEventHarness
 	ID             ahp.Optional[string]
 	Items          []*ahp.ModelVisibleItem
 	Native         ahp.Optional[*ahp.NativeEvent]
@@ -1458,9 +1457,6 @@ func (v SessionStartInput) MarshalJSON() ([]byte, error) {
 		if v.Gaps.Present {
 			fields["gaps"] = v.Gaps.Value
 		}
-	}
-	{
-		fields["harness"] = v.Harness
 	}
 	{
 		if v.ID.Present {

@@ -107,7 +107,11 @@ func PublicBoundary(ctx context.Context, request Object, exchange func(context.C
 	if content.AuthorizeContent == nil {
 		content.AuthorizeContent = func(context.Context, hooks.ContentAuthorization) (bool, error) { return true, nil }
 	}
-	c, err := hooks.New(registration.Value, hooks.Options{Source: str(ev["source"]), Events: host, Metadata: metadata, EventClient: &http.Client{Transport: transport}, UploadClient: config.UploadClient, Content: content})
+	var harness ahp.Harness
+	if err := json.Unmarshal(jsonBytes(ev["harness"]), &harness); err != nil {
+		return nil, false, fmt.Errorf("invalid event harness: %w", err)
+	}
+	c, err := hooks.New(registration.Value, hooks.Options{Harness: harness, Source: str(ev["source"]), Events: host, Metadata: metadata, EventClient: &http.Client{Transport: transport}, UploadClient: config.UploadClient, Content: content})
 	if err != nil {
 		return nil, false, err
 	}

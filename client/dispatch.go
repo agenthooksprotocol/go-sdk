@@ -9,6 +9,7 @@ import (
 	"github.com/agenthooksprotocol/go-sdk/internal/canonical"
 	"github.com/agenthooksprotocol/go-sdk/internal/inputsources"
 	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
+	"reflect"
 	"time"
 )
 
@@ -16,7 +17,8 @@ import (
 // constants for name. Input uses canonical host fields (including nested
 // call/tool envelopes), not flattened
 // generated input fields. Source, type, and manifest remain SDK-owned and must
-// be absent. Prefer named methods and generated inputs for ordinary callers.
+// be absent. An optional harness must match the configured identity. Prefer
+// named methods and generated inputs for ordinary callers.
 func (c *Hooks) Dispatch(ctx context.Context, name eventtype.Type, input any, options ...InterceptOption) (*Result, error) {
 	return c.intercept(ctx, string(name), input, options...)
 }
@@ -92,6 +94,14 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 			return nil, errors.New("boundary input contains SDK-owned field")
 		}
 	}
+	harness, err := sdkMap(c.opts.Harness)
+	if err != nil {
+		return nil, errors.New("invalid configured harness identity")
+	}
+	if supplied, ok := event["harness"]; ok && !reflect.DeepEqual(supplied, harness) {
+		return nil, errors.New("boundary harness conflicts with configured identity")
+	}
+	event["harness"] = harness
 	event["source"] = c.opts.Source
 	event["type"] = name
 	if _, ok := event["id"]; !ok {

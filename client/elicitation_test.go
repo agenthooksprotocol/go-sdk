@@ -10,7 +10,7 @@ func elicitationFixture(stage, mode, payload string) (map[string]any, map[string
 	raw := []byte(payload)
 	item := map[string]any{"id": "item", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": payload}
 	meta := map[string]any{"server": "requester", "mode": mode, stage: item}
-	event := map[string]any{"type": "user.elicitation." + stage, "id": "request-id", "source": "urn:adapter", "session": map[string]any{"id": "session"}, "elicitation": meta}
+	event := map[string]any{"type": "user.elicitation." + stage, "id": "request-id", "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:adapter", "session": map[string]any{"id": "session"}, "elicitation": meta}
 	if stage == "result" {
 		event["id"] = "result-id"
 		event["parentEventId"] = "request-id"

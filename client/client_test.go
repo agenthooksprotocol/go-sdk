@@ -67,7 +67,7 @@ func testClient(t *testing.T, policies ...string) (*Hooks, []*testTransport) {
 	if !reg.OK {
 		t.Fatal(reg.Diagnostics)
 	}
-	c, err := New(reg.Value, Options{Source: "urn:test:host", Events: testHost(), Metadata: testManifestMetadata(), Content: ContentOptions{ProjectOpaque: func(_ context.Context, _ ContentAuthorization, _ string, v any) (any, error) { return v, nil }}})
+	c, err := New(reg.Value, Options{Harness: ahp.Harness{Name: "test", Version: "1"}, Source: "urn:test:host", Events: testHost(), Metadata: testManifestMetadata(), Content: ContentOptions{ProjectOpaque: func(_ context.Context, _ ContentAuthorization, _ string, v any) (any, error) { return v, nil }}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,6 +175,10 @@ func TestShortCircuitObservesOnlyUncalledSubscriptions(t *testing.T) {
 			}
 			if tr.calls[0]["method"] != want {
 				t.Errorf("backend %d wrong method", i)
+			}
+			identity := sdkObj(sdkObj(sdkObj(tr.calls[0]["params"])["event"])["harness"])
+			if identity["name"] != "test" || identity["version"] != "1" {
+				t.Errorf("backend %d missing configured harness: %v", i, identity)
 			}
 		}
 		tr.mu.Unlock()

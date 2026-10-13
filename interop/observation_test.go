@@ -18,7 +18,7 @@ func TestDowngradedObservationsDoNotWait(t *testing.T) {
 	selected := make(chan string, 3)
 	release := make(chan struct{})
 	defer close(release)
-	event := Object{"id": "same", "source": "urn:test", "type": "tool.before", "secret": "effective"}
+	event := Object{"id": "same", "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:test", "type": "tool.before", "secret": "effective"}
 	DispatchObservations(event, []Object{{"id": "called", "mode": "intercept"}, {"id": "remaining", "mode": "intercept"}, {"id": "explicit", "mode": "observe"}}, map[string]bool{"called": true}, func(event, sub Object) (Object, error) {
 		selected <- str(sub["id"])
 		delete(event, "secret")

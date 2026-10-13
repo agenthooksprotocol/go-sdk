@@ -116,7 +116,7 @@ func TestPublicResolvedInstructionsAcrossReceivers(t *testing.T) {
 		sub := subscription.NewIntercept([]string{"context.compact.before"}, time.Second, "fail-closed", content.NewSelection("body"), subscription.WithInterceptUpload(upload))
 		backends = append(backends, registration.NewBackend("com.example."+receiver, transport.NewHttp(endpoint.URL+"/hooks/"+receiver), sub))
 	}
-	hooks, err := client.New(registration.New(backends...), client.Options{Source: "urn:test:completion",
+	hooks, err := client.New(registration.New(backends...), client.Options{Harness: ahp.Harness{Name: "test", Version: "1"}, Source: "urn:test:completion",
 		Events: capability.Host{ContextCompactBefore: capability.ContextCompactBefore{ModifyInstructions: capability.Replace()}},
 		// Advertise the inline text category and the bounded attachment upload size.
 		Metadata: &client.ManifestMetadata{
