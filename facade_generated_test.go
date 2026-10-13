@@ -94,7 +94,7 @@ func TestGeneratedTypedHostProjection(t *testing.T) {
 	if err = json.Unmarshal(raw, &object); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"source", "type", "manifest", "id", "time", "session"} {
+	for _, key := range []string{"source", "harness", "type", "manifest", "id", "time", "session"} {
 		if _, ok := object[key]; ok {
 			t.Errorf("projection emitted SDK-owned or absent %s", key)
 		}
