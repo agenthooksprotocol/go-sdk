@@ -19,7 +19,7 @@ func TestPublicSubscribesIncludesObserveOnly(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"protocolVersion":"draft","hooks":[{"id":"com.example.observer","transport":{"type":"http","url":"http://127.0.0.1:1/hooks"},"subscriptions":[{"events":["tool.*"],"mode":"observe","content":{"default":"body"},"filters":{"toolKinds":["filtered"]}}]}]}`), &registration); err != nil {
 		t.Fatal(err)
 	}
-	hooks, err := client.New(registration, client.Options{Source: "urn:test:consumer", Events: capability.Host{ToolAfter: capability.Observe{}}})
+	hooks, err := client.New(registration, client.Options{Source: "urn:test:consumer", Events: capability.Host{ToolAfter: capability.ToolAfter{Observe: true}}})
 	if err != nil {
 		t.Fatal(err)
 	}

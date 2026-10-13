@@ -211,7 +211,7 @@ func TestTypedCapabilityConstruction(t *testing.T) {
 	if len((capability.Host{ToolBefore: capability.ToolBefore{ModifyInput: capability.Modify{}}}).Wire()) != 0 {
 		t.Fatal("zero event grants")
 	}
-	host := capability.Host{ToolBefore: capability.ToolBefore{Allow: true, Deny: true, ReturnResult: true, ModifyInput: capability.ReplaceAndMerge(), Observe: true}, SessionEnd: capability.Observe{}, SessionStart: capability.Observe{}}
+	host := capability.Host{ToolBefore: capability.ToolBefore{Allow: true, Deny: true, ReturnResult: true, ModifyInput: capability.ReplaceAndMerge(), Observe: true}, SessionEnd: capability.SessionEnd{Observe: true}, SessionStart: capability.SessionStart{Observe: true}}
 	wire := host.Wire()
 	session := wire["session.start"]
 	if len(session.Modes) != 1 || session.Modes[0] != "observe" || session.Capabilities != nil {
@@ -500,9 +500,16 @@ func TestDependentFlowConstruction(t *testing.T) {
 	if len((capability.Host{TurnFinishBefore: capability.TurnFinishBefore{Flow: nilFlow}}).Wire()) != 0 {
 		t.Fatal("typed nil flow granted")
 	}
-	var nilObserve *capability.Observe
+	var nilObserve *capability.SessionEnd
 	if len((capability.Host{SessionEnd: nilObserve}).Wire()) != 0 {
 		t.Fatal("typed nil observer granted")
+	}
+	if len((capability.Host{SessionEnd: capability.SessionEnd{}, TurnEnd: capability.TurnEnd{Observe: false}}).Wire()) != 0 {
+		t.Fatal("zero observation-only declaration granted")
+	}
+	ended, err := json.Marshal((capability.Host{SessionEnd: &capability.SessionEnd{Observe: true}, TurnEnd: capability.TurnEnd{Observe: true}}).Wire())
+	if err != nil || string(ended) != `{"session.end":{"modes":["observe"]},"turn.end":{"modes":["observe"]}}` {
+		t.Fatalf("observation-only declarations: %s %v", ended, err)
 	}
 	if len((capability.Host{ToolBefore: capability.ToolBefore{InjectContext: capability.Injection{}}}).Wire()) != 0 {
 		t.Fatal("zero injection granted")
@@ -555,7 +562,7 @@ func TestIndependentElicitationFacilities(t *testing.T) {
 	if len((capability.Host{UserElicitationRequest: capability.UserElicitationRequest{}}).Wire()) != 0 {
 		t.Fatal("all-absent facilities activated interception")
 	}
-	observe := (capability.Host{UserElicitationRequest: capability.Observe{}}).Wire()["user.elicitation.request"]
+	observe := (capability.Host{UserElicitationRequest: capability.UserElicitationRequest{Observe: true}}).Wire()["user.elicitation.request"]
 	data, err := json.Marshal(observe)
 	if err != nil || string(data) != `{"modes":["observe"]}` {
 		t.Fatalf("observation-only declaration: %s %v", data, err)

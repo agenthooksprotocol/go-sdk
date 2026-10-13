@@ -23,6 +23,9 @@ func WithStdioArgs(value []string) StdioOption {
 func WithStdioCWD(value string) StdioOption {
 	return func(v *ahp.StdioTransport) { v.CWD = ahp.Optional[string]{Present: true, Value: value} }
 }
+func WithStdioEnv(value map[string]string) StdioOption {
+	return func(v *ahp.StdioTransport) { v.Env = ahp.Optional[map[string]string]{Present: true, Value: value} }
+}
 func NewStdio(argCommand string, argLifecycle ahp.StdioTransportLifecycle, opts ...StdioOption) ahp.BackendTransport {
 	v := &ahp.StdioTransport{Command: argCommand, Lifecycle: argLifecycle, Type: "stdio"}
 	for _, opt := range opts {

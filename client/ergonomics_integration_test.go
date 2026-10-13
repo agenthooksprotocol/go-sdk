@@ -50,7 +50,7 @@ func TestGeneratedCapabilityCompositionAndBoundaryAdmission(t *testing.T) {
 	if zeroModify.Capabilities.Modify != nil || !reflect.DeepEqual(zeroModify.Capabilities.Effects, []string{"deny"}) {
 		t.Fatal("zero modification widened a nonzero event")
 	}
-	observed := capability.Host{ToolBefore: capability.Observe{}}.Wire()["tool.before"]
+	observed := capability.Host{ToolBefore: capability.ToolBefore{Observe: true}}.Wire()["tool.before"]
 	if !reflect.DeepEqual(observed.Modes, []string{"observe"}) || observed.Capabilities != nil {
 		t.Fatal("explicit observation added interception")
 	}

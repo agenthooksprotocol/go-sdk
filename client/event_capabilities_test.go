@@ -53,8 +53,8 @@ func TestEventOptionsRejectInvalidAuthority(t *testing.T) {
 		"absent":            {},
 		"zero event":        {ToolBefore: capability.ToolBefore{}},
 		"zero modification": {ToolBefore: capability.ToolBefore{ModifyInput: capability.Modify{}}},
-		"wrong mode":        {ToolBefore: capability.Observe{}},
-		"unrelated event":   {SessionEnd: capability.Observe{}},
+		"wrong mode":        {ToolBefore: capability.ToolBefore{Observe: true}},
+		"unrelated event":   {SessionEnd: capability.SessionEnd{Observe: true}},
 	}
 	for name, events := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -73,7 +73,7 @@ func TestEventOptionsRejectInvalidAuthority(t *testing.T) {
 func TestEventOptionsExplicitModesAndPolicy(t *testing.T) {
 	for _, mode := range []string{"intercept", "observe"} {
 		t.Run(mode, func(t *testing.T) {
-			events := capability.Host{ToolBefore: capability.Observe{}}
+			events := capability.Host{ToolBefore: capability.ToolBefore{Observe: true}}
 			if mode == "intercept" {
 				events.ToolBefore = capability.ToolBefore{Deny: true}
 			}
@@ -137,7 +137,7 @@ func TestEventOptionsMetadataCannotGrantEvents(t *testing.T) {
 
 func TestEventOptionsMinimalMetadata(t *testing.T) {
 	reg := eventOptionsRegistration(t, "session.start", "intercept", nil)
-	c, err := New(reg, Options{Source: "urn:test:events", Events: capability.Host{ToolBefore: capability.Observe{}, SessionStart: capability.SessionStart{Message: true}}})
+	c, err := New(reg, Options{Source: "urn:test:events", Events: capability.Host{ToolBefore: capability.ToolBefore{Observe: true}, SessionStart: capability.SessionStart{Message: true}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,8 +199,8 @@ func TestTypedCapabilityPublicAPI(t *testing.T) {
 		{"runtime string capability diagnostic event", `func diagnostic(name string) client.CapabilityAdmissionError { return client.CapabilityAdmissionError{Event: name} }`, false},
 		{"typed subscription interest", `func interest(h *client.Hooks) bool { return h.Subscribes(event.ToolBefore) }`, true},
 		{"runtime string subscription interest", `func interest(h *client.Hooks, name string) bool { return h.Subscribes(name) }`, false},
-		{"public example", `var _ = capability.Host{SessionStart: capability.Observe{}, ToolBefore: capability.ToolBefore{Allow: true, Deny: true, ReturnResult: true, ModifyInput: capability.ReplaceAndMerge(), Observe: true}}`, true},
-		{"unknown event", `var _ = capability.Host{ToolUnknown: capability.Observe{}}`, false},
+		{"public example", `var _ = capability.Host{SessionStart: capability.SessionStart{Observe: true}, ToolBefore: capability.ToolBefore{Allow: true, Deny: true, ReturnResult: true, ModifyInput: capability.ReplaceAndMerge(), Observe: true}}`, true},
+		{"unknown event", `var _ = capability.Host{ToolUnknown: capability.ToolUnknown{Observe: true}}`, false},
 		{"arbitrary modes", `var _ = capability.ToolBefore{Modes: []string{"execute"}}`, false},
 		{"wrong event", `var _ = capability.Host{ToolBefore: capability.SessionStart{Message: true}}`, false},
 		{"unsupported effect", `var _ = capability.ToolBefore{ModifySummary: capability.Replace()}`, false},

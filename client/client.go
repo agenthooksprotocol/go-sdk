@@ -42,6 +42,17 @@ type Options struct {
 	MaxPendingObservations int
 	ObservationTimeout     time.Duration
 	Content                ContentOptions
+	// InheritEnvironment starts stdio backends with the full host environment
+	// instead of the minimal base (PATH, HOME, locale, temp directories and
+	// similar). Registration env entries still apply on top. This SDK option is
+	// not part of the protocol; it exists for hosts migrating backends that rely
+	// on inherited variables. Prefer explicit registration env entries.
+	InheritEnvironment bool
+	// TransportDiagnostic, when non-nil, receives transport conditions that do
+	// not fail a delivery, such as ErrUnsolicitedFrame for stdio output that
+	// matched no pending request. It may run on a background goroutine, must be
+	// safe for concurrent use, and must not block. Errors never carry payloads.
+	TransportDiagnostic func(backendID string, err error)
 }
 
 // Hooks is the registration-driven host for AHP boundary delivery.
@@ -202,6 +213,13 @@ func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
 		if err != nil {
 			c.Close()
 			return nil, err
+		}
+		if stdio, ok := tr.(*stdioBackend); ok {
+			stdio.inheritEnvironment = opts.InheritEnvironment
+			if opts.TransportDiagnostic != nil {
+				backendID, report := id, opts.TransportDiagnostic
+				stdio.diagnostic = func(err error) { report(backendID, err) }
+			}
 		}
 		b.transport = tr
 		c.backends = append(c.backends, b)

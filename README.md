@@ -150,8 +150,9 @@ The JSON document uses the `ahp.Registration` wire model: backend
 routes, modes, deadlines, failure policies, content selections, and upload
 endpoints are registration data. `capability.Host` grants only the facilities
 explicitly declared for each event. Set an event declaration's `Observe` field
-when both interception and observation are supported; use `capability.Observe{}`
-for observation alone. Set `ElicitationForm: true` on an event that supports
+when both interception and observation are supported. For observation alone,
+set only `Observe: true`, for example `capability.SessionEnd{Observe: true}`;
+every event has its own declaration type. Set `ElicitationForm: true` on an event that supports
 form decisions to advertise that mode.
 `Options.Events` is the authoritative source of event modes and grants.
 `Options.Metadata` accepts metadata-only customization alongside it:
@@ -198,6 +199,26 @@ rejects fractional milliseconds and nonpositive deadlines. Use the generated
 `NewInterceptDuration` helper for an eager checked constructor, or
 `NewInterceptMilliseconds` for explicit wire values. No timeout or stdio
 lifecycle default is invented.
+
+A stdio backend starts with a minimal base environment taken from the host:
+`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_ALL` and other `LC_*`
+variables, `TZ`, `TMPDIR`, `TEMP` and `TMP`. On Windows it also gets
+`SYSTEMROOT`, `WINDIR`, `COMSPEC`, `PATHEXT`, `USERPROFILE`, `APPDATA`,
+`LOCALAPPDATA` and `PROGRAMDATA`, matched case-insensitively. The registration's
+stdio `env` entries are applied on top as literal values and replace base
+values with the same name. Bearer `tokenEnv` references are always resolved in
+the host environment, and credentials are never copied into the child.
+`client.Options.InheritEnvironment` passes the full host environment instead.
+It is an SDK option, not part of the protocol, for backends that still depend
+on inherited variables.
+
+A persistent stdio backend has one reader per child process that owns its
+stdout. Responses are matched to pending requests by JSON-RPC id. Frames that
+match no pending request, for example output written after a notification, are
+discarded and reported to `Options.TransportDiagnostic` as
+`client.ErrUnsolicitedFrame`. They never fail another request or restart the
+child. Repeated non-JSON output (`client.ErrMalformedFrame`) terminates the
+child, and the next delivery starts a new one.
 
 ### Subscription interest
 
@@ -320,7 +341,7 @@ supply required occurrence and application data.
 
 ```go
 capability.Host{
-    SessionStart: capability.Observe{},
+    SessionStart: capability.SessionStart{Observe: true},
     ToolBefore: capability.ToolBefore{
         Allow: true, Deny: true, ReturnResult: true,
         ModifyInput: capability.ReplaceAndMerge(),
@@ -331,7 +352,7 @@ capability.Host{
 }
 ```
 
-Each field accepts only its matching event declaration or observation support.
+Each field accepts only its matching event declaration.
 Only catalogue-supported facilities are available on each declaration. A nil
 field or a zero event declaration grants nothing and is omitted. Interception
 and observation are independent: a nonzero facility enables interception, while
@@ -513,6 +534,27 @@ Each intercept context supplies the exact `Event` and `Capabilities`, optional
 `EnvelopeExtras` (request extras). Observe contexts supply the event and both
 extra maps; the observation schema has no state or extensions members. Unknown
 params members retain future data without granting authority.
+
+`ObserveHandlers.Any` is an optional catch-all for observations whose
+per-event callback is nil. It receives a `server.ObserveAnyContext` with the
+canonical event `Type`, the validated `*ahp.Event` union, and the same extras
+maps. It never runs alongside a per-event callback, so you can audit-log every
+observation and still handle selected events with typed callbacks:
+
+```go
+Observe: server.ObserveHandlers{
+    ToolAfter: handleToolAfter, // takes precedence for tool.after
+    Any: func(ctx context.Context, observation server.ObserveAnyContext) error {
+        log.Printf("observed %s", observation.Type)
+        return nil
+    },
+},
+```
+
+Without `Any`, an observation with no matching callback is acknowledged with an
+empty `204` and reported only through `server.Options.Diagnostic` as
+`server.ErrObserverUnavailable`. An intercept request with no matching
+callback receives JSON-RPC error `-32002` (`unsupported_event`).
 
 Replies contain ordered event-specific `Effects`, optional `Extensions`, and
 opaque result `AdditionalProperties`. A zero reply is a no-op. The engine supplies

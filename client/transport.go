@@ -16,6 +16,9 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"runtime"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -74,6 +77,16 @@ func newBackendTransport(backend *ahp.Backend, eventClient *http.Client) (backen
 	}
 	copied := *cfg
 	copied.Args.Value = append([]string(nil), cfg.Args.Value...)
+	if cfg.Env.Present {
+		copied.Env.Value = make(map[string]string, len(cfg.Env.Value))
+		for name, value := range cfg.Env.Value {
+			// Names and values are literal; only reject what an OS environment cannot hold.
+			if name == "" || strings.ContainsAny(name, "=\x00") || strings.ContainsRune(value, 0) {
+				return nil, errors.New("invalid stdio environment entry")
+			}
+			copied.Env.Value[name] = value
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &stdioBackend{credential: credential, cfg: copied, gate: make(chan struct{}, 1), ctx: ctx, cancel: cancel, processes: make(map[*backendProcess]struct{})}, nil
 }
@@ -184,19 +197,205 @@ func (t *httpBackend) Exchange(ctx context.Context, body []byte, notification bo
 	return data, nil
 }
 
+// baseEnvironment is the minimal host environment a stdio backend receives
+// unless the host opts into full inheritance. Every LC_* locale variable is
+// also kept. Registration env entries are applied on top.
+var baseEnvironment = []string{"PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "TZ", "TMPDIR", "TEMP", "TMP"}
+
+// windowsBaseEnvironment adds variables Windows processes commonly need to start.
+var windowsBaseEnvironment = []string{"SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA"}
+
+// backendEnvironment builds a child environment from the host environment and
+// registration entries. Entries replace base values with the same name, using
+// case-insensitive names on Windows. The result is never nil, so exec.Cmd does
+// not fall back to inheriting the full host environment.
+func backendEnvironment(host []string, entries map[string]string, inherit, windows bool) []string {
+	key := func(name string) string {
+		if windows {
+			return strings.ToUpper(name)
+		}
+		return name
+	}
+	allowed := make(map[string]bool, len(baseEnvironment)+len(windowsBaseEnvironment))
+	for _, name := range baseEnvironment {
+		allowed[key(name)] = true
+	}
+	if windows {
+		for _, name := range windowsBaseEnvironment {
+			allowed[key(name)] = true
+		}
+	}
+	overridden := make(map[string]bool, len(entries))
+	for name := range entries {
+		overridden[key(name)] = true
+	}
+	env := make([]string, 0, len(entries)+len(allowed))
+	seen := make(map[string]bool)
+	for _, kv := range host {
+		name, _, ok := strings.Cut(kv, "=")
+		if !ok || name == "" {
+			continue
+		}
+		k := key(name)
+		if seen[k] || overridden[k] || !(inherit || allowed[k] || strings.HasPrefix(k, key("LC_"))) {
+			continue
+		}
+		seen[k] = true
+		env = append(env, kv)
+	}
+	names := make([]string, 0, len(entries))
+	for name := range entries {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		env = append(env, name+"="+entries[name])
+	}
+	return env
+}
+
+// maxMalformedFrames bounds consecutive non-JSON output lines from a persistent
+// child before it is terminated ("repeatedly emits malformed protocol output").
+const maxMalformedFrames = 3
+
+var (
+	// ErrUnsolicitedFrame is reported to Options.TransportDiagnostic when a
+	// persistent stdio backend writes a frame that matches no pending request.
+	// The frame is discarded; it never fails or answers another request.
+	ErrUnsolicitedFrame = errors.New("client: unsolicited stdio frame discarded")
+	// ErrMalformedFrame is reported to Options.TransportDiagnostic when a stdio
+	// backend writes a line that is not a JSON object. Repeated malformed output
+	// terminates the backend process.
+	ErrMalformedFrame = errors.New("client: malformed stdio frame discarded")
+	errFrameTooLarge  = errors.New("response exceeds transport limit")
+	errRepeatedOutput = errors.New("backend repeatedly emitted malformed output")
+)
+
 type backendProcess struct {
 	cmd    *exec.Cmd
 	stdin  *os.File
 	stdout *os.File
-	reader *bufio.Reader
 	done   chan struct{}
 	err    error // published by closing done
 	once   sync.Once
+
+	// The reader goroutine owns stdout for the child's lifetime and routes
+	// response frames to pending requests by JSON-RPC id.
+	mu       sync.Mutex
+	pending  map[string]chan []byte
+	readDone chan struct{}
+	readErr  error // published by closing readDone
 }
 
 func (p *backendProcess) stop() {
 	p.once.Do(func() { killBackendProcess(p.cmd); p.stdin.Close(); p.stdout.Close() })
 	<-p.done
+	<-p.readDone
+}
+
+// await registers interest in the response to id before the request is written.
+func (p *backendProcess) await(id string) (<-chan []byte, func()) {
+	ch := make(chan []byte, 1)
+	p.mu.Lock()
+	p.pending[id] = ch
+	p.mu.Unlock()
+	return ch, func() {
+		p.mu.Lock()
+		if p.pending[id] == ch {
+			delete(p.pending, id)
+		}
+		p.mu.Unlock()
+	}
+}
+
+func (p *backendProcess) read(diagnostic func(error)) {
+	defer close(p.readDone)
+	reader := bufio.NewReader(p.stdout)
+	malformed := 0
+	for {
+		frame, err := readStdioFrame(reader)
+		if err != nil {
+			p.readErr = err
+			if !errors.Is(err, io.EOF) {
+				// An oversized or truncated frame leaves the stream unsynchronized.
+				killBackendProcess(p.cmd)
+			}
+			return
+		}
+		id, ok := frameID(frame)
+		if !ok {
+			malformed++
+			report(diagnostic, ErrMalformedFrame)
+			if malformed >= maxMalformedFrames {
+				p.readErr = errRepeatedOutput
+				killBackendProcess(p.cmd)
+				return
+			}
+			continue
+		}
+		malformed = 0
+		p.mu.Lock()
+		ch := p.pending[id]
+		delete(p.pending, id)
+		p.mu.Unlock()
+		if ch == nil {
+			report(diagnostic, ErrUnsolicitedFrame)
+			continue
+		}
+		ch <- frame
+	}
+}
+
+func report(diagnostic func(error), err error) {
+	if diagnostic != nil {
+		diagnostic(err)
+	}
+}
+
+// readStdioFrame reads one newline-terminated frame within the transport limit.
+func readStdioFrame(r *bufio.Reader) ([]byte, error) {
+	var data []byte
+	for {
+		fragment, err := r.ReadSlice('\n')
+		if len(data)+len(fragment) > maxTransportMessage+1 {
+			return nil, errFrameTooLarge
+		}
+		data = append(data, fragment...)
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		if err == io.EOF && len(data) == 0 {
+			return nil, io.EOF
+		}
+		if err != nil {
+			return nil, errors.New("backend response framing failed")
+		}
+		return bytes.TrimSuffix(data, []byte{'\n'}), nil
+	}
+}
+
+// frameID returns a canonical routing key for a JSON-RPC object's id. Objects
+// without an id are valid but unroutable and map to the empty key.
+func frameID(frame []byte) (string, bool) {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(frame, &fields) != nil || fields == nil {
+		return "", false
+	}
+	raw, ok := fields["id"]
+	if !ok {
+		return "", true
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var id any
+	if decoder.Decode(&id) != nil {
+		return "", false
+	}
+	key, err := json.Marshal(id)
+	if err != nil {
+		return "", false
+	}
+	return string(key), true
 }
 
 type stdioBackend struct {
@@ -209,6 +408,10 @@ type stdioBackend struct {
 	processes  map[*backendProcess]struct{}
 	current    *backendProcess // guarded by gate
 	workers    sync.WaitGroup
+	// inheritEnvironment passes the full host environment instead of the minimal base.
+	inheritEnvironment bool
+	// diagnostic receives discarded-output conditions that do not fail a delivery.
+	diagnostic func(error)
 }
 
 func (t *stdioBackend) start() (*backendProcess, error) {
@@ -224,7 +427,7 @@ func (t *stdioBackend) start() (*backendProcess, error) {
 	if t.cfg.CWD.Present {
 		cmd.Dir = t.cfg.CWD.Value
 	}
-	// The schema has no env override. Inherit the host environment.
+	cmd.Env = backendEnvironment(os.Environ(), t.cfg.Env.Value, t.inheritEnvironment, runtime.GOOS == "windows")
 	cmd.Stderr = nil // discard diagnostics without leaking credentials or blocking
 	configureBackendProcess(cmd)
 	inRead, inWrite, err := os.Pipe()
@@ -246,9 +449,10 @@ func (t *stdioBackend) start() (*backendProcess, error) {
 		outRead.Close()
 		return nil, errors.New("backend process start failed")
 	}
-	p := &backendProcess{cmd: cmd, stdin: inWrite, stdout: outRead, reader: bufio.NewReader(outRead), done: make(chan struct{})}
+	p := &backendProcess{cmd: cmd, stdin: inWrite, stdout: outRead, done: make(chan struct{}), pending: make(map[string]chan []byte), readDone: make(chan struct{})}
 	t.processes[p] = struct{}{}
 	go func() { p.err = cmd.Wait(); close(p.done) }()
+	go p.read(t.diagnostic)
 	return p, nil
 }
 func (t *stdioBackend) remove(p *backendProcess) {
@@ -281,6 +485,14 @@ func (t *stdioBackend) Exchange(ctx context.Context, body []byte, notification b
 	if bytes.ContainsAny(body, "\r\n") || !json.Valid(body) {
 		return nil, errors.New("invalid stdio message framing")
 	}
+	var requestID string
+	if !notification {
+		id, ok := frameID(body)
+		if !ok || id == "" || id == "null" {
+			return nil, errors.New("backend response correlation failed")
+		}
+		requestID = id
+	}
 	select {
 	case t.gate <- struct{}{}:
 	case <-ctx.Done():
@@ -299,6 +511,15 @@ func (t *stdioBackend) Exchange(ctx context.Context, body []byte, notification b
 		return nil, errors.New("configured authentication has no supported stdio binding")
 	}
 	p := t.current
+	if p != nil {
+		select {
+		case <-p.readDone:
+			// The child's output stream ended or was rejected; replace it.
+			t.remove(p)
+			t.current, p = nil, nil
+		default:
+		}
+	}
 	if p == nil {
 		var err error
 		p, err = t.start()
@@ -311,6 +532,12 @@ func (t *stdioBackend) Exchange(ctx context.Context, body []byte, notification b
 	type result struct {
 		data []byte
 		err  error
+	}
+	var response <-chan []byte
+	if !notification {
+		var release func()
+		response, release = p.await(requestID)
+		defer release()
 	}
 	done := make(chan result, 1)
 	go func() {
@@ -327,29 +554,20 @@ func (t *stdioBackend) Exchange(ctx context.Context, body []byte, notification b
 			return
 		}
 		var data []byte
-		for {
-			fragment, e := p.reader.ReadSlice('\n')
-			if len(data)+len(fragment) > maxTransportMessage+1 {
-				done <- result{err: errors.New("response exceeds transport limit")}
+		select {
+		case data = <-response:
+		case <-p.readDone:
+			// Prefer a frame routed just before the stream ended.
+			select {
+			case data = <-response:
+			default:
+				if errors.Is(p.readErr, errFrameTooLarge) {
+					done <- result{err: errFrameTooLarge}
+				} else {
+					done <- result{err: errors.New("backend response framing failed")}
+				}
 				return
 			}
-			data = append(data, fragment...)
-			if e == bufio.ErrBufferFull {
-				continue
-			}
-			if e != nil {
-				done <- result{err: errors.New("backend response framing failed")}
-				return
-			}
-			break
-		}
-		data = bytes.TrimSuffix(data, []byte{'\n'})
-		var request, response struct {
-			ID json.RawMessage `json:"id"`
-		}
-		if json.Unmarshal(body, &request) != nil || json.Unmarshal(data, &response) != nil || len(request.ID) == 0 || !bytes.Equal(bytes.TrimSpace(request.ID), bytes.TrimSpace(response.ID)) {
-			done <- result{err: errors.New("backend response correlation failed")}
-			return
 		}
 		if perEvent {
 			<-p.done

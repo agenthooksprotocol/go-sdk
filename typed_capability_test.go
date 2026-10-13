@@ -19,7 +19,7 @@ import (
 )
 
 func TestTypedCapabilityHelpers(t *testing.T) {
-	var nilObserve *capability.Observe
+	var nilObserve *capability.SessionEnd
 	var nilEvent *capability.ToolBefore
 	var nilFlow *capability.ContinueFlow
 	for _, host := range []capability.Host{
@@ -34,7 +34,7 @@ func TestTypedCapabilityHelpers(t *testing.T) {
 		}
 	}
 	for _, host := range []capability.Host{
-		{ToolBefore: capability.Observe{}}, {ToolBefore: capability.ToolBefore{Observe: true}},
+		{ToolBefore: capability.ToolBefore{Observe: true}}, {ToolBefore: capability.ToolBefore{Observe: true}},
 	} {
 		wire := host.Wire()["tool.before"]
 		if len(wire.Modes) != 1 || wire.Modes[0] != "observe" || wire.Capabilities != nil {
@@ -127,11 +127,12 @@ func TestTypedCapabilityPublicStaticContract(t *testing.T) {
 		name, declaration string
 		valid             bool
 	}{
-		{"event-specific host", `var _ = capability.Host{ToolBefore: capability.ToolBefore{Allow: true, ModifyInput: capability.ReplaceAndMerge(), Flow: capability.Stop()}, SessionStart: capability.Observe{}, SessionEnd: capability.Observe{}}`, true},
+		{"event-specific host", `var _ = capability.Host{ToolBefore: capability.ToolBefore{Allow: true, ModifyInput: capability.ReplaceAndMerge(), Flow: capability.Stop()}, SessionStart: capability.SessionStart{Observe: true}, SessionEnd: capability.SessionEnd{Observe: true}}`, true},
 		{"safe continuation", `var _ = capability.Host{TurnFinishBefore: capability.TurnFinishBefore{Flow: capability.ContinueAndStop(0, 18446744073709551615)}}`, true},
 		{"safe injection", `var _ = capability.ToolBefore{InjectContext: capability.InjectNow().WithNextTurn()}`, true},
 		{"cross-event", `var _ = capability.Host{ToolBefore: capability.ToolAfter{}}`, false},
 		{"observation-only", `var _ = capability.Host{SessionEnd: capability.ToolBefore{}}`, false},
+		{"shared observation removed", `var _ = capability.Host{SessionEnd: capability.Observe{}}`, false},
 		{"wire is output only", `var _ = capability.Host{ToolBefore: capability.WireDeclaration{}}`, false},
 		{"unsupported control", `var _ = capability.ToolAfter{Deny: true}`, false},
 		{"unsupported target", `var _ = capability.ToolBefore{ModifyOutput: capability.Replace()}`, false},

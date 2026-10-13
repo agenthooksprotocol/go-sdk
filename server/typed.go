@@ -28,6 +28,14 @@ type ObserveContext[E any] struct {
 	EnvelopeExtras       map[string]json.RawMessage
 }
 
+// ObserveAnyContext carries an observation routed to ObserveHandlers.Any. Type is
+// the canonical event type (for example "session.end"); Event is the validated
+// event union with exactly one known variant present.
+type ObserveAnyContext struct {
+	Type string
+	ObserveContext[ahp.Event]
+}
+
 // Handlers separates interception from observation, including for the same event.
 // Callbacks may run concurrently over HTTP and must cooperate with cancellation.
 // Nil event callbacks reject that event. Discovery is independent of dispatch.
@@ -94,6 +102,10 @@ type ObserveHandlers struct {
 	WorkspaceChangeAfter   func(context.Context, ObserveContext[ahp.WorkspaceChangeAfterEvent]) error
 	FileChanged            func(context.Context, ObserveContext[ahp.FileChangedEvent]) error
 	HookFailure            func(context.Context, ObserveContext[ahp.HookFailureEvent]) error
+	// Any is an optional catch-all invoked only for a validated observation
+	// whose per-event callback above is nil. It never runs in addition to a
+	// per-event callback. Without it, such observations are acknowledged silently.
+	Any func(context.Context, ObserveAnyContext) error
 }
 
 // ToolBeforeReply contains ordered event-specific effects and opaque result data.
@@ -616,7 +628,30 @@ func (h ObserveHandlers) dispatch(ctx context.Context, request ahp.ObserveNotifi
 	if event.HookFailureEvent.Present && h.HookFailure != nil {
 		return h.HookFailure(ctx, ObserveContext[ahp.HookFailureEvent]{Event: event.HookFailureEvent.Value, AdditionalProperties: request.Params.AdditionalProperties, EnvelopeExtras: request.AdditionalProperties})
 	}
+	if h.Any != nil {
+		eventType, err := observedEventType(event)
+		if err != nil {
+			return err
+		}
+		return h.Any(ctx, ObserveAnyContext{Type: eventType, ObserveContext: ObserveContext[ahp.Event]{Event: event, AdditionalProperties: request.Params.AdditionalProperties, EnvelopeExtras: request.AdditionalProperties}})
+	}
 	return errMissingHandler
+}
+
+// observedEventType reads the discriminator from the validated event union, so
+// the catch-all needs no hand-maintained variant table.
+func observedEventType(event *ahp.Event) (string, error) {
+	raw, err := json.Marshal(event)
+	if err != nil {
+		return "", err
+	}
+	var discriminator struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &discriminator); err != nil || discriminator.Type == "" {
+		return "", errors.New("server: observed event type unavailable")
+	}
+	return discriminator.Type, nil
 }
 
 // WithToolBeforeArguments binds a declared argument type to ToolBefore without
