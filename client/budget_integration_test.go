@@ -210,7 +210,8 @@ func TestNamedSourceOuterBudgetThroughAuthRetryAndOwnedObservation(t *testing.T)
 	}
 	transport := &budgetIntegrationTransport{check: checkDeadline}
 	hooks, err := New(registration.Value, Options{
-		Source: "urn:test:budget", Events: capability.Host{ToolBefore: capability.ToolBefore{Deny: true, Observe: true}}, AuthProvider: provider,
+		Harness: ahp.Harness{Name: "test", Version: "1"},
+		Source:  "urn:test:budget", Events: capability.Host{ToolBefore: capability.ToolBefore{Deny: true, Observe: true}}, AuthProvider: provider,
 		EventClient: &http.Client{Transport: transport}, UploadClient: &http.Client{Transport: transport}, ObservationTimeout: time.Minute,
 		Content: ContentOptions{AllowLoopbackHTTP: true,
 			AuthorizeContent: func(ctx context.Context, scope ContentAuthorization) (bool, error) {

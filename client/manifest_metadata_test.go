@@ -22,7 +22,7 @@ func TestManifestMetadataDirectTransferAndSnapshot(t *testing.T) {
 	policy.AdditionalProperties = map[string]json.RawMessage{"vendor": opaque}
 	metadata.ManagedPolicy = ahp.Some(policy)
 	reg := eventOptionsRegistration(t, "tool.before", "intercept", nil)
-	c, err := New(reg, Options{Source: "urn:test:metadata", Events: testHost(), Metadata: metadata})
+	c, err := New(reg, Options{Harness: ahp.Harness{Name: "test", Version: "1"}, Source: "urn:test:metadata", Events: testHost(), Metadata: metadata})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestManifestMetadataExplicitEmptyLists(t *testing.T) {
 	}
 	// An explicit empty transport list must not silently regain registration's
 	// HTTP transport during admission.
-	c, err := New(reg, Options{Source: "urn:test:metadata", Events: testHost(), Metadata: metadata})
+	c, err := New(reg, Options{Harness: ahp.Harness{Name: "test", Version: "1"}, Source: "urn:test:metadata", Events: testHost(), Metadata: metadata})
 	if c != nil {
 		c.Close()
 		t.Fatal("empty transports silently regained HTTP")
@@ -120,7 +120,7 @@ func TestManifestMetadataRejectsExtrasCollisions(t *testing.T) {
 		for _, key := range group.keys {
 			t.Run(group.name+"/"+key, func(t *testing.T) {
 				metadata := group.makeMetadata(map[string]json.RawMessage{key: json.RawMessage(`null`)})
-				c, err := New(reg, Options{Source: "urn:test:metadata", Events: testHost(), Metadata: metadata})
+				c, err := New(reg, Options{Harness: ahp.Harness{Name: "test", Version: "1"}, Source: "urn:test:metadata", Events: testHost(), Metadata: metadata})
 				if c != nil {
 					c.Close()
 					t.Fatal("colliding metadata acquired a client")
@@ -148,7 +148,7 @@ func TestManifestMetadataCanonicalAdmission(t *testing.T) {
 	reg := eventOptionsRegistration(t, "tool.before", "intercept", nil)
 	for name, metadata := range cases {
 		t.Run(name, func(t *testing.T) {
-			c, err := New(reg, Options{Source: "urn:test:metadata", Events: capability.Host{ToolBefore: capability.ToolBefore{Deny: true}}, Metadata: metadata})
+			c, err := New(reg, Options{Harness: ahp.Harness{Name: "test", Version: "1"}, Source: "urn:test:metadata", Events: capability.Host{ToolBefore: capability.ToolBefore{Deny: true}}, Metadata: metadata})
 			if c != nil {
 				c.Close()
 				t.Fatal("invalid metadata acquired a client")

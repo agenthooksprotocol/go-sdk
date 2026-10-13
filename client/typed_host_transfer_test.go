@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"testing"
 
+	ahp "github.com/agenthooksprotocol/go-sdk"
 	"github.com/agenthooksprotocol/go-sdk/capability"
 	"github.com/agenthooksprotocol/go-sdk/event"
 )
@@ -64,7 +65,7 @@ func TestManifestMetadataValidationDoesNotInspectTypedEvents(t *testing.T) {
 
 func TestTypedHostTransferPreservesContinuationMaximum(t *testing.T) {
 	host := capability.Host{TurnFinishBefore: capability.TurnFinishBefore{Flow: capability.ContinueAndStop(2, 1).WithMaxContinuations(3), Observe: true}}
-	h, err := New(eventOptionsRegistration(t, "turn.finish.before", "intercept", nil), Options{Source: "urn:test:flow-max", Events: host})
+	h, err := New(eventOptionsRegistration(t, "turn.finish.before", "intercept", nil), Options{Harness: ahp.Harness{Name: "test", Version: "1"}, Source: "urn:test:flow-max", Events: host})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +85,7 @@ func TestTypedHostTransferPreservesContinuationMaximum(t *testing.T) {
 
 func TestTypedHostElicitationOnlyIsValidInterception(t *testing.T) {
 	host := capability.Host{ToolBefore: capability.ToolBefore{ElicitationForm: true}}
-	h, err := New(eventOptionsRegistration(t, "tool.before", "intercept", nil), Options{Source: "urn:test:facility", Events: host})
+	h, err := New(eventOptionsRegistration(t, "tool.before", "intercept", nil), Options{Harness: ahp.Harness{Name: "test", Version: "1"}, Source: "urn:test:facility", Events: host})
 	if err != nil {
 		t.Fatal(err)
 	}

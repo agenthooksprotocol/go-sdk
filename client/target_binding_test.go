@@ -258,7 +258,7 @@ func TestTargetParamsAndWorkspaceMappings(t *testing.T) {
 	if _, err := targetTestClient(nil).prepareBoundary(context.Background(), event, targetTestCaps("request"), cfg); err == nil {
 		t.Fatal("native params accepted descriptor templates")
 	}
-	workspace := map[string]any{"id": "workspace-event", "source": "urn:test:host", "time": "2026-01-01T00:00:00Z", "type": "workspace.change.before", "workspace": map[string]any{"kind": "cwd", "change": map[string]any{"cwd": "/old"}, "prior": map[string]any{"cwd": "/prior"}}}
+	workspace := map[string]any{"id": "workspace-event", "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:test:host", "time": "2026-01-01T00:00:00Z", "type": "workspace.change.before", "workspace": map[string]any{"kind": "cwd", "change": map[string]any{"cwd": "/old"}, "prior": map[string]any{"cwd": "/prior"}}}
 	wp, err := targetTestClient(nil).prepareBoundary(context.Background(), workspace, targetTestCaps("workspace"), interceptConfig{})
 	if err != nil {
 		t.Fatal(err)
@@ -277,7 +277,7 @@ func targetTestCanonicalEvent(t *testing.T, kind string, items []any) map[string
 	if kind == "tool.after" {
 		return targetTestEvent(t, items)
 	}
-	event := map[string]any{"id": "test", "source": "urn:test", "time": "2026-01-01T00:00:00Z", "type": kind, "items": items}
+	event := map[string]any{"id": "test", "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:test", "time": "2026-01-01T00:00:00Z", "type": kind, "items": items}
 	switch kind {
 	case "turn.start":
 		event["turn"] = map[string]any{"id": "turn"}
@@ -424,7 +424,7 @@ func TestToolAfterOutputCanonicalLists(t *testing.T) {
 			first := map[string]any{"id": "first", "role": "assistant", "parts": []any{map[string]any{"id": "first-text", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": "first"}, attachment}}
 			second := map[string]any{"id": "second", "role": "assistant", "parts": []any{map[string]any{"id": "second-text", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": "second"}}}
 			original := []any{first, second}
-			event := map[string]any{"id": "test", "source": "urn:test", "time": "2026-01-01T00:00:00Z", "type": "tool.after", "call": map[string]any{"id": "call"}, "path": "execute", "tool": map[string]any{"name": "task", "kind": "task", "origin": "native", "input": map[string]any{"native": "opaque"}}, "outcome": "ok", "execution": map[string]any{"status": "executed"}, "items": original}
+			event := map[string]any{"id": "test", "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:test", "time": "2026-01-01T00:00:00Z", "type": "tool.after", "call": map[string]any{"id": "call"}, "path": "execute", "tool": map[string]any{"name": "task", "kind": "task", "origin": "native", "input": map[string]any{"native": "opaque"}}, "outcome": "ok", "execution": map[string]any{"status": "executed"}, "items": original}
 			before := string(sdkJSON(event))
 			caps := map[string]any{"effects": []any{"modify"}, "modify": map[string]any{"output": map[string]any{"replace": true, "merge": true}}}
 			opens := 0

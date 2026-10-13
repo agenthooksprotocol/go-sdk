@@ -50,7 +50,7 @@ func TestSubscribesStaticInterest(t *testing.T) {
 			if !reg.OK {
 				t.Fatal(reg.Diagnostics)
 			}
-			h, err := New(reg.Value, Options{Source: "urn:test:interest", AuthProvider: interestAuth{t}, EventClient: &http.Client{Transport: interestHTTP{t}}, UploadClient: &http.Client{Transport: interestHTTP{t}}, Events: capability.Host{ToolBefore: capability.ToolBefore{Deny: true, Observe: true}, ToolAfter: capability.ToolAfter{Observe: true}, SessionStart: capability.SessionStart{Observe: true}}, Content: ContentOptions{
+			h, err := New(reg.Value, Options{Harness: ahp.Harness{Name: "test", Version: "1"}, Source: "urn:test:interest", AuthProvider: interestAuth{t}, EventClient: &http.Client{Transport: interestHTTP{t}}, UploadClient: &http.Client{Transport: interestHTTP{t}}, Events: capability.Host{ToolBefore: capability.ToolBefore{Deny: true, Observe: true}, ToolAfter: capability.ToolAfter{Observe: true}, SessionStart: capability.SessionStart{Observe: true}}, Content: ContentOptions{
 				AuthorizeContent: func(context.Context, ContentAuthorization) (bool, error) {
 					t.Fatal("content authorization in lookup")
 					return false, nil

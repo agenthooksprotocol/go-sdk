@@ -59,7 +59,8 @@ func ExampleHooks_ToolBefore() {
 		Modify:  ahp.Some(ahp.CapabilitiesModify{Input: ahp.Some(ahp.CapabilitiesModifyInput{Replace: true, Merge: false})}),
 	}
 	hooks, err := client.New(registration, client.Options{
-		Source: "urn:example:host",
+		Harness: ahp.Harness{Name: "test", Version: "1"},
+		Source:  "urn:example:host",
 		Events: capability.Host{
 			ToolBefore: capability.ToolBefore{Deny: true, ModifyInput: capability.Replace(), Observe: true},
 		},

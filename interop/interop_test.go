@@ -37,7 +37,7 @@ func fixturePath(t *testing.T, name string) string {
 }
 func wire(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
 func request(id string) Object {
-	return Object{"jsonrpc": "2.0", "id": id, "method": "hooks/intercept", "params": Object{"protocolVersion": "draft", "event": Object{"id": id, "source": "urn:ahp:interop", "type": "tool.before", "time": "2026-01-01T00:00:00Z", "session": Object{"id": "test"}, "call": Object{"id": "call-1"}, "path": "execute", "tool": Object{"name": "task", "kind": "task", "origin": "native", "input": Object{"task": float64(1)}}}, "capabilities": ToolCapabilities(), "state": Object{"permission": "none", "candidate": nil}}}
+	return Object{"jsonrpc": "2.0", "id": id, "method": "hooks/intercept", "params": Object{"protocolVersion": "draft", "event": Object{"id": id, "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:ahp:interop", "type": "tool.before", "time": "2026-01-01T00:00:00Z", "session": Object{"id": "test"}, "call": Object{"id": "call-1"}, "path": "execute", "tool": Object{"name": "task", "kind": "task", "origin": "native", "input": Object{"task": float64(1)}}}, "capabilities": ToolCapabilities(), "state": Object{"permission": "none", "candidate": nil}}}
 }
 func response(id string, effects ...any) Object {
 	return Object{"jsonrpc": "2.0", "id": id, "result": Object{"protocolVersion": "draft", "effects": effects}}

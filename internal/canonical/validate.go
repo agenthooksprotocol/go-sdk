@@ -48,7 +48,7 @@ var schemas = sync.OnceValues(func() (map[string]*jsonschema.Schema, error) {
 		}
 		out[name] = s
 	}
-	for _, name := range []string{"request", "notification", "successResponse", "errorResponse", "jsonRpcId"} {
+	for _, name := range []string{"request", "notification", "successResponse", "errorResponse", "jsonRpcId", "harness"} {
 		s, err := compiler.Compile("https://agenthooksprotocol.org/schemas/draft/common.schema.json#/$defs/" + name)
 		if err != nil {
 			return nil, err

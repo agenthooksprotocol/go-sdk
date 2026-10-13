@@ -35,7 +35,7 @@ func uploadPlanClient(t *testing.T, endpoint string, limit int, policies ...stri
 	if !reg.OK {
 		t.Fatal(reg.Diagnostics)
 	}
-	c, err := New(reg.Value, Options{Source: "urn:test:upload-plan", Events: capability.Host{ModelRequestBefore: capability.ModelRequestBefore{ModifyRequest: capability.ReplaceAndMerge(), Message: true, Deny: true, Observe: true}}, Metadata: testManifestMetadata(), MaxConcurrentUploads: limit, Content: ContentOptions{AuthorizeContent: contentTestAllow, AllowLoopbackHTTP: true, ProjectOpaque: base.opts.Content.ProjectOpaque}})
+	c, err := New(reg.Value, Options{Harness: ahp.Harness{Name: "test", Version: "1"}, Source: "urn:test:upload-plan", Events: capability.Host{ModelRequestBefore: capability.ModelRequestBefore{ModifyRequest: capability.ReplaceAndMerge(), Message: true, Deny: true, Observe: true}}, Metadata: testManifestMetadata(), MaxConcurrentUploads: limit, Content: ContentOptions{AuthorizeContent: contentTestAllow, AllowLoopbackHTTP: true, ProjectOpaque: base.opts.Content.ProjectOpaque}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +246,7 @@ func TestUploadPlanNegativeLimitRejected(t *testing.T) {
 	if !reg.OK {
 		t.Fatal(reg.Diagnostics)
 	}
-	c, err := New(reg.Value, Options{Source: "urn:test:upload-plan", Events: base.opts.Events, Metadata: base.opts.Metadata, MaxConcurrentUploads: -1})
+	c, err := New(reg.Value, Options{Harness: ahp.Harness{Name: "test", Version: "1"}, Source: "urn:test:upload-plan", Events: base.opts.Events, Metadata: base.opts.Metadata, MaxConcurrentUploads: -1})
 	if c != nil {
 		_ = c.Close()
 	}

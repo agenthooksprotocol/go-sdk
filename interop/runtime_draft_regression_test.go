@@ -76,7 +76,7 @@ func TestRuntimeDraftUnknownFields(t *testing.T) {
 func TestRuntimeDraftObservationIDsStayLocal(t *testing.T) {
 	prepared := make(chan string, 2)
 	delivered := make(chan Object, 2)
-	DispatchObservations(Object{"id": "event", "source": "urn:test", "type": "tool.before"}, []Object{{"id": "called", "mode": "intercept"}, {"id": "remaining", "mode": "intercept"}, {"id": "observer", "mode": "observe"}}, map[string]bool{"called": true}, func(event, sub Object) (Object, error) { prepared <- str(sub["id"]); return event, nil }, func(note Object) error { delivered <- note; return nil })
+	DispatchObservations(Object{"id": "event", "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:test", "type": "tool.before"}, []Object{{"id": "called", "mode": "intercept"}, {"id": "remaining", "mode": "intercept"}, {"id": "observer", "mode": "observe"}}, map[string]bool{"called": true}, func(event, sub Object) (Object, error) { prepared <- str(sub["id"]); return event, nil }, func(note Object) error { delivered <- note; return nil })
 	seen := map[string]bool{}
 	for i := 0; i < 2; i++ {
 		select {

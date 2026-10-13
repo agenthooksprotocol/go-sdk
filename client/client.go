@@ -28,6 +28,8 @@ import (
 // The two HTTP clients are deliberately independent credential scopes.
 type Options struct {
 	Source string
+	// Harness identifies the emitting runtime on every event.
+	Harness ahp.Harness
 	// Events explicitly advertises boundary modes and capabilities.
 	// Metadata customizes only non-event advertisement fields.
 	Events   capability.Host
@@ -144,6 +146,19 @@ func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
 	if strings.TrimSpace(opts.Source) == "" {
 		return nil, errors.New("source is required")
 	}
+	harnessBytes, err := json.Marshal(opts.Harness)
+	if err != nil {
+		return nil, errors.New("invalid harness identity")
+	}
+	if err := canonical.Validate("harness", harnessBytes); err != nil {
+		return nil, errors.New("invalid harness identity")
+	}
+	var harness ahp.Harness
+	if err := json.Unmarshal(harnessBytes, &harness); err != nil {
+		return nil, errors.New("invalid harness identity: " + err.Error())
+	}
+	// Detach extension maps and raw bytes from caller-owned configuration.
+	opts.Harness = harness
 	if opts.MaxConcurrentUploads < 0 || opts.MaxContentBytes < 0 || opts.MaxPendingObservations < 0 || opts.ObservationTimeout < 0 {
 		return nil, errors.New("negative client limit")
 	}

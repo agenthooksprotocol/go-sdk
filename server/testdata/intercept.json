@@ -24,7 +24,11 @@
       "call": {
         "id": "call_http_456"
       },
-      "path": "example"
+      "path": "example",
+      "harness": {
+        "name": "test",
+        "version": "1"
+      }
     },
     "capabilities": {
       "effects": [

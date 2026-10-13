@@ -105,7 +105,7 @@ func TestBinaryUploadBinding(t *testing.T) {
 
 func TestTaskLineage(t *testing.T) {
 	event := func(id, parent, typ, task string) Object {
-		e := Object{"id": id, "source": "urn:source", "type": typ, "task": Object{"id": task, "operation": "update", "change": Object{"status": "native-done"}}}
+		e := Object{"id": id, "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:source", "type": typ, "task": Object{"id": task, "operation": "update", "change": Object{"status": "native-done"}}}
 		if parent != "" {
 			e["parentEventId"] = parent
 		}
@@ -183,7 +183,7 @@ func TestRequiredTypedPayloads(t *testing.T) {
 		t.Fatal("missing tool origin")
 	}
 	for _, typ := range []string{"task.change.after", "workspace.change.after", "file.changed"} {
-		ev := Object{"id": "typed", "source": "urn:source", "time": "2026-01-01T00:00:00Z", "type": typ}
+		ev := Object{"id": "typed", "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:source", "time": "2026-01-01T00:00:00Z", "type": typ}
 		m := Object{"jsonrpc": "2.0", "method": "hooks/observe", "params": Object{"protocolVersion": "draft", "event": ev}}
 		if e = v.validate("observe", m); e == nil {
 			t.Fatal("missing typed payload", typ)
@@ -229,7 +229,7 @@ func TestCanonicalSettledTypedMessages(t *testing.T) {
 		{"workspace.change.after", "workspace", Object{"kind": "cwd", "change": Object{"cwd": "/new"}}},
 		{"file.changed", "changes", []any{Object{"path": "/new/file", "operation": "create", "agentCaused": true}}},
 	} {
-		ev := Object{"id": "event", "source": "urn:source", "time": "2026-01-01T00:00:00Z", "type": tc.kind, tc.field: tc.payload}
+		ev := Object{"id": "event", "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:source", "time": "2026-01-01T00:00:00Z", "type": tc.kind, tc.field: tc.payload}
 		m := Object{"jsonrpc": "2.0", "method": "hooks/observe", "params": Object{"protocolVersion": "draft", "event": ev}}
 		if e = v.observe.Validate(m); e != nil {
 			t.Fatal(tc.kind, e)
@@ -321,7 +321,7 @@ func TestTaskWorkspaceCapabilities(t *testing.T) {
 			if family == "workspace" {
 				payload = Object{"kind": "cwd", "change": Object{"cwd": "/new"}}
 			}
-			event := Object{"id": "boundary", "source": "urn:go:test", "time": "2026-01-01T00:00:00Z", "type": family + ".change.before", family: payload}
+			event := Object{"id": "boundary", "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:go:test", "time": "2026-01-01T00:00:00Z", "type": family + ".change.before", family: payload}
 			req := Object{"jsonrpc": "2.0", "id": "boundary", "method": "hooks/intercept", "params": Object{"protocolVersion": "draft", "event": event, "capabilities": Object{"effects": []any{"deny", "message"}}}}
 			if e := validator.validate("intercept-request", req); e != nil {
 				t.Fatal(e)

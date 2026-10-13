@@ -230,7 +230,11 @@ func runObservationChain(parent context.Context, sc lifecycleScenario, send func
 	if err != nil {
 		return nil, nil, err
 	}
-	client, err := hooks.New(registration.Value, hooks.Options{Source: str(event["source"]), Events: host, Metadata: metadata, EventClient: &http.Client{Transport: transport}, ObservationTimeout: 20 * time.Second, Content: hooks.ContentOptions{ProjectOpaque: func(_ context.Context, _ hooks.ContentAuthorization, _ string, value any) (any, error) {
+	var harness ahp.Harness
+	if err := json.Unmarshal(jsonBytes(event["harness"]), &harness); err != nil {
+		return nil, nil, fmt.Errorf("invalid event harness: %w", err)
+	}
+	client, err := hooks.New(registration.Value, hooks.Options{Harness: harness, Source: str(event["source"]), Events: host, Metadata: metadata, EventClient: &http.Client{Transport: transport}, ObservationTimeout: 20 * time.Second, Content: hooks.ContentOptions{ProjectOpaque: func(_ context.Context, _ hooks.ContentAuthorization, _ string, value any) (any, error) {
 		return value, nil
 	}}})
 	if err != nil {

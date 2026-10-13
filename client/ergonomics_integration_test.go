@@ -148,7 +148,7 @@ func TestNamedSourcesReachAuthorizedReceiverReferences(t *testing.T) {
 				if !reg.OK {
 					t.Fatal(reg.Diagnostics)
 				}
-				hooks, err := New(reg.Value, Options{Source: "urn:test:source", Events: capability.Host{ToolBefore: capability.ToolBefore{Deny: true, Observe: true}}, Content: ContentOptions{AllowLoopbackHTTP: true, AuthorizeContent: contentTestAllow, ProjectOpaque: func(_ context.Context, _ ContentAuthorization, _ string, value any) (any, error) { return value, nil }}})
+				hooks, err := New(reg.Value, Options{Harness: ahp.Harness{Name: "test", Version: "1"}, Source: "urn:test:source", Events: capability.Host{ToolBefore: capability.ToolBefore{Deny: true, Observe: true}}, Content: ContentOptions{AllowLoopbackHTTP: true, AuthorizeContent: contentTestAllow, ProjectOpaque: func(_ context.Context, _ ContentAuthorization, _ string, value any) (any, error) { return value, nil }}})
 				if err != nil {
 					t.Fatal(err)
 				}

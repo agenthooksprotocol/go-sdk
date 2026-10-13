@@ -17,7 +17,7 @@ import (
 
 func senderFixture(stage string, raw []byte) O {
 	meta := O{"server": "requesting-server", "mode": "form", stage: O{"id": stage + "-body", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": string(raw)}}
-	event := O{"id": stage, "source": "urn:real:requester", "type": "user.elicitation." + stage, "time": "2026-09-01T00:00:00Z", "session": O{"id": "real-session"}, "elicitation": meta}
+	event := O{"id": stage, "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:real:requester", "type": "user.elicitation." + stage, "time": "2026-09-01T00:00:00Z", "session": O{"id": "real-session"}, "elicitation": meta}
 	if stage == "result" {
 		event["parentEventId"] = "request"
 		meta["action"] = "accept"
@@ -193,7 +193,7 @@ func TestSenderDoesNotPublishUnverifiedReceiptEvidence(t *testing.T) {
 			defer peer.Close()
 			// Receipt verification applies to immutable binary attachments, not inline MCP text.
 			request := O{"jsonrpc": "2.0", "id": "binary", "method": "hooks/intercept", "params": O{"protocolVersion": "draft", "capabilities": O{"effects": []any{}}, "event": O{
-				"id": "binary", "source": "urn:test", "time": "2026-09-01T00:00:00Z", "type": "model.request.before",
+				"id": "binary", "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:test", "time": "2026-09-01T00:00:00Z", "type": "model.request.before",
 				"attempt": O{"id": "attempt", "number": 1}, "model": O{"id": "model", "provider": "test"}, "params": O{},
 				"items": []any{O{"id": "message", "role": "user", "parts": []any{O{"id": "binary-part", "kind": "attachment", "mediaType": "application/octet-stream", "selection": "body", "body": O{"ref": "urn:binary"}}}}},
 			}}}

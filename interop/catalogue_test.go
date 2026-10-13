@@ -13,7 +13,7 @@ func TestCatalogueCanonicalMessages(t *testing.T) {
 	// This self-contained canonical message proves the adapter shape independently
 	// of the protocol checkout's separately versioned scenario catalogue.
 	message := Object{"jsonrpc": "2.0", "method": "hooks/observe", "params": Object{"protocolVersion": "draft", "event": Object{
-		"id": "inline-catalogue", "source": "urn:ahp:catalogue", "time": "2026-09-15T12:00:00Z", "type": "model.request.before",
+		"id": "inline-catalogue", "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:ahp:catalogue", "time": "2026-09-15T12:00:00Z", "type": "model.request.before",
 		"model": Object{"id": "example", "provider": "example"}, "attempt": Object{"id": "example", "number": 1}, "params": Object{},
 		"items": []any{
 			Object{"id": "input", "role": "user", "parts": []any{Object{"id": "first", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": "First line.\nUnicode: café 🌍"}, Object{"id": "image", "kind": "attachment", "mediaType": "image/png", "selection": "metadata"}, Object{"id": "last", "kind": "text", "mediaType": "text/plain", "selection": "body", "text": "Last part."}}},
@@ -172,7 +172,7 @@ func TestCatalogueReceiverRejectionDoesNotPoisonLineage(t *testing.T) {
 		t.Fatal(e)
 	}
 	receiver := &lifecycleReceiver{suite: "catalogue", validator: v, changed: make(chan struct{}), uploads: map[string]string{}}
-	event := Object{"id": "a", "source": "urn:go:catalogue", "type": "task.change.before", "time": "2026-01-01T00:00:00Z", "task": Object{"id": "task", "operation": "update", "change": Object{"status": "working"}}}
+	event := Object{"id": "a", "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:go:catalogue", "type": "task.change.before", "time": "2026-01-01T00:00:00Z", "task": Object{"id": "task", "operation": "update", "change": Object{"status": "working"}}}
 	message := Object{"jsonrpc": "2.0", "method": "hooks/observe", "params": Object{"protocolVersion": "draft", "event": event}}
 	if _, e := receiver.catalogueDispatch(message); e != nil {
 		t.Fatal(e)

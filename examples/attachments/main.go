@@ -26,7 +26,7 @@ func run(registrationPath, filePath string) error {
 		return err
 	}
 	caps := capability.Host{ModelRequestBefore: capability.ModelRequestBefore{Deny: true, Observe: true}}
-	hooks, err := client.New(registration, client.Options{Source: "urn:example:document-review", Events: caps, MaxContentBytes: 8 << 20, MaxConcurrentUploads: 8})
+	hooks, err := client.New(registration, client.Options{Harness: ahp.Harness{Name: "test", Version: "1"}, Source: "urn:example:document-review", Events: caps, MaxContentBytes: 8 << 20, MaxConcurrentUploads: 8})
 	if err != nil {
 		return err
 	}

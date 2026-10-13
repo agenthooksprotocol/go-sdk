@@ -249,7 +249,7 @@ func TestCanonicalFileReferencesUseSharedOwners(t *testing.T) {
 		opens.Add(1)
 		return io.NopCloser(strings.NewReader("file")), nil
 	}}}}
-	event := map[string]any{"id": "file-event", "source": "urn:test:host", "time": "2026-01-01T00:00:00Z", "type": "file.changed", "changes": []any{map[string]any{"agentCaused": false, "operation": "update", "path": "report.pdf", "after": map[string]any{"id": "file-part", "kind": "attachment", "selection": "body", "mediaType": "application/pdf", "body": map[string]any{"ref": "external-file"}}}}}
+	event := map[string]any{"id": "file-event", "harness": map[string]any{"name": "test", "version": "1"}, "source": "urn:test:host", "time": "2026-01-01T00:00:00Z", "type": "file.changed", "changes": []any{map[string]any{"agentCaused": false, "operation": "update", "path": "report.pdf", "after": map[string]any{"id": "file-part", "kind": "attachment", "selection": "body", "mediaType": "application/pdf", "body": map[string]any{"ref": "external-file"}}}}}
 	cfg := contentSourceConfig(nil)
 	p, err := c.prepareBoundary(context.Background(), event, nil, cfg)
 	if err != nil {
