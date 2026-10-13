@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.5.0...v0.6.0) (2026-10-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* capability.Observe is removed. Replace capability.Observe{} with the event's own declaration, for example capability.SessionEnd{Observe: true}.
+
+### Features
+
+* conform server JSON-RPC handling, route stdio by id, and adopt event-specific capabilities and stdio env ([#33](https://github.com/agenthooksprotocol/go-sdk/issues/33)) ([256c682](https://github.com/agenthooksprotocol/go-sdk/commit/256c6827470cbde9d24d1c5681161a3c13d5d634))
+
 ## [0.5.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.4.1...v0.5.0) (2026-10-12)
 
 
