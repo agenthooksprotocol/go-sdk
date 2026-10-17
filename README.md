@@ -573,6 +573,41 @@ handler in an application-owned mux and use normal HTTP authentication middlewar
 application owns listener startup, admission policy, and shutdown. Callback
 errors are redacted; notifications never receive JSON-RPC replies.
 
+### HTTP registration headers
+
+HTTP transports accept optional `headers` metadata on event requests:
+
+```json
+{
+  "type": "http",
+  "url": "https://backend.example/events",
+  "headers": {
+    "X-Tenant": "development",
+    "X-Api-Key": { "valueEnv": "BACKEND_API_KEY" },
+    "X-Deployment-Secret": { "valueRef": "backend/deployment" }
+  }
+}
+```
+
+Use literals only for non-secret metadata; they are not interpolated. Credentials
+must use `valueEnv` (the harness environment) or `valueRef`. Set
+`client.Options.HeaderResolver` for references; its context carries the dispatch
+deadline and its request identifies the backend, exact destination, and event
+purpose. Resolvers must honor cancellation and must not log secrets or references.
+Values are resolved once per dispatch, reused on permitted authentication retries,
+and resolved again on the next dispatch. Missing, empty, invalid, or failed secret
+sources prevent delivery, without partial-header fallback.
+
+Names must be ASCII HTTP tokens, unique ignoring case. Values must be printable
+ASCII; empty literal metadata is permitted. Authentication, framing, security, and
+AHP-reserved headers cannot be configured; `Authorization` belongs exclusively to
+`auth`. Aggregate registration headers are limited to 64 KiB (including names and
+per-field overhead); excess is an error, never truncation. Headers apply only to
+the exact registered event endpoint, never uploads, discovery, or redirects.
+Borrowed event clients retain their transport configuration; custom transports
+are trusted harness code and must not override authentication/framing fields or
+forward event headers to other destinations.
+
 ### Content and authentication
 
 Configure one harness-owned `Options.AuthProvider` implementing `auth.Provider`.

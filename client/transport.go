@@ -52,6 +52,10 @@ func newBackendTransport(backend *ahp.Backend, eventClient *http.Client) (backen
 		if cfg == nil || cfg.Type != ahp.HttpTransportTypeHTTP {
 			return nil, errors.New("invalid HTTP transport")
 		}
+		headers, err := registrationHeaders(cfg)
+		if err != nil {
+			return nil, err
+		}
 		u, err := url.Parse(cfg.URL)
 		if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") {
 			return nil, errors.New("invalid backend URL")
@@ -69,7 +73,7 @@ func newBackendTransport(backend *ahp.Backend, eventClient *http.Client) (backen
 		// Registration has no redirect opt-in; never forward payloads to another URL.
 		c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 		ctx, cancel := context.WithCancel(context.Background())
-		return &httpBackend{url: cfg.URL, client: &c, ctx: ctx, cancel: cancel, gate: make(chan struct{}, 1), credential: credential}, nil
+		return &httpBackend{headers: headers, url: cfg.URL, client: &c, ctx: ctx, cancel: cancel, gate: make(chan struct{}, 1), credential: credential}, nil
 	}
 	cfg := t.StdioTransport.Value
 	if cfg == nil || cfg.Type != ahp.StdioTransportTypeStdio || cfg.Command == "" || (cfg.Lifecycle != ahp.StdioTransportLifecyclePersistent && cfg.Lifecycle != ahp.StdioTransportLifecyclePerEvent) {
@@ -119,14 +123,17 @@ func (c *backendCredential) resolve(ctx context.Context) (string, error) {
 }
 
 type httpBackend struct {
-	provider    auth.Provider
-	authRequest *auth.Request
-	gate        chan struct{}
-	credential  *backendCredential
-	url         string
-	client      *http.Client
-	ctx         context.Context
-	cancel      context.CancelFunc
+	headers        map[string]headerSource
+	headerResolver HeaderResolver
+	backendID      string
+	provider       auth.Provider
+	authRequest    *auth.Request
+	gate           chan struct{}
+	credential     *backendCredential
+	url            string
+	client         *http.Client
+	ctx            context.Context
+	cancel         context.CancelFunc
 }
 
 func (t *httpBackend) Close() error { t.cancel(); t.gate <- struct{}{}; <-t.gate; return nil }
@@ -153,6 +160,11 @@ func (t *httpBackend) Exchange(ctx context.Context, body []byte, notification bo
 	if err != nil {
 		return nil, errors.New("invalid HTTP request")
 	}
+	headers, err := t.resolveHeaders(ctx)
+	if err != nil {
+		return nil, err
+	}
+	req.Header = headers
 	client := t.client
 	if t.authRequest == nil {
 		token, err := t.credential.resolve(ctx)

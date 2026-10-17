@@ -35,7 +35,9 @@ type Options struct {
 	Events   capability.Host
 	Metadata *ManifestMetadata
 	// AuthProvider is harness-owned; Hooks never closes it.
-	AuthProvider    auth.Provider
+	AuthProvider auth.Provider
+	// HeaderResolver resolves event-only registration valueRef header sources.
+	HeaderResolver  HeaderResolver
 	EventClient     *http.Client
 	UploadClient    *http.Client
 	MaxContentBytes int64
@@ -228,6 +230,10 @@ func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
 		if err != nil {
 			c.Close()
 			return nil, err
+		}
+		if httpTransport, ok := tr.(*httpBackend); ok {
+			httpTransport.headerResolver = opts.HeaderResolver
+			httpTransport.backendID = id
 		}
 		if stdio, ok := tr.(*stdioBackend); ok {
 			stdio.inheritEnvironment = opts.InheritEnvironment
