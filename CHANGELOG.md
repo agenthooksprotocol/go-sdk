@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.8.0...v0.9.0) (2026-10-17)
+
+
+### Features
+
+* add Intercepts static lookup ([#41](https://github.com/agenthooksprotocol/go-sdk/issues/41)) ([b67bc43](https://github.com/agenthooksprotocol/go-sdk/commit/b67bc4303ff6f82bb94e1a61c87a3e184c6f099d))
+
 ## [0.8.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.7.0...v0.8.0) (2026-10-17)
 
 
