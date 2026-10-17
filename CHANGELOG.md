@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.7.0...v0.8.0) (2026-10-17)
+
+
+### Features
+
+* apply configured HTTP headers to events and uploads ([#39](https://github.com/agenthooksprotocol/go-sdk/issues/39)) ([16824d6](https://github.com/agenthooksprotocol/go-sdk/commit/16824d68a84bc7792a1c512aaa04b596948b0f68))
+
 ## [0.7.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.6.0...v0.7.0) (2026-10-13)
 
 
