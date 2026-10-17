@@ -5,6 +5,11 @@ import ahp "github.com/agenthooksprotocol/go-sdk"
 
 type HttpOption func(*ahp.HttpTransport)
 
+func WithHttpHeaders(value map[string]*ahp.HttpHeaderValue) HttpOption {
+	return func(v *ahp.HttpTransport) {
+		v.Headers = ahp.Optional[map[string]*ahp.HttpHeaderValue]{Present: true, Value: value}
+	}
+}
 func NewHttp(argURL string, opts ...HttpOption) ahp.BackendTransport {
 	v := &ahp.HttpTransport{Type: "http", URL: argURL}
 	for _, opt := range opts {

@@ -75,6 +75,45 @@ func TestRegistrationHeadersEmittedAndRotated(t *testing.T) {
 	}
 }
 
+func TestRegistrationHeadersPublicRegistration(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Header.Get("X-Secret") != "resolved" {
+			t.Error("missing resolved public header")
+		}
+		w.WriteHeader(204)
+	}))
+	defer srv.Close()
+	reg := ahp.ParseRegistration(sdkJSON(map[string]any{"protocolVersion": "draft", "hooks": []any{map[string]any{
+		"id": "com.example.headers", "transport": map[string]any{"type": "http", "url": srv.URL, "headers": map[string]any{"X-Secret": map[string]any{"valueRef": "secret"}}},
+		"subscriptions": []any{map[string]any{"events": []any{"tool.before"}, "mode": "intercept", "timeoutMs": 1000, "failurePolicy": "fail-closed", "content": map[string]any{"default": "metadata"}}},
+	}}}))
+	if !reg.OK {
+		t.Fatal(reg.Diagnostics)
+	}
+	cfg := reg.Value.Hooks[0].Transport.HttpTransport.Value
+	if !cfg.Headers.Present || !cfg.Headers.Value["X-Secret"].HttpHeaderSource.Present {
+		t.Fatal("missing generated header projection")
+	}
+	c, err := New(reg.Value, Options{Harness: ahp.Harness{Name: "test", Version: "1"}, Source: "urn:test:host", Events: testHost(), Metadata: testManifestMetadata(), EventClient: srv.Client(), HeaderResolver: func(ctx context.Context, r HeaderRequest) (string, error) {
+		if r.BackendID != "com.example.headers" || r.Destination != srv.URL || r.Purpose != auth.Event {
+			t.Error("incorrect public resolver scope")
+		}
+		return "resolved", nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err := c.backends[0].transport.Exchange(context.Background(), []byte(`{}`), true); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("requests=%d", calls)
+	}
+}
+
 func TestRegistrationHeadersInvalid(t *testing.T) {
 	invalid := []string{`null`, `[]`, `{"Bad Name":"x"}`, `{"é":"x"}`, `{"X":"a","x":"a"}`, `{"X":"a","X":"b"}`, `{"X":null}`, `{"X":1}`, `{"X":[]}`, `{"X":"\t"}`, `{"X":"\r\n"}`, `{"X":"é"}`, `{"X":"\u007f"}`, `{"X":{}}`, `{"X":{"valueEnv":""}}`, `{"X":{"valueEnv":"BAD-NAME"}}`, `{"X":{"valueRef":""}}`, `{"X":{"valueEnv":"OK","valueRef":"ref"}}`}
 	for _, name := range []string{"Authorization", "Proxy-Test", "Cookie", "Set-Cookie", "Host", "Content-Type", "Accept", "Content-Length", "Content-Encoding", "Connection", "Keep-Alive", "Transfer-Encoding", "TE", "Trailer", "Upgrade", "Expect", "Origin", "Referer", "Sec-Test", "AHP-Test"} {
