@@ -45,8 +45,10 @@ func validHeaderValue(s string) bool {
 }
 
 func registrationHeaders(cfg *ahp.HttpTransport) (map[string]headerSource, error) {
-	// Project through JSON so both retained extension fields and generated schema
-	// fields use exactly the same registration path.
+	// The generated typed decoder deduplicates configured header names in source
+	// JSON member order before storing Headers.Value. Keep that winner selection:
+	// marshaling a Go map here cannot recover the original configuration order.
+	// Project through JSON to also support retained raw extension fields.
 	encoded, err := json.Marshal(cfg)
 	if err != nil {
 		return nil, errHeaderConfig
