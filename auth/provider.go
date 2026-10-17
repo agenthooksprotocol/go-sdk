@@ -6,8 +6,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -69,8 +69,8 @@ func (EnvironmentProvider) Credential(ctx context.Context, request Request) (Cre
 	if json.Unmarshal(request.Binding, &binding) != nil || binding.Type != "bearer" || binding.TokenEnv == "" || binding.TokenRef != "" {
 		return Credential{}, ErrCredential
 	}
-	token := os.Getenv(binding.TokenEnv)
-	if !validBearer(token) {
+	token, err := ResolveSecret(ctx, binding.TokenEnv, "", nil)
+	if err != nil || !validBearer(token) {
 		return Credential{}, ErrCredential
 	}
 	return Credential{Type: "bearer", Token: token}, nil
@@ -93,6 +93,37 @@ func copyRequest(r Request) Request { r.Binding = append(json.RawMessage(nil), r
 // The supplied client's transport must not follow redirects itself or inject
 // credentials for another scope. No transport is closed or mutated by Do.
 func Do(client *http.Client, req *http.Request, request Request, provider Provider, retrySafe bool) (*http.Response, error) {
+	return DoWithHeaders(client, req, request, provider, retrySafe, nil)
+}
+
+// ApplyHeaders overlays configured headers case-insensitively after defaults/auth.
+// Host and Content-Length use net/http's dedicated request fields.
+func ApplyHeaders(req *http.Request, headers http.Header) {
+	if req.Header == nil {
+		req.Header = make(http.Header)
+	}
+	for name, values := range headers {
+		for existing := range req.Header {
+			if strings.EqualFold(existing, name) {
+				delete(req.Header, existing)
+			}
+		}
+		req.Header[http.CanonicalHeaderKey(name)] = append([]string(nil), values...)
+		if strings.EqualFold(name, "Host") && len(values) > 0 {
+			req.Host = values[0]
+		}
+		if strings.EqualFold(name, "Content-Length") && len(values) > 0 {
+			if length, err := strconv.ParseInt(values[0], 10, 64); err == nil {
+				req.ContentLength = length
+			}
+		}
+	}
+}
+
+// DoWithHeaders applies registration headers last. Explicit Authorization skips
+// credential acquisition, discovery, and all challenge/retry handling. Existing
+// redirect behavior is unchanged. Headers never reach provider-owned requests.
+func DoWithHeaders(client *http.Client, req *http.Request, request Request, provider Provider, retrySafe bool, headers http.Header) (*http.Response, error) {
 	if req == nil {
 		return nil, ErrScope
 	}
@@ -120,7 +151,17 @@ func Do(client *http.Client, req *http.Request, request Request, provider Provid
 		return reject(redactError(ErrCredential, err))
 	}
 	request = copyRequest(request)
-	authenticated := len(request.Binding) != 0
+
+	explicitAuthorization := false
+	for name := range headers {
+		if strings.EqualFold(name, "Authorization") {
+			explicitAuthorization = true
+		}
+	}
+	if explicitAuthorization {
+		provider = nil
+	}
+	authenticated := len(request.Binding) != 0 && !explicitAuthorization
 	var credential Credential
 	if authenticated {
 		var binding struct {
@@ -172,6 +213,7 @@ func Do(client *http.Client, req *http.Request, request Request, provider Provid
 			}
 			current.Header.Set("Authorization", "Bearer "+credential.Token)
 		}
+		ApplyHeaders(current, headers)
 		response, err := copied.Do(current)
 		if err != nil {
 			if response != nil && response.Body != nil {

@@ -497,7 +497,20 @@ func (c *Hooks) uploadContent(ctx context.Context, config map[string]any, raw []
 			return nil, ctx.Err()
 		}
 	}
-	response, err := auth.Do(&client, request, auth.Request{Binding: binding, BackendID: backendID, Destination: endpoint, Purpose: auth.Upload}, c.opts.AuthProvider, false)
+	var sources map[string]headerSource
+	for _, backend := range c.backends {
+		if backend.id == backendID {
+			if transport, ok := backend.transport.(*httpBackend); ok {
+				sources = transport.headers
+			}
+			break
+		}
+	}
+	headers, err := resolveHeaders(ctx, sources, c.opts.HeaderResolver, HeaderRequest{BackendID: backendID, Destination: endpoint, Purpose: auth.Upload})
+	if err != nil {
+		return nil, err
+	}
+	response, err := auth.DoWithHeaders(&client, request, auth.Request{Binding: binding, BackendID: backendID, Destination: endpoint, Purpose: auth.Upload}, c.opts.AuthProvider, false, headers)
 	if err != nil {
 		return nil, errors.New("content upload failed")
 	}

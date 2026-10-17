@@ -36,7 +36,7 @@ type Options struct {
 	Metadata *ManifestMetadata
 	// AuthProvider is harness-owned; Hooks never closes it.
 	AuthProvider auth.Provider
-	// HeaderResolver resolves event-only registration valueRef header sources.
+	// HeaderResolver resolves registration valueRef sources for events and uploads.
 	HeaderResolver  HeaderResolver
 	EventClient     *http.Client
 	UploadClient    *http.Client

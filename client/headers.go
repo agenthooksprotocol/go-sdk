@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"os"
 	"regexp"
 	"strings"
 
@@ -15,7 +14,7 @@ import (
 	"github.com/agenthooksprotocol/go-sdk/auth"
 )
 
-// HeaderRequest scopes a harness-owned secret lookup to one event destination.
+// HeaderRequest scopes a harness-owned secret lookup to one backend event or upload destination.
 // ValueRef is opaque and must not be included in diagnostics.
 type HeaderRequest struct {
 	BackendID   string
@@ -33,30 +32,16 @@ var errHeaderResolution = errors.New("HTTP registration header resolution failed
 var headerName = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 var headerEnv = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// maxRegistrationHeaders bounds aggregate configured names and resolved values.
-const maxRegistrationHeaders = 64 << 10
-
 type headerSource struct{ literal, env, ref string }
 
-func printableHeader(s string) bool {
+// Go's HTTP field values allow HTAB, visible ASCII, and obs-text bytes.
+func validHeaderValue(s string) bool {
 	for i := 0; i < len(s); i++ {
-		if s[i] < 32 || s[i] > 126 {
+		if (s[i] < 32 && s[i] != '\t') || s[i] == 127 {
 			return false
 		}
 	}
 	return true
-}
-
-func reservedHeader(name string) bool {
-	name = strings.ToLower(name)
-	if strings.HasPrefix(name, "proxy-") || strings.HasPrefix(name, "sec-") || strings.HasPrefix(name, "ahp-") {
-		return true
-	}
-	switch name {
-	case "authorization", "cookie", "set-cookie", "host", "content-type", "accept", "content-length", "content-encoding", "connection", "keep-alive", "transfer-encoding", "te", "trailer", "upgrade", "expect", "origin", "referer":
-		return true
-	}
-	return false
 }
 
 func registrationHeaders(cfg *ahp.HttpTransport) (map[string]headerSource, error) {
@@ -80,7 +65,6 @@ func registrationHeaders(cfg *ahp.HttpTransport) (map[string]headerSource, error
 		return nil, errHeaderConfig
 	}
 	result := make(map[string]headerSource)
-	total := 0
 	for d.More() {
 		token, err := d.Token()
 		if err != nil {
@@ -88,10 +72,7 @@ func registrationHeaders(cfg *ahp.HttpTransport) (map[string]headerSource, error
 		}
 		name, ok := token.(string)
 		key := strings.ToLower(name)
-		if !ok || !headerName.MatchString(name) || reservedHeader(name) {
-			return nil, errHeaderConfig
-		}
-		if _, exists := result[key]; exists {
+		if !ok || !headerName.MatchString(name) {
 			return nil, errHeaderConfig
 		}
 		var raw json.RawMessage
@@ -100,7 +81,7 @@ func registrationHeaders(cfg *ahp.HttpTransport) (map[string]headerSource, error
 		}
 		var source headerSource
 		if len(raw) > 0 && raw[0] == '"' {
-			if json.Unmarshal(raw, &source.literal) != nil || !printableHeader(source.literal) {
+			if json.Unmarshal(raw, &source.literal) != nil || !validHeaderValue(source.literal) {
 				return nil, errHeaderConfig
 			}
 		} else {
@@ -121,10 +102,6 @@ func registrationHeaders(cfg *ahp.HttpTransport) (map[string]headerSource, error
 				return nil, errHeaderConfig
 			}
 		}
-		total += len(name) + len(source.literal) + len(source.env) + len(source.ref) + 4
-		if total > maxRegistrationHeaders {
-			return nil, errHeaderConfig
-		}
 		result[key] = source
 	}
 	if _, err := d.Token(); err != nil {
@@ -137,37 +114,35 @@ func registrationHeaders(cfg *ahp.HttpTransport) (map[string]headerSource, error
 }
 
 func (t *httpBackend) resolveHeaders(ctx context.Context) (http.Header, error) {
-	headers := make(http.Header, len(t.headers))
-	total := 0
-	for name, source := range t.headers {
+	return resolveHeaders(ctx, t.headers, t.headerResolver, HeaderRequest{BackendID: t.backendID, Destination: t.url, Purpose: auth.Event})
+}
+
+func resolveHeaders(ctx context.Context, sources map[string]headerSource, resolver HeaderResolver, scope HeaderRequest) (http.Header, error) {
+	headers := make(http.Header, len(sources))
+	for name, source := range sources {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		value := source.literal
-		if source.env != "" {
-			var ok bool
-			value, ok = os.LookupEnv(source.env)
-			if !ok || value == "" {
-				return nil, errHeaderResolution
-			}
-		} else if source.ref != "" {
-			if t.headerResolver == nil {
-				return nil, errHeaderResolution
+		if source.env != "" || source.ref != "" {
+			var lookup auth.SecretResolver
+			if resolver != nil {
+				lookup = func(ctx context.Context, ref string) (string, error) {
+					request := scope
+					request.ValueRef = ref
+					return resolver(ctx, request)
+				}
 			}
 			var err error
-			value, err = t.headerResolver(ctx, HeaderRequest{BackendID: t.backendID, Destination: t.url, Purpose: auth.Event, ValueRef: source.ref})
-			if err != nil || value == "" {
+			value, err = auth.ResolveSecret(ctx, source.env, source.ref, lookup)
+			if err != nil {
 				return nil, errHeaderResolution
 			}
 		}
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if !printableHeader(value) {
-			return nil, errHeaderResolution
-		}
-		total += len(name) + len(value) + 4
-		if total > maxRegistrationHeaders {
+		if !validHeaderValue(value) {
 			return nil, errHeaderResolution
 		}
 		headers.Set(name, value)

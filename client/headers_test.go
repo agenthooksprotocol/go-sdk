@@ -115,10 +115,7 @@ func TestRegistrationHeadersPublicRegistration(t *testing.T) {
 }
 
 func TestRegistrationHeadersInvalid(t *testing.T) {
-	invalid := []string{`null`, `[]`, `{"Bad Name":"x"}`, `{"é":"x"}`, `{"X":"a","x":"a"}`, `{"X":"a","X":"b"}`, `{"X":null}`, `{"X":1}`, `{"X":[]}`, `{"X":"\t"}`, `{"X":"\r\n"}`, `{"X":"é"}`, `{"X":"\u007f"}`, `{"X":{}}`, `{"X":{"valueEnv":""}}`, `{"X":{"valueEnv":"BAD-NAME"}}`, `{"X":{"valueRef":""}}`, `{"X":{"valueEnv":"OK","valueRef":"ref"}}`}
-	for _, name := range []string{"Authorization", "Proxy-Test", "Cookie", "Set-Cookie", "Host", "Content-Type", "Accept", "Content-Length", "Content-Encoding", "Connection", "Keep-Alive", "Transfer-Encoding", "TE", "Trailer", "Upgrade", "Expect", "Origin", "Referer", "Sec-Test", "AHP-Test"} {
-		invalid = append(invalid, `{"`+strings.ToUpper(name)+`":"sensitive"}`)
-	}
+	invalid := []string{`null`, `[]`, `{"Bad Name":"x"}`, `{"é":"x"}`, `{"X":null}`, `{"X":1}`, `{"X":[]}`, `{"X":"\r\n"}`, `{"X":"\u007f"}`, `{"X":{}}`, `{"X":{"valueEnv":""}}`, `{"X":{"valueEnv":"BAD-NAME"}}`, `{"X":{"valueRef":""}}`, `{"X":{"valueEnv":"OK","valueRef":"ref"}}`}
 	for _, raw := range invalid {
 		cfg := &ahp.HttpTransport{Type: ahp.HttpTransportTypeHTTP, URL: "http://localhost/events", AdditionalProperties: map[string]json.RawMessage{"headers": json.RawMessage(raw)}}
 		if _, err := registrationHeaders(cfg); err == nil {
@@ -133,7 +130,7 @@ func TestRegistrationHeadersFailClosed(t *testing.T) {
 	requests := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests++; w.WriteHeader(204) }))
 	defer srv.Close()
-	for _, value := range []string{"", "bad\nvalue", "é", strings.Repeat("x", maxRegistrationHeaders)} {
+	for _, value := range []string{"", "bad\nvalue", "bad\x00value"} {
 		tr := headerBackend(t, srv.URL, `{"X":{"valueRef":"private-reference"}}`, srv.Client())
 		tr.headerResolver = func(context.Context, HeaderRequest) (string, error) { return value, nil }
 		if _, err := tr.Exchange(context.Background(), []byte(`{}`), true); err == nil {
@@ -205,7 +202,7 @@ func TestRegistrationHeadersAuthRetryReusesResolution(t *testing.T) {
 	}
 }
 
-func TestRegistrationHeadersRedirectIsolation(t *testing.T) {
+func TestRegistrationHeadersPreserveExistingRedirectBehavior(t *testing.T) {
 	targets := 0
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { targets++; w.WriteHeader(204) }))
 	defer target.Close()
@@ -224,8 +221,12 @@ func TestRegistrationHeadersRedirectIsolation(t *testing.T) {
 	defer srv.Close()
 	client := srv.Client()
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return nil }
-	for _, route := range []string{"same", "cross"} {
-		tr := headerBackend(t, srv.URL+"/events", `{"X-Route":"`+route+`"}`, client)
+	for _, route := range []string{"same", "cross", ""} {
+		raw := `{}`
+		if route != "" {
+			raw = `{"X-Route":"` + route + `"}`
+		}
+		tr := headerBackend(t, srv.URL+"/events", raw, client)
 		if _, err := tr.Exchange(context.Background(), []byte(`{}`), true); err == nil {
 			t.Error("redirect accepted")
 		}

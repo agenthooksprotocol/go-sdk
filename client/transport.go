@@ -115,8 +115,8 @@ func (c *backendCredential) resolve(ctx context.Context) (string, error) {
 	if c.Type != "bearer" || c.TokenEnv == "" || c.TokenRef != "" {
 		return "", errors.New("configured authentication binding is unsupported")
 	}
-	token := os.Getenv(c.TokenEnv)
-	if token == "" || !bearerTokenPattern.MatchString(token) {
+	token, err := auth.ResolveSecret(ctx, c.TokenEnv, "", nil)
+	if err != nil || !bearerTokenPattern.MatchString(token) {
 		return "", errors.New("backend credential unavailable or invalid")
 	}
 	return token, nil
@@ -164,9 +164,8 @@ func (t *httpBackend) Exchange(ctx context.Context, body []byte, notification bo
 	if err != nil {
 		return nil, err
 	}
-	req.Header = headers
 	client := t.client
-	if t.authRequest == nil {
+	if t.authRequest == nil && headers["Authorization"] == nil {
 		token, err := t.credential.resolve(ctx)
 		if err != nil {
 			return nil, err
@@ -178,8 +177,9 @@ func (t *httpBackend) Exchange(ctx context.Context, body []byte, notification bo
 	req.Header.Set("Content-Type", "application/json")
 	var resp *http.Response
 	if t.authRequest != nil {
-		resp, err = auth.Do(client, req, *t.authRequest, t.provider, !notification)
+		resp, err = auth.DoWithHeaders(client, req, *t.authRequest, t.provider, !notification, headers)
 	} else {
+		auth.ApplyHeaders(req, headers)
 		resp, err = client.Do(req)
 	}
 	if err != nil {
