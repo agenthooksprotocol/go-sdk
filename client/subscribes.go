@@ -35,3 +35,30 @@ func (h *Hooks) Subscribes(eventType event.Type) bool {
 	}
 	return false
 }
+
+// Intercepts reports whether any intercept subscription the host granted
+// selects the event. Payload filters are not evaluated.
+func (h *Hooks) Intercepts(eventType event.Type) bool {
+	if h == nil {
+		return false
+	}
+	name := string(eventType)
+	for _, raw := range sdkArray(h.manifest["events"]) {
+		entry := sdkObj(raw)
+		if entry["event"] != name {
+			continue
+		}
+		if !sdkHas(entry["modes"], "intercept") {
+			return false
+		}
+		for _, backend := range h.backends {
+			for _, sub := range backend.subscriptions {
+				if sub["mode"] == "intercept" && subscriptionMatches(sub, name) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return false
+}
