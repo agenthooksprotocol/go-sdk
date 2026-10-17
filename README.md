@@ -238,6 +238,11 @@ host modes rather than requiring an intercept-mode match. Payload filters are
 ignored conservatively: true means possible interest, not that a particular
 input passes its filters. It is neither permission nor a guarantee of delivery.
 
+`func (h *Hooks) Intercepts(eventType event.Type) bool` is `Subscribes`
+restricted to intercept subscriptions. Call
+`hooks.Intercepts(event.ModelResponseAfter)` to decide whether to withhold
+streamed output until interceptors settle.
+
 ### Consumer settlement
 
 `Result.Event` is the authoritative canonical `*ahp.Event`. Read its typed

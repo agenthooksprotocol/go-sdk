@@ -144,3 +144,89 @@ func TestSubscribesAllCanonicalEvents(t *testing.T) {
 		})
 	}
 }
+
+func TestInterceptsStaticInterest(t *testing.T) {
+	type sel struct{ selector, mode string }
+	for _, tc := range []struct {
+		name     string
+		subs     []sel
+		filtered bool
+		query    event.Type
+		want     bool
+	}{
+		{name: "intercept exact", subs: []sel{{"tool.before", "intercept"}}, query: event.ToolBefore, want: true},
+		{name: "observe only", subs: []sel{{"tool.before", "observe"}}, query: event.ToolBefore},
+		{name: "observe and intercept", subs: []sel{{"tool.before", "observe"}, {"tool.before", "intercept"}}, query: event.ToolBefore, want: true},
+		{name: "filtered intercept", subs: []sel{{"tool.before", "intercept"}}, filtered: true, query: event.ToolBefore, want: true},
+		{name: "global wildcard", subs: []sel{{"*", "intercept"}}, query: event.ToolBefore, want: true},
+		{name: "global wildcard model", subs: []sel{{"*", "intercept"}}, query: event.ModelResponseAfter, want: true},
+		{name: "global wildcard observe only grant", subs: []sel{{"*", "intercept"}}, query: event.ToolAfter},
+		{name: "global wildcard unknown", subs: []sel{{"*", "intercept"}}, query: event.Type("unknown.event")},
+		{name: "global wildcard unconfigured", subs: []sel{{"*", "intercept"}}, query: event.SessionEnd},
+		{name: "global wildcard empty", subs: []sel{{"*", "intercept"}}, query: ""},
+		{name: "prefix wildcard", subs: []sel{{"model.*", "intercept"}}, query: event.ModelResponseAfter, want: true},
+		{name: "prefix wildcard observe only grant", subs: []sel{{"model.*", "intercept"}}, query: event.ModelRequestBefore},
+		{name: "prefix wildcard unrelated namespace", subs: []sel{{"model.*", "intercept"}}, query: event.ToolBefore},
+		{name: "prefix is not bare namespace", subs: []sel{{"model.*", "intercept"}}, query: event.Type("model")},
+		{name: "observe wildcard", subs: []sel{{"*", "observe"}}, query: event.ToolBefore},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			subs := []any{}
+			for _, s := range tc.subs {
+				sub := map[string]any{"events": []any{s.selector}, "mode": s.mode, "content": map[string]any{"default": "body"}}
+				if s.mode == "intercept" {
+					sub["timeoutMs"] = 1000
+					sub["failurePolicy"] = "fail-closed"
+				}
+				if tc.filtered {
+					sub["filters"] = map[string]any{"toolKinds": []any{"never-matches-without-input"}, "paths": []any{"execute"}}
+				}
+				subs = append(subs, sub)
+			}
+			hooks := []any{map[string]any{"id": "com.example.interception", "transport": map[string]any{"type": "http", "url": "http://127.0.0.1/hooks"}, "subscriptions": subs}}
+			reg := ahp.ParseRegistration(sdkJSON(map[string]any{"protocolVersion": "draft", "hooks": hooks}))
+			if !reg.OK {
+				t.Fatal(reg.Diagnostics)
+			}
+			h, err := New(reg.Value, Options{Harness: ahp.Harness{Name: "test", Version: "1"}, Source: "urn:test:interception", AuthProvider: interestAuth{t}, EventClient: &http.Client{Transport: interestHTTP{t}}, UploadClient: &http.Client{Transport: interestHTTP{t}}, Events: capability.Host{
+				ToolBefore:         capability.ToolBefore{Deny: true, Observe: true},
+				ToolAfter:          capability.ToolAfter{Observe: true},
+				ModelRequestBefore: capability.ModelRequestBefore{Observe: true},
+				ModelResponseAfter: capability.ModelResponseAfter{Message: true, Observe: true},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer h.Close()
+			transports := []*testTransport{}
+			for i := range h.backends {
+				h.backends[i].transport.Close()
+				tr := &testTransport{reply: func(map[string]any) []any { t.Fatal("backend contact in lookup"); return nil }}
+				h.backends[i].transport = tr
+				transports = append(transports, tr)
+			}
+			snapshot, _ := json.Marshal([]any{h.manifest, subscriptionsForTest(h)})
+			if got := h.Intercepts(tc.query); got != tc.want {
+				t.Fatalf("Intercepts(%q)=%v, want %v", tc.query, got, tc.want)
+			}
+			after, _ := json.Marshal([]any{h.manifest, subscriptionsForTest(h)})
+			if string(snapshot) != string(after) {
+				t.Fatal("lookup mutated configuration")
+			}
+			for _, tr := range transports {
+				if len(tr.calls) != 0 {
+					t.Fatal("lookup delivered an observation or interception")
+				}
+			}
+		})
+	}
+}
+
+func TestInterceptsWithoutSubscribers(t *testing.T) {
+	granted := map[string]any{"events": []any{map[string]any{"event": "tool.before", "modes": []any{"intercept", "observe"}}}}
+	for _, h := range []*Hooks{nil, {}, {manifest: granted}} {
+		if h.Intercepts(event.ToolBefore) {
+			t.Fatal("no subscriptions must mean no interception")
+		}
+	}
+}

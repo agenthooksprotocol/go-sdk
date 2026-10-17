@@ -199,6 +199,8 @@ func TestTypedCapabilityPublicAPI(t *testing.T) {
 		{"runtime string capability diagnostic event", `func diagnostic(name string) client.CapabilityAdmissionError { return client.CapabilityAdmissionError{Event: name} }`, false},
 		{"typed subscription interest", `func interest(h *client.Hooks) bool { return h.Subscribes(event.ToolBefore) }`, true},
 		{"runtime string subscription interest", `func interest(h *client.Hooks, name string) bool { return h.Subscribes(name) }`, false},
+		{"typed interception interest", `func interest(h *client.Hooks) bool { return h.Intercepts(event.ToolBefore) }`, true},
+		{"runtime string interception interest", `func interest(h *client.Hooks, name string) bool { return h.Intercepts(name) }`, false},
 		{"public example", `var _ = capability.Host{SessionStart: capability.SessionStart{Observe: true}, ToolBefore: capability.ToolBefore{Allow: true, Deny: true, ReturnResult: true, ModifyInput: capability.ReplaceAndMerge(), Observe: true}}`, true},
 		{"unknown event", `var _ = capability.Host{ToolUnknown: capability.ToolUnknown{Observe: true}}`, false},
 		{"arbitrary modes", `var _ = capability.ToolBefore{Modes: []string{"execute"}}`, false},
