@@ -1,11 +1,11 @@
 {
   "sourceRepository": "agenthooksprotocol/agent-hooks-protocol",
-  "sourceCommit": "fdecb705bab125832a5de638a684df060a0ec754",
+  "sourceCommit": "6e409ee9a1670220cfa79cdc47a6df0be438bd6a",
   "schemaRevision": "draft",
   "protocolVersion": "draft",
   "generatorVersion": "0.1.0",
   "language": "go",
-  "schemaManifestSha256": "7ef102ef7cae2e47eeacdf14982a517057e1f2f6fe7e8fa5cc192ef72091cb6c",
+  "schemaManifestSha256": "81d5096127d1f03d6fa3472aa7fbc64f6ec9ce0adf57b40ee9f576b092036a63",
   "documents": [
     {
       "path": "schema/draft/capabilities-request.schema.json",
@@ -45,7 +45,7 @@
     },
     {
       "path": "schema/draft/content-upload.schema.json",
-      "sha256": "a405adb54b8de11f3814840f7cbcd54d76cdcc2e25d00942f1c1755eb05c6753"
+      "sha256": "369fd8bffe89c30112f6e31224db405661ecb14470e06b4e0b11b5e5403b65b0"
     },
     {
       "path": "schema/draft/deny-effect.schema.json",
@@ -101,7 +101,7 @@
     },
     {
       "path": "schema/draft/registration.schema.json",
-      "sha256": "92dda763bb92c543b6ba3f35ee05506461c94015b38768bb3336692934fd661c"
+      "sha256": "6144a5f9935e2b0e37006880949d1dc3304ac03baad9a2580b06d4fecb536342"
     },
     {
       "path": "schema/draft/schema.json",
