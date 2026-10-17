@@ -573,6 +573,50 @@ handler in an application-owned mux and use normal HTTP authentication middlewar
 application owns listener startup, admission policy, and shutdown. Callback
 errors are redacted; notifications never receive JSON-RPC replies.
 
+### HTTP registration headers
+
+HTTP transports accept optional `headers` on backend event and content-upload requests:
+
+```json
+{
+  "type": "http",
+  "url": "https://backend.example/events",
+  "headers": {
+    "Authorization": "Bearer abc123",
+    "Cookie": "session=example",
+    "X-Tenant": "development",
+    "X-Api-Key": { "valueEnv": "BACKEND_API_KEY" },
+    "X-Deployment-Secret": { "valueRef": "backend/deployment" }
+  }
+}
+```
+
+Values can be literals (including credentials), `valueEnv` (the harness environment),
+or `valueRef`; literals are not interpolated. Set `client.Options.HeaderResolver`
+for references; its context carries the operation deadline and its request
+identifies the backend, destination, and event or upload purpose. Environment and
+reference lookup share authentication's secret-resolution helper. Resolvers must
+honor cancellation and must not log secrets or references.
+Values are resolved once per dispatch, reused on permitted authentication retries,
+and resolved again on the next dispatch. Missing, empty, invalid, or failed secret
+sources prevent delivery, without partial-header fallback.
+
+Any valid HTTP field name can be configured. Values follow Go's native HTTP field
+syntax, including supported non-ASCII text and horizontal tabs; injection controls
+such as CR, LF, and NUL are rejected. Empty literal values are permitted. Duplicate
+names are compared case-insensitively and the last configuration property wins;
+programmatic Go maps use their deterministic JSON serialization order.
+
+Configured values are applied after defaults and authentication, including
+`Content-Type`, `Cookie`, and protocol headers. Presence of configured
+`Authorization` suppresses credential acquisition, discovery, and challenge retries
+for both events and uploads, even when an authentication binding is also present.
+Resolution failure does not fall back to authentication.
+
+Headers apply to the configured backend's event and content-upload requests, not
+unrelated backends or provider-owned discovery/token requests. Borrowed clients
+retain their transport configuration and existing redirect behavior is unchanged.
+
 ### Content and authentication
 
 Configure one harness-owned `Options.AuthProvider` implementing `auth.Provider`.
