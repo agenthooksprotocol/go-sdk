@@ -7,6 +7,7 @@ import "time"
 import "fmt"
 import "strconv"
 import "strings"
+import "github.com/agenthooksprotocol/go-sdk/event"
 
 type InterceptOption func(*ahp.InterceptSubscription)
 
@@ -59,8 +60,8 @@ func NewInterceptMilliseconds(argEvents []string, argTimeoutMs json.Number, argF
 }
 
 // NewIntercept constructs data with an exact duration conversion; canonical validation rejects nonpositive or fractional milliseconds.
-func NewIntercept(argEvents []string, argTimeout time.Duration, argFailurePolicy ahp.InterceptSubscriptionFailurePolicy, argContent *ahp.ContentSelection, opts ...InterceptOption) ahp.BackendSubscriptionsItem {
-	return NewInterceptMilliseconds(argEvents, durationMilliseconds(argTimeout), argFailurePolicy, argContent, opts...)
+func NewIntercept[E EventSelector](argEvents E, argTimeout time.Duration, argFailurePolicy ahp.InterceptSubscriptionFailurePolicy, argContent *ahp.ContentSelection, opts ...InterceptOption) ahp.BackendSubscriptionsItem {
+	return NewInterceptMilliseconds(eventStrings(argEvents), durationMilliseconds(argTimeout), argFailurePolicy, argContent, opts...)
 }
 
 // NewInterceptDuration checks and converts a duration before constructing the subscription.
@@ -107,7 +108,7 @@ func WithObserveEvents(values ...string) ObserveOption {
 		}()
 	}
 }
-func NewObserve(argContent *ahp.ContentSelection, argEvents []string, opts ...ObserveOption) ahp.BackendSubscriptionsItem {
+func NewObserveStrings(argContent *ahp.ContentSelection, argEvents []string, opts ...ObserveOption) ahp.BackendSubscriptionsItem {
 	v := &ahp.ObserveSubscription{Content: argContent, Events: func() []ahp.ObserveSubscriptionEventsItem {
 		items := make([]ahp.ObserveSubscriptionEventsItem, len(argEvents))
 		for i, value := range argEvents {
@@ -122,6 +123,35 @@ func NewObserve(argContent *ahp.ContentSelection, argEvents []string, opts ...Ob
 	}
 	return ahp.BackendSubscriptionsItem{ObserveSubscription: ahp.Optional[*ahp.ObserveSubscription]{Present: true, Value: v}}
 }
+func NewObserve[E EventSelector](argContent *ahp.ContentSelection, argEvents E, opts ...ObserveOption) ahp.BackendSubscriptionsItem {
+	return NewObserveStrings(argContent, eventStrings(argEvents), opts...)
+}
+
+// EventSelector accepts typed standard events and legacy string lists.
+type EventSelector interface {
+	event.Type | []event.Type | []string
+}
+
+func eventStrings[E EventSelector](events E) []string {
+	switch v := any(events).(type) {
+	case event.Type:
+		return []string{string(v)}
+	case []event.Type:
+		result := make([]string, len(v))
+		for i, value := range v {
+			result[i] = string(value)
+		}
+		return result
+	case []string:
+		return append([]string{}, v...)
+	}
+	return nil // Exhaustive over the EventSelector constraint.
+}
+
+type FailurePolicy = ahp.InterceptSubscriptionFailurePolicy
+
+const FailOpen FailurePolicy = "fail-open"
+const FailClosed FailurePolicy = "fail-closed"
 
 // Milliseconds converts a positive, whole-millisecond duration without truncation.
 // It does not apply a default or round fractions. Protocol validation remains required.

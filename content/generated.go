@@ -104,6 +104,9 @@ func NewUploadReceipt(argRef string, argSha256 string, argSize json.Number, opts
 	return v
 }
 
+// Metadata selects metadata without materializing content.
+func Metadata() *ahp.ContentSelection { return NewSelection(ahp.ContentSelectionDefaultMetadata) }
+
 // Milliseconds converts a positive, whole-millisecond duration without truncation.
 // It does not apply a default or round fractions. Protocol validation remains required.
 // durationMilliseconds is total: preserve invalid fractional/negative values

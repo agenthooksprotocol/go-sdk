@@ -40,9 +40,11 @@ type ObserveAnyContext struct {
 // Callbacks may run concurrently over HTTP and must cooperate with cancellation.
 // Nil event callbacks reject that event. Discovery is independent of dispatch.
 type Handlers struct {
-	Intercept    InterceptHandlers
-	Observe      ObserveHandlers
-	Capabilities func(context.Context, ahp.CapabilitiesRequest) (ahp.CapabilitiesResponseResult, error)
+	// Configuration supplies static subscription defaults through hooks/configuration.
+	Configuration *ahp.Configuration
+	Intercept     InterceptHandlers
+	Observe       ObserveHandlers
+	Capabilities  func(context.Context, ahp.CapabilitiesRequest) (ahp.CapabilitiesResponseResult, error)
 }
 
 // InterceptHandlers accepts only event-specific callbacks and replies.
@@ -289,6 +291,7 @@ func NewHandler(h Handlers, opts Options) (http.Handler, error) {
 		typedIntercept: h.Intercept.dispatch,
 		Observe:        h.Observe.dispatch,
 		Capabilities:   h.Capabilities,
+		Configuration:  h.Configuration,
 	}, opts)
 }
 
