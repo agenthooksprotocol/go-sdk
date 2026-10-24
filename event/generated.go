@@ -3904,6 +3904,45 @@ func (v WorkspaceChangeBeforeInput) MarshalJSON() ([]byte, error) {
 
 const WorkspaceChangeBefore Type = "workspace.change.before"
 
+// All selects all events supported by the subscription delivery mode.
+const All Type = "*"
+
+// ConfigAll selects supported events in the config family.
+const ConfigAll Type = "config.*"
+
+// ContextAll selects supported events in the context family.
+const ContextAll Type = "context.*"
+
+// FileAll selects supported events in the file family.
+const FileAll Type = "file.*"
+
+// HookAll selects supported events in the hook family.
+const HookAll Type = "hook.*"
+
+// ModelAll selects supported events in the model family.
+const ModelAll Type = "model.*"
+
+// SessionAll selects supported events in the session family.
+const SessionAll Type = "session.*"
+
+// TaskAll selects supported events in the task family.
+const TaskAll Type = "task.*"
+
+// ToolAll selects supported events in the tool family.
+const ToolAll Type = "tool.*"
+
+// TurnAll selects supported events in the turn family.
+const TurnAll Type = "turn.*"
+
+// UserAll selects supported events in the user family.
+const UserAll Type = "user.*"
+
+// WorkspaceAll selects supported events in the workspace family.
+const WorkspaceAll Type = "workspace.*"
+
+// Select copies typed selectors in order for a subscription. Canonical validation rejects an empty selection.
+func Select(events ...Type) []Type { return append([]Type{}, events...) }
+
 // ResponseForRequest validates a known canonical event context without publishing state.
 func ResponseForRequest(eventType Type, input []byte) ahp.ParseResult[ahp.ContextualResponse] {
 	switch eventType {

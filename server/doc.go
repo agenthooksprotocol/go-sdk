@@ -3,7 +3,9 @@ package server
 // This package deliberately supplies no listener, registry, storage service, or
 // authentication middleware. Mount NewHandler on an application's HTTP mux and
 // configure TLS, authorization, deadlines and admission with ordinary net/http
-// facilities. Discovery is the hooks/capabilities POST method, not a GET route.
+// facilities. Discovery uses hooks/capabilities and hooks/configuration POST
+// methods, not GET routes. Handlers.Configuration publishes a validated snapshot
+// of shared subscription defaults without requiring an application callback.
 //
 // Request and callback-result validation combines root ahp codecs with the
 // generator-produced offline internal/canonical bundle. Contextual checks enforce

@@ -11,10 +11,24 @@ func WithBackendAuthentication(value *ahp.Authentication) BackendOption {
 	}
 }
 func WithBackendSubscriptions(values ...ahp.BackendSubscriptionsItem) BackendOption {
-	return func(v *ahp.Backend) { v.Subscriptions = append([]ahp.BackendSubscriptionsItem{}, values...) }
+	return func(v *ahp.Backend) {
+		v.Subscriptions = ahp.Optional[[]ahp.BackendSubscriptionsItem]{Present: true, Value: append([]ahp.BackendSubscriptionsItem{}, values...)}
+	}
 }
 func NewBackend(argID string, argTransport ahp.BackendTransport, argSubscriptions ahp.BackendSubscriptionsItem, opts ...BackendOption) *ahp.Backend {
-	v := &ahp.Backend{ID: func() *ahp.ReverseDnsName { v := ahp.ReverseDnsName(argID); return &v }(), Transport: argTransport, Subscriptions: []ahp.BackendSubscriptionsItem{argSubscriptions}}
+	v := &ahp.Backend{ID: func() *ahp.ReverseDnsName { v := ahp.ReverseDnsName(argID); return &v }(), Transport: argTransport, Subscriptions: ahp.Optional[[]ahp.BackendSubscriptionsItem]{Present: true, Value: []ahp.BackendSubscriptionsItem{argSubscriptions}}}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(v)
+		}
+	}
+	return v
+}
+
+// NewDiscoveredBackend omits subscriptions for configuration discovery.
+func NewDiscoveredBackend(id string, transport ahp.BackendTransport, opts ...BackendOption) *ahp.Backend {
+	v := NewBackend(id, transport, ahp.BackendSubscriptionsItem{})
+	v.Subscriptions = ahp.Optional[[]ahp.BackendSubscriptionsItem]{}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(v)

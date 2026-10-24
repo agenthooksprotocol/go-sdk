@@ -27,7 +27,15 @@ import (
 // Options describes host-owned identity, supported protocol operations and I/O.
 // The two HTTP clients are deliberately independent credential scopes.
 type Options struct {
-	Source string
+	// InitializationContext bounds configuration discovery during New. Nil uses Background.
+	InitializationContext context.Context
+	// ConfigurationTimeout bounds each discovery exchange; zero uses five seconds.
+	ConfigurationTimeout time.Duration
+	// AuthorizeConfiguration approves discovered defaults with upload destinations or
+	// credential references. Without it, upload-bearing advertisements are skipped.
+	// It receives a detached snapshot; mutations do not change admitted defaults.
+	AuthorizeConfiguration func(context.Context, *ahp.Configuration) (bool, error)
+	Source                 string
 	// Harness identifies the emitting runtime on every event.
 	Harness ahp.Harness
 	// Events explicitly advertises boundary modes and capabilities.
@@ -135,7 +143,8 @@ type Result struct {
 	Interrupted bool
 }
 
-// New validates and snapshots configuration before opening any transport.
+// New validates and snapshots configuration. Backends without explicit subscriptions
+// are discovered within ConfigurationTimeout before New returns.
 func New(reg ahp.Registration, opts Options) (*Hooks, error) {
 	c, err := newClient(reg, opts)
 	if err != nil {
@@ -145,6 +154,15 @@ func New(reg ahp.Registration, opts Options) (*Hooks, error) {
 }
 
 func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
+	if opts.ConfigurationTimeout < 0 {
+		return nil, errors.New("negative configuration timeout")
+	}
+	if opts.ConfigurationTimeout == 0 {
+		opts.ConfigurationTimeout = 5 * time.Second
+	}
+	if opts.InitializationContext == nil {
+		opts.InitializationContext = context.Background()
+	}
 	if strings.TrimSpace(opts.Source) == "" {
 		return nil, errors.New("source is required")
 	}
@@ -218,6 +236,7 @@ func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
 			return nil, errors.New("authentication is not advertised")
 		}
 		b := registeredBackend{id: id}
+		_, explicit := bm["subscriptions"]
 		for _, v := range sdkArray(bm["subscriptions"]) {
 			sub := sdkObj(v)
 			if err := validateSubscription(manifest, sub); err != nil {
@@ -228,6 +247,10 @@ func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
 		}
 		tr, err := newAuthenticatedBackendTransport(backend, opts.EventClient, opts.AuthProvider)
 		if err != nil {
+			if !explicit {
+				c.configurationSkipped(id)
+				continue
+			}
 			c.Close()
 			return nil, err
 		}
@@ -243,6 +266,20 @@ func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
 			}
 		}
 		b.transport = tr
+		if !explicit {
+			subscriptions, err := c.discoverConfiguration(tr)
+			if opts.InitializationContext.Err() != nil {
+				_ = tr.Close()
+				_ = c.Close()
+				return nil, opts.InitializationContext.Err()
+			}
+			if err != nil || len(subscriptions) == 0 {
+				_ = tr.Close()
+				c.configurationSkipped(id)
+				continue
+			}
+			b.subscriptions = subscriptions
+		}
 		c.backends = append(c.backends, b)
 	}
 	return c, nil

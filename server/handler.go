@@ -20,6 +20,7 @@ const DefaultMaxFrameBytes int64 = 4 << 20
 
 // wireHandlers is the private validated transport callback seam.
 type wireHandlers struct {
+	Configuration  *ahp.Configuration
 	typedIntercept func(context.Context, ahp.InterceptRequest) (any, map[string]json.RawMessage, error)
 	Intercept      func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error)
 	Observe        func(context.Context, ahp.ObserveNotification) error
@@ -96,6 +97,10 @@ func newWireHandler(h wireHandlers, opts Options) (http.Handler, error) {
 	}
 	if err := canonicalpkg.Load(); err != nil {
 		return nil, errors.New("server: canonical schemas unavailable")
+	}
+	configuration, err := snapshotConfiguration(h.Configuration)
+	if err != nil {
+		return nil, err
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -188,7 +193,7 @@ func newWireHandler(h wireHandlers, opts Options) (http.Handler, error) {
 			rpcError(codeInvalidParams, "Invalid params")
 			return
 		}
-		if method == "hooks/intercept" || method == "hooks/observe" || method == "hooks/capabilities" {
+		if method == "hooks/intercept" || method == "hooks/observe" || method == "hooks/capabilities" || method == "hooks/configuration" {
 			var version string
 			if json.Unmarshal(params["protocolVersion"], &version) == nil && version != "draft" {
 				rpcErrorData(codeUnsupportedVersion, "Unsupported AHP protocol version", map[string]any{"supported": []string{ahp.ProtocolVersionValue}})
@@ -241,6 +246,16 @@ func newWireHandler(h wireHandlers, opts Options) (http.Handler, error) {
 				w.WriteHeader(http.StatusNoContent)
 			}
 			return
+		case "hooks/configuration":
+			if !canonical("configuration-request", b) {
+				rpcError(codeInvalidParams, "Invalid params")
+				return
+			}
+			if configuration == nil {
+				rpcError(codeMethodNotFound, "Method not found")
+				return
+			}
+			result = map[string]any{"protocolVersion": ahp.ProtocolVersionValue, "configuration": configuration}
 		case "hooks/capabilities":
 			p := ahp.ParseCapabilitiesRequest(b)
 			if !p.OK || !canonical("capabilities-request", b) {
@@ -275,7 +290,10 @@ func newWireHandler(h wireHandlers, opts Options) (http.Handler, error) {
 		out, err := json.Marshal(envelope)
 		kind := "intercept-response"
 		valid := false
-		if method == "hooks/capabilities" {
+		if method == "hooks/configuration" {
+			kind = "configuration-response"
+			valid = true
+		} else if method == "hooks/capabilities" {
 			kind = "capabilities-response"
 			valid = ahp.ParseCapabilitiesResponse(out).OK
 		} else {
