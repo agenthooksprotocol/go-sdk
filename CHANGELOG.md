@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/agenthooksprotocol/go-sdk/compare/v0.10.0...v0.10.1) (2026-10-24)
+
+
+### Bug Fixes
+
+* support request-scoped configuration handlers ([#45](https://github.com/agenthooksprotocol/go-sdk/issues/45)) ([b8341f2](https://github.com/agenthooksprotocol/go-sdk/commit/b8341f22542f136ba1f2c8db2710feb8c512a3b3))
+
 ## [0.10.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.9.0...v0.10.0) (2026-10-24)
 
 
