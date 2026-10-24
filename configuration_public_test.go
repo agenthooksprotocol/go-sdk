@@ -1,6 +1,7 @@
 package ahp_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -51,3 +52,23 @@ func TestSharedConfigurationPublicSurface(t *testing.T) {
 		t.Fatal("explicit empty subscriptions became discovery")
 	}
 }
+
+func ExampleConfigurationFunc() {
+	source := ahp.ConfigurationFunc(func(ctx context.Context) (*ahp.Configuration, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		// Read application-authenticated tenant data from ctx here.
+		return ahp.NewConfiguration(subscription.NewIntercept(
+			event.ToolBefore, 750*time.Millisecond, subscription.FailOpen, content.Metadata(),
+		)), nil
+	})
+	handler, err := server.NewHandler(server.Handlers{Configuration: source}, server.Options{})
+	if err != nil {
+		panic(err)
+	}
+	_ = handler // Mount on an authenticated HTTP route or pass to server.ServeStdio.
+}
+
+var _ ahp.ConfigurationSource = (*ahp.Configuration)(nil)
+var _ ahp.ConfigurationSource = ahp.ConfigurationFunc(nil)

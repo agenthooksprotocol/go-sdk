@@ -4,8 +4,9 @@ package server
 // authentication middleware. Mount NewHandler on an application's HTTP mux and
 // configure TLS, authorization, deadlines and admission with ordinary net/http
 // facilities. Discovery uses hooks/capabilities and hooks/configuration POST
-// methods, not GET routes. Handlers.Configuration publishes a validated snapshot
-// of shared subscription defaults without requiring an application callback.
+// methods, not GET routes. Handlers.Configuration accepts static defaults or a
+// request-scoped ahp.ConfigurationSource. Static defaults are snapshotted during
+// setup; dynamic results are validated and detached for each discovery request.
 //
 // Request and callback-result validation combines root ahp codecs with the
 // generator-produced offline internal/canonical bundle. Contextual checks enforce

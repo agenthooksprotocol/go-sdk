@@ -20,7 +20,7 @@ const DefaultMaxFrameBytes int64 = 4 << 20
 
 // wireHandlers is the private validated transport callback seam.
 type wireHandlers struct {
-	Configuration  *ahp.Configuration
+	Configuration  ahp.ConfigurationSource
 	typedIntercept func(context.Context, ahp.InterceptRequest) (any, map[string]json.RawMessage, error)
 	Intercept      func(context.Context, ahp.InterceptRequest) (ahp.InterceptResponseResult, error)
 	Observe        func(context.Context, ahp.ObserveNotification) error
@@ -98,7 +98,7 @@ func newWireHandler(h wireHandlers, opts Options) (http.Handler, error) {
 	if err := canonicalpkg.Load(); err != nil {
 		return nil, errors.New("server: canonical schemas unavailable")
 	}
-	configuration, err := snapshotConfiguration(h.Configuration)
+	configuration, err := prepareConfiguration(h.Configuration)
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +255,13 @@ func newWireHandler(h wireHandlers, opts Options) (http.Handler, error) {
 				rpcError(codeMethodNotFound, "Method not found")
 				return
 			}
-			result = map[string]any{"protocolVersion": ahp.ProtocolVersionValue, "configuration": configuration}
+			snapshot, resolveErr := configuration(r.Context())
+			if resolveErr != nil {
+				diagnostic(ErrConfigurationUnavailable)
+				rpcError(codeBackendInternal, "Backend internal error")
+				return
+			}
+			result = map[string]any{"protocolVersion": ahp.ProtocolVersionValue, "configuration": snapshot}
 		case "hooks/capabilities":
 			p := ahp.ParseCapabilitiesRequest(b)
 			if !p.OK || !canonical("capabilities-request", b) {
