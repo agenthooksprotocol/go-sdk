@@ -40,8 +40,9 @@ type ObserveAnyContext struct {
 // Callbacks may run concurrently over HTTP and must cooperate with cancellation.
 // Nil event callbacks reject that event. Discovery is independent of dispatch.
 type Handlers struct {
-	// Configuration supplies static subscription defaults through hooks/configuration.
-	Configuration *ahp.Configuration
+	// Configuration supplies static defaults or a request-scoped configuration source.
+	// Static *ahp.Configuration values are snapshotted by NewHandler.
+	Configuration ahp.ConfigurationSource
 	Intercept     InterceptHandlers
 	Observe       ObserveHandlers
 	Capabilities  func(context.Context, ahp.CapabilitiesRequest) (ahp.CapabilitiesResponseResult, error)

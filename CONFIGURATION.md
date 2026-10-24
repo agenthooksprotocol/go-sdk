@@ -23,10 +23,51 @@ handler, err := server.NewHandler(server.Handlers{
 ```
 
 Import `ahp` from `github.com/agenthooksprotocol/go-sdk` and the `content`, `event`,
-`server`, and `subscription` subpackages. `NewHandler` validates and snapshots the
-configuration; later caller mutations do not change the advertisement. Mount the
+`server`, and `subscription` subpackages. For static configuration, `NewHandler` validates and snapshots the
+declaration; later caller mutations do not change the advertisement. Mount the
 handler on the application's authenticated HTTP route, or pass it to
 `server.ServeStdio`. Authentication remains application-owned.
+
+## Dynamic backend configuration
+
+The same `Handlers.Configuration` field accepts an `ahp.ConfigurationSource`.
+Use `ahp.ConfigurationFunc` for a function, or implement `ResolveConfiguration`
+on an application-owned type:
+
+```go
+source := ahp.ConfigurationFunc(func(ctx context.Context) (*ahp.Configuration, error) {
+    // Read tenant information installed by your authentication middleware.
+    if err := ctx.Err(); err != nil {
+        return nil, err
+    }
+    return ahp.NewConfiguration(
+        subscription.NewIntercept(
+            event.ToolBefore,
+            750*time.Millisecond,
+            subscription.FailOpen,
+            content.Metadata(),
+        ),
+    ), nil
+})
+handler, err := server.NewHandler(server.Handlers{Configuration: source}, server.Options{})
+```
+
+The SDK invokes a dynamic source only for a validated `hooks/configuration`
+request, with the current request context. HTTP authentication remains middleware
+owned. Stdio uses the same handler without inventing an authenticated principal.
+The SDK owns JSON-RPC routing, correlation, validation, and response serialization.
+
+Dynamic sources can run concurrently and must honor context cancellation. Each
+successful result is validated and copied; do not mutate it concurrently with
+that copy. There is no dynamic-result cache. A nil result, invalid configuration,
+callback error, or panic produces a sanitized backend error and
+`server.ErrConfigurationUnavailable` through `Options.Diagnostic`. Errors and
+panic values are never included in diagnostics or responses. A nil source,
+including a typed nil pointer or function, means discovery is unavailable.
+Static `*ahp.Configuration` callers retain setup-time validation and snapshot
+behavior.
+
+## Client discovery
 
 The client opts into discovery by omitting subscriptions:
 
