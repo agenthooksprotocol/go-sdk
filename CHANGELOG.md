@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.9.0...v0.10.0) (2026-10-24)
+
+
+### Features
+
+* discover server-driven subscription configuration ([#43](https://github.com/agenthooksprotocol/go-sdk/issues/43)) ([7c5223a](https://github.com/agenthooksprotocol/go-sdk/commit/7c5223a5ed7fbe485e48cf5a1e7c4f07cfbabb62))
+
 ## [0.9.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.8.0...v0.9.0) (2026-10-17)
 
 
