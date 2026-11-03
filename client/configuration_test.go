@@ -2,18 +2,23 @@ package client
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/auth"
 	"github.com/agenthooksprotocol/go-sdk/capability"
+	"github.com/agenthooksprotocol/go-sdk/content"
 	"github.com/agenthooksprotocol/go-sdk/event"
 	"github.com/agenthooksprotocol/go-sdk/server"
 )
@@ -246,38 +251,175 @@ func TestConfigurationHTTPServerAndClient(t *testing.T) {
 	}
 }
 
-func TestConfigurationUploadRequiresLocalAuthorization(t *testing.T) {
-	for _, approved := range []bool{false, true} {
-		t.Run(map[bool]string{false: "denied", true: "approved"}[approved], func(t *testing.T) {
-			subs := discoveredSubscriptions("tool.before")
-			sdkObj(subs[0])["upload"] = map[string]any{"endpoint": "https://uploads.example.test/body", "timeoutMs": 1000, "maxBytes": 1024, "auth": map[string]any{"type": "bearer", "tokenEnv": "AHP_UPLOAD_SECRET"}}
-			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var req map[string]any
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{"protocolVersion": "draft", "configuration": map[string]any{"subscriptions": subs}}})
-			}))
-			defer s.Close()
-			opts := discoveryOptions()
-			var authorized bool
-			if approved {
-				opts.AuthorizeConfiguration = func(ctx context.Context, snapshot *ahp.Configuration) (bool, error) {
-					authorized = true
-					if _, ok := ctx.Deadline(); !ok {
-						t.Error("authorization has no operation deadline")
-					}
-					*snapshot = ahp.Configuration{}
-					return true, nil
+func discoveredUploadSubscription(endpoint string, binding map[string]any) map[string]any {
+	upload := map[string]any{"endpoint": endpoint, "timeoutMs": 1000, "maxBytes": 1024}
+	if binding != nil {
+		upload["auth"] = binding
+	}
+	return map[string]any{"events": []any{"model.request.before"}, "mode": "intercept", "timeoutMs": 1000, "failurePolicy": "fail-closed", "content": map[string]any{"default": "body"}, "upload": upload}
+}
+func discoveredUploadOptions() Options {
+	opts := discoveryOptions()
+	opts.Events = capability.Host{ModelRequestBefore: capability.ModelRequestBefore{ModifyRequest: capability.ReplaceAndMerge(), Message: true, Deny: true, Observe: true}}
+	opts.Metadata = testManifestMetadata()
+	opts.Content.AuthorizeContent = contentTestAllow
+	opts.Content.AllowLoopbackHTTP = true
+	return opts
+}
+func dispatchDiscoveredUpload(t *testing.T, h *Hooks) {
+	t.Helper()
+	result, err := h.Dispatch(context.Background(), event.ModelRequestBefore, uploadPlanInput(t), WithContentSource(uploadPlanPath, content.NewAttachment([]byte("body"))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer result.Close()
+	if len(result.Diagnostics) != 0 {
+		t.Fatalf("delivery diagnostics: %v", result.Diagnostics)
+	}
+}
+
+// discoveryUploadEndpoint confirms uploads after checking the Authorization header.
+func discoveryUploadEndpoint(t *testing.T, authorization string) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var calls atomic.Int32
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if got := r.Header.Get("Authorization"); got != authorization {
+			t.Errorf("upload Authorization = %q, want %q", got, authorization)
+		}
+		raw, _ := io.ReadAll(r.Body)
+		contentTestConfirm(w, "upload-receipt", raw)
+	}))
+	t.Cleanup(s.Close)
+	return s, &calls
+}
+
+// discoveryBackend advertises subs and counts event deliveries, which must carry
+// the confirmed upload receipt.
+func discoveryBackend(t *testing.T, subs []any) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var deliveries atomic.Int32
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var req map[string]any
+		_ = json.Unmarshal(raw, &req)
+		result := map[string]any{"protocolVersion": "draft", "configuration": map[string]any{"subscriptions": subs}}
+		if req["method"] != "hooks/configuration" {
+			deliveries.Add(1)
+			if !bytes.Contains(raw, []byte("upload-receipt")) {
+				t.Error("delivery missing upload receipt")
+			}
+			result = map[string]any{"protocolVersion": "draft", "effects": []any{}}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": result})
+	}))
+	t.Cleanup(s.Close)
+	return s, &deliveries
+}
+
+type discoverySecretProvider struct{ calls atomic.Int32 }
+
+func (p *discoverySecretProvider) Credential(context.Context, auth.Request) (auth.Credential, error) {
+	p.calls.Add(1)
+	return auth.Credential{}, errors.New("secret resolved")
+}
+func (p *discoverySecretProvider) Challenge(context.Context, auth.Request, auth.Challenge) (*auth.Credential, error) {
+	p.calls.Add(1)
+	return nil, errors.New("secret resolved")
+}
+
+func TestDiscoveredUploadAdmittedWithConfiguredHeader(t *testing.T) {
+	uploads, received := discoveryUploadEndpoint(t, "Bearer config-secret")
+	backend, deliveries := discoveryBackend(t, []any{discoveredUploadSubscription(uploads.URL+"/advertised", nil)})
+	h, err := New(discoveryRegistration(t, backend.URL, nil), discoveredUploadOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	dispatchDiscoveredUpload(t, h)
+	if received.Load() != 1 || deliveries.Load() != 1 {
+		t.Fatalf("uploads=%d deliveries=%d", received.Load(), deliveries.Load())
+	}
+}
+
+func TestDiscoveredUploadOAuthWithoutClientSecretAdmitted(t *testing.T) {
+	binding := map[string]any{"type": "oauth", "resource": "https://uploads.example.test", "issuer": "https://issuer.example.test", "clientId": "client", "flow": "client_credentials"}
+	backend, _ := discoveryBackend(t, []any{discoveredUploadSubscription("https://uploads.example.test/body", binding)})
+	provider := &discoverySecretProvider{}
+	opts := discoveredUploadOptions()
+	opts.AuthProvider = provider
+	h, err := New(discoveryRegistration(t, backend.URL, nil), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	if !h.Subscribes(event.ModelRequestBefore) || provider.calls.Load() != 0 {
+		t.Fatalf("subscribed=%v credential calls=%d", h.Subscribes(event.ModelRequestBefore), provider.calls.Load())
+	}
+}
+
+func TestDiscoveredUploadLocalSecretReferenceSkipsBackend(t *testing.T) {
+	for name, binding := range map[string]map[string]any{
+		"tokenEnv":        {"type": "bearer", "tokenEnv": "AHP_DISCOVERED_UPLOAD_SECRET"},
+		"tokenRef":        {"type": "bearer", "tokenRef": "AHP_DISCOVERED_UPLOAD_SECRET"},
+		"clientSecretRef": {"type": "oauth", "resource": "https://uploads.example.test", "issuer": "https://issuer.example.test", "clientId": "client", "flow": "client_credentials", "clientSecretRef": "AHP_DISCOVERED_UPLOAD_SECRET"},
+	} {
+		for _, placement := range []string{"only-subscription", "unmatched-subscription"} {
+			t.Run(name+"/"+placement, func(t *testing.T) {
+				t.Setenv("AHP_DISCOVERED_UPLOAD_SECRET", "local-secret")
+				uploads, received := discoveryUploadEndpoint(t, "")
+				sub := discoveredUploadSubscription(uploads.URL, binding)
+				subs := []any{sub}
+				if placement == "unmatched-subscription" {
+					sub["events"] = []any{"session.start"}
+					subs = []any{discoveredUploadSubscription(uploads.URL, nil), sub}
 				}
-			}
-			h, err := New(discoveryRegistration(t, s.URL, nil), opts)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer h.Close()
-			if h.Subscribes(event.ToolBefore) != approved || authorized != approved {
-				t.Fatal("upload authorization boundary violated")
-			}
-		})
+				backend, deliveries := discoveryBackend(t, subs)
+				provider := &discoverySecretProvider{}
+				opts := discoveredUploadOptions()
+				opts.AuthProvider = provider
+				var reason error
+				opts.TransportDiagnostic = func(_ string, err error) { reason = err }
+				h, err := New(discoveryRegistration(t, backend.URL, nil), opts)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer h.Close()
+				if !errors.Is(reason, ErrConfigurationLocalSecretReference) || !errors.Is(reason, ErrConfigurationSkipped) {
+					t.Fatalf("skip reason: %v", reason)
+				}
+				if strings.Contains(reason.Error(), "AHP_DISCOVERED_UPLOAD_SECRET") {
+					t.Fatal("diagnostic exposes reference name")
+				}
+				if len(h.backends) != 0 || h.Subscribes(event.ModelRequestBefore) {
+					t.Fatal("backend admitted")
+				}
+				dispatchDiscoveredUpload(t, h)
+				if provider.calls.Load() != 0 || received.Load() != 0 || deliveries.Load() != 0 {
+					t.Fatalf("credential calls=%d uploads=%d deliveries=%d", provider.calls.Load(), received.Load(), deliveries.Load())
+				}
+			})
+		}
+	}
+}
+
+func TestExplicitUploadLocalSecretReferenceRetained(t *testing.T) {
+	t.Setenv("AHP_EXPLICIT_UPLOAD_SECRET", "local-secret")
+	uploads, received := discoveryUploadEndpoint(t, "Bearer local-secret")
+	backend, deliveries := discoveryBackend(t, nil)
+	sub := discoveredUploadSubscription(uploads.URL, map[string]any{"type": "bearer", "tokenEnv": "AHP_EXPLICIT_UPLOAD_SECRET"})
+	parsed := ahp.ParseRegistration(sdkJSON(map[string]any{"protocolVersion": "draft", "hooks": []any{map[string]any{"id": "com.example.explicit", "transport": map[string]any{"type": "http", "url": backend.URL}, "subscriptions": []any{sub}}}}))
+	if !parsed.OK {
+		t.Fatal(parsed.Diagnostics)
+	}
+	h, err := New(parsed.Value, discoveredUploadOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	dispatchDiscoveredUpload(t, h)
+	if received.Load() != 1 || deliveries.Load() != 1 {
+		t.Fatalf("uploads=%d deliveries=%d", received.Load(), deliveries.Load())
 	}
 }

@@ -102,18 +102,20 @@ malformed, or inapplicable advertisements skip the backend.
 response bodies or credentials. There is no periodic refresh or effect guarantee;
 per-request capability grants remain authoritative.
 
-## Upload authorization
+## Discovered uploads
 
-Server configuration is untrusted. An advertised upload destination or credential
-reference does not authorize access to local credentials. Upload-bearing defaults
-are skipped unless `Options.AuthorizeConfiguration` explicitly approves them.
-This callback receives the bounded initialization context and a detached
-configuration snapshot. Inspect upload destinations and authentication bindings
-against local policy before returning true. Returning false or an error skips the
-backend; mutating the snapshot cannot change its subscriptions.
+Discovered upload settings are admitted like any other discovered subscription
+setting, with no separate approval. A discovered upload is a modality of the
+content the backend already receives, so the backend's configured headers apply to
+it exactly as they apply to other uploads from that backend.
 
-For configurations without upload settings, this callback is optional. When
-supplied, it runs for those configurations too. Existing per-item content
-authorization and independent upload authentication still apply after admission;
-configuration approval does not bypass them. Explicit client subscriptions retain
-their existing behavior and do not invoke this discovery callback.
+Server configuration is untrusted and cannot authorize access to local credentials.
+If any advertised subscription's upload `auth` names `tokenEnv`, `tokenRef`, or
+`clientSecretRef`, the entire backend is skipped without resolving the reference;
+the reference is not removed to admit the remainder. `Options.TransportDiagnostic`
+receives `client.ErrConfigurationLocalSecretReference`, which wraps
+`client.ErrConfigurationSkipped`.
+
+Existing per-item content authorization and independent upload authentication
+still apply after admission. Explicit client subscriptions retain their existing
+behavior, including local secret references, and do not invoke discovery.

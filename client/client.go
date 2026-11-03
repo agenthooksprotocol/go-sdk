@@ -31,11 +31,7 @@ type Options struct {
 	InitializationContext context.Context
 	// ConfigurationTimeout bounds each discovery exchange; zero uses five seconds.
 	ConfigurationTimeout time.Duration
-	// AuthorizeConfiguration approves discovered defaults with upload destinations or
-	// credential references. Without it, upload-bearing advertisements are skipped.
-	// It receives a detached snapshot; mutations do not change admitted defaults.
-	AuthorizeConfiguration func(context.Context, *ahp.Configuration) (bool, error)
-	Source                 string
+	Source               string
 	// Harness identifies the emitting runtime on every event.
 	Harness ahp.Harness
 	// Events explicitly advertises boundary modes and capabilities.
@@ -248,7 +244,7 @@ func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
 		tr, err := newAuthenticatedBackendTransport(backend, opts.EventClient, opts.AuthProvider)
 		if err != nil {
 			if !explicit {
-				c.configurationSkipped(id)
+				c.configurationSkipped(id, ErrConfigurationSkipped)
 				continue
 			}
 			c.Close()
@@ -273,9 +269,9 @@ func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
 				_ = c.Close()
 				return nil, opts.InitializationContext.Err()
 			}
-			if err != nil || len(subscriptions) == 0 {
+			if err != nil {
 				_ = tr.Close()
-				c.configurationSkipped(id)
+				c.configurationSkipped(id, err)
 				continue
 			}
 			b.subscriptions = subscriptions
