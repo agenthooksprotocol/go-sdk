@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	ahp "github.com/agenthooksprotocol/go-sdk"
 	"github.com/agenthooksprotocol/go-sdk/internal/canonical"
@@ -14,9 +15,13 @@ import (
 // was skipped. It contains no endpoint, credentials, or backend response data.
 var ErrConfigurationSkipped = errors.New("backend configuration unavailable or inapplicable")
 
-func (c *Hooks) configurationSkipped(id string) {
+// ErrConfigurationLocalSecretReference wraps ErrConfigurationSkipped for discovered
+// upload auth naming a local secret reference. It contains no reference name.
+var ErrConfigurationLocalSecretReference = fmt.Errorf("%w: discovered upload names a local secret reference", ErrConfigurationSkipped)
+
+func (c *Hooks) configurationSkipped(id string, reason error) {
 	if c.opts.TransportDiagnostic != nil {
-		c.opts.TransportDiagnostic(id, ErrConfigurationSkipped)
+		c.opts.TransportDiagnostic(id, reason)
 	}
 }
 
@@ -54,26 +59,11 @@ func (c *Hooks) discoverConfiguration(transport backendTransport) ([]map[string]
 		return nil, ErrConfigurationSkipped
 	}
 	configuration := sdkObj(result["configuration"])
-	needsAuthorization := false
+	// Checked before selectors are resolved: a reference on any subscription skips
+	// the whole backend, including one this client would otherwise drop as unmatched.
 	for _, raw := range sdkArray(configuration["subscriptions"]) {
-		if _, present := sdkObj(raw)["upload"]; present {
-			needsAuthorization = true
-		}
-	}
-	if needsAuthorization || c.opts.AuthorizeConfiguration != nil {
-		if c.opts.AuthorizeConfiguration == nil {
-			return nil, ErrConfigurationSkipped
-		}
-		var snapshot ahp.Configuration
-		if json.Unmarshal(sdkJSON(configuration), &snapshot) != nil {
-			return nil, ErrConfigurationSkipped
-		}
-		allowed, err := c.opts.AuthorizeConfiguration(ctx, &snapshot)
-		if c.opts.InitializationContext.Err() != nil {
-			return nil, c.opts.InitializationContext.Err()
-		}
-		if err != nil || !allowed || ctx.Err() != nil {
-			return nil, ErrConfigurationSkipped
+		if uploadNamesLocalSecret(sdkObj(raw)) {
+			return nil, ErrConfigurationLocalSecretReference
 		}
 	}
 	var resolved []map[string]any
@@ -104,5 +94,20 @@ func (c *Hooks) discoverConfiguration(transport backendTransport) ([]map[string]
 		}
 		resolved = append(resolved, sub)
 	}
+	if len(resolved) == 0 {
+		return nil, ErrConfigurationSkipped
+	}
 	return resolved, nil
+}
+
+// uploadNamesLocalSecret reports whether a subscription's upload auth would make
+// the client read a value the backend has never held. The value is not inspected.
+func uploadNamesLocalSecret(sub map[string]any) bool {
+	binding := sdkObj(sdkObj(sub["upload"])["auth"])
+	for _, key := range []string{"tokenEnv", "tokenRef", "clientSecretRef"} {
+		if _, present := binding[key]; present {
+			return true
+		}
+	}
+	return false
 }
