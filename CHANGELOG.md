@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.11.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.10.1...v0.11.0) (2026-11-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **client:** remove Options.AuthorizeConfiguration.
+
+### Features
+
+* **client:** admit discovered uploads without approval ([#47](https://github.com/agenthooksprotocol/go-sdk/issues/47)) ([7e28d1c](https://github.com/agenthooksprotocol/go-sdk/commit/7e28d1c247c40cfbfb233c08bca0be6a5970727e))
+
 ## [0.10.1](https://github.com/agenthooksprotocol/go-sdk/compare/v0.10.0...v0.10.1) (2026-10-24)
 
 
