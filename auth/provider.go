@@ -177,7 +177,7 @@ func DoWithHeaders(client *http.Client, req *http.Request, request Request, prov
 		var err error
 		credential, err = provider.Credential(req.Context(), copyRequest(request))
 		if err != nil {
-			return reject(redactError(ErrCredential, err))
+			return reject(redactProviderError(err))
 		}
 	}
 	copied := http.Client{}
@@ -227,7 +227,7 @@ func DoWithHeaders(client *http.Client, req *http.Request, request Request, prov
 		next, err := provider.Challenge(req.Context(), copyRequest(request), Challenge{StatusCode: response.StatusCode, Header: response.Header.Clone(), Attempt: credential.Attempt})
 		if err != nil {
 			response.Body.Close()
-			return nil, redactError(ErrCredential, err)
+			return nil, redactProviderError(err)
 		}
 		if err = req.Context().Err(); err != nil {
 			response.Body.Close()

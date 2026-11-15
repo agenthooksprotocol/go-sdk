@@ -643,6 +643,58 @@ uploads are not replayed. Redirects are never followed. Separately scoped
 deployment-specific TLS/workload mechanisms stay transport-owned. Borrowed HTTP
 clients are never closed.
 
+#### Compose bearer and host OAuth providers
+
+Routing is additive; existing custom providers still receive their original
+`auth.Request`. To support references alongside host-managed OAuth, pass this
+provider through `client.Options.AuthProvider`:
+
+```go
+provider := auth.Route(auth.Routes{
+    Bearer: auth.NewBearerProvider(auth.BearerOptions{
+        ResolveSecret: resolveSecret, // func(context.Context, string) (string, error)
+    }),
+    OAuth: hostOAuth, // your auth.Provider, including trust and consent policy
+})
+hooks, err := client.New(registration, client.Options{
+    // ... other registration/event options ...
+    AuthProvider: provider,
+})
+```
+
+The bearer provider resolves exactly one `tokenEnv` or `tokenRef` via the existing
+secret helper. Missing references fail closed; installing an OAuth route never
+disables bearer or turns a bearer failure into OAuth discovery. Without a supplied
+bearer route, `auth.Route` keeps the environment-only default. The OAuth route
+also receives actual 401 challenges for initially unbound endpoints; absent a
+configured OAuth route, this returns `unsupported_binding`, not an automatic
+login. A rejected attempt returns to its issuing provider with the original opaque
+identity and exact backend/destination/purpose/binding, never another route.
+
+Use `auth.ProviderFuncs` for small callback-based providers. Use
+`auth.NormalizeTarget(request)` to obtain validated `Kind`, `Bearer` and `OAuth`
+accessors; `Request()` retains unknown wire fields and returns a detached copy.
+An OAuth resource is not the event/upload destination. Normalization validates
+shape and HTTPS issuer/resource URLs, **not** issuer trust, permissions or network
+policy. The router creates no credential cache, shared registry or worker.
+
+Registration-aware failures support `errors.As(err, &authError)` for `*auth.Error`
+and its stable `Code`; `errors.Is` still matches the existing auth sentinels and
+native cancellation/deadline identities. Provider messages, raw causes, callback
+URLs and response bodies are discarded. Low-level scoped token transports retain
+their existing sentinel-only errors. Operational codes distinguish invalid
+configuration, unsupported binding, unavailable credentials, interaction required,
+access denied, rejected refresh, failed discovery, untrusted destination and
+provider failure; they are SDK outcomes, not protocol wire fields.
+
+**Managed OAuth is not yet available.** Both PKCE and client-credentials acquisition
+remain host-owned. [The OAuth compatibility spike](auth/oauth/README.md) verifies
+`golang.org/x/oauth2` grant APIs and documents the security gate, including its
+missing resource-bound refresh option. It does not implement discovery, login,
+persistence or an `auth.Provider`. The dependency is test-only but, as a Go
+subpackage dependency, appears in this module's `go.mod`; production auth/client
+packages do not import it.
+
 Content selection does not grant access. `client.ContentOptions` supplies
 receiver-scoped disclosure decisions and host-owned content resolution.
 `ContentAuthorization.Subscription` is the generated `ahp.BackendSubscriptionsItem`
