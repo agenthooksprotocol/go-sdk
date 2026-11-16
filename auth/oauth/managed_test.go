@@ -167,6 +167,12 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if mode == "non-oauth" {
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(503)
+			fmt.Fprint(w, "upstream unavailable")
+			return
+		}
 		if mode == "temporary" {
 			w.WriteHeader(503)
 			fmt.Fprint(w, `{"error":"temporarily_unavailable","error_description":"secret-upstream-body"}`)
@@ -190,6 +196,23 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 			scopes = "events admin"
 		}
 		response := map[string]any{"access_token": "access-token", "refresh_token": "refresh-token", "token_type": "Bearer", "expires_in": 3600, "scope": scopes}
+		if mode == "refresh-unknown-expiry" {
+			delete(response, "expires_in")
+			response["refresh_token"] = "rotated-refresh"
+		}
+		if mode == "refresh-omitted-scope" {
+			delete(response, "scope")
+			response["refresh_token"] = "rotated-refresh"
+		}
+		if mode == "refresh-broadened-scope" {
+			response["scope"] = "events admin"
+			response["refresh_token"] = "rotated-refresh"
+		}
+		if mode == "invalid-client" {
+			w.WriteHeader(400)
+			fmt.Fprint(w, `{"error":"invalid_client"}`)
+			return
+		}
 		if mode == "missing-type" {
 			delete(response, "token_type")
 		}
@@ -444,11 +467,11 @@ func TestManagedCancellationLeavesAmbiguityAndReleasesCoordination(t *testing.T)
 	}
 	f.mode.Store("ok")
 	repair, err := p.Prepare(budget(t), r)
-	if err != nil || repair.Login == nil {
-		t.Fatal("coordination not released or consent unavailable")
+	if err != nil || repair.Credential == nil || repair.Login != nil {
+		t.Fatal("coordination not released or refresh retry unavailable")
 	}
-	if f.refreshCalls.Load() != 1 {
-		t.Fatal("ambiguous refresh retried")
+	if f.refreshCalls.Load() != 2 {
+		t.Fatal("ambiguous refresh was not retryable")
 	}
 }
 func TestManagedFailedRefreshCommitDoesNotReuseOldGeneration(t *testing.T) {
@@ -465,8 +488,8 @@ func TestManagedFailedRefreshCommitDoesNotReuseOldGeneration(t *testing.T) {
 		t.Fatal("failed commit lost ambiguity marker")
 	}
 	repair, err := p.Prepare(budget(t), r)
-	if err != nil || repair.Login == nil {
-		t.Fatal("failed commit not repairable")
+	if err != nil || repair.Credential == nil || repair.Login != nil {
+		t.Fatal("failed commit not retryable")
 	}
 }
 func TestManagedCallbackBindingAndNoImplicitConsent(t *testing.T) {
@@ -499,6 +522,10 @@ func TestManagedCallbackBindingAndNoImplicitConsent(t *testing.T) {
 			assertCode(t, err, auth.CodeAccessDenied)
 			if f.tokenCalls.Load() != 0 {
 				t.Fatal("invalid callback reached exchange")
+			}
+			valid := url.Values{"state": {u.Query().Get("state")}, "code": {"code"}}
+			if _, err := p.Complete(ctx, prepared.Login, "https://client.example/callback?"+valid.Encode()); err != nil {
+				t.Fatalf("stray callback consumed pending login: %v", err)
 			}
 		})
 	}
@@ -550,8 +577,8 @@ func TestManagedChallengeDiscoveryAndForeignAttempt(t *testing.T) {
 	ctx := budget(t)
 	unbound := r
 	unbound.Binding = nil
-	initial, err := p.Credential(ctx, unbound)
-	if err != nil || initial.Token != "" {
+	initial, err := p.PreemptiveCredential(ctx, unbound)
+	if err != nil || initial != nil {
 		t.Fatal("unbound endpoint did not start anonymously")
 	}
 	token, err := p.Challenge(ctx, unbound, auth.Challenge{StatusCode: 401, Header: http.Header{"Www-Authenticate": {`Bearer resource_metadata="` + f.server.URL + `/custom-resource"`}}})

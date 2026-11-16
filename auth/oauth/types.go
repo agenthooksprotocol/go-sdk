@@ -21,12 +21,18 @@ const (
 )
 
 // ClientConfig is selected by local policy, never by an advertisement alone.
-// Scopes are the locally permitted AND requested scopes. ClientSecret is a
+// Scopes are requested scopes. AllowedScopes defaults to Scopes; RequiredScopes
+// are explicit operation requirements. ClientSecret is a
 // runtime secret, not registration data. Its formatting is always redacted.
 type ClientConfig struct {
 	Issuer, Resource, ClientID, Flow string
 	Scopes                           []string
-	ClientSecret, RedirectURI        string
+	// A nil AllowedScopes defaults to Scopes; an empty non-nil ceiling permits none.
+	AllowedScopes, RequiredScopes []string
+	// GrantPartition opts independently approved bindings into shared consent.
+	// Empty keeps each destination/backend/purpose binding isolated.
+	GrantPartition            string
+	ClientSecret, RedirectURI string
 	// TokenAuthMethod is optional: discovery selects a supported method when empty.
 	TokenAuthMethod string
 }
@@ -36,12 +42,21 @@ func (ClientConfig) GoString() string { return "oauth.ClientConfig{redacted}" }
 
 // Record is an opaque-to-the-SDK host-persisted credential generation. Hosts
 // must return detached values and atomically persist complete copies. A refresh
-// with an unknown outcome retains the old secrets but is not retried blindly.
+// with an unknown outcome retains old secrets for host-controlled retry.
 type Record struct {
-	AccessToken, RefreshToken, Generation       string
+	AccessToken, RefreshToken, Generation string
+	// Zero ExpiresAt means unknown expiry, not an expired credential.
 	ExpiresAt                                   time.Time
 	Scopes                                      []string
 	Rejected, RefreshRejected, RefreshUncertain bool
+	Binding                                     *BindingMetadata
+}
+
+// BindingMetadata is secret-free principal and discovery state at a binding key.
+type BindingMetadata struct {
+	Config         ClientConfig
+	IssuerMetadata metadata
+	RequiredScopes []string
 }
 
 func (Record) String() string   { return "oauth.Record{redacted}" }

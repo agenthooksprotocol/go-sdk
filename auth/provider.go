@@ -3,19 +3,19 @@ package auth
 import (
 	"context"
 	"encoding/json"
-	"net"
 	"net/http"
-	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/agenthooksprotocol/go-sdk/internal/authutil"
 )
 
 // Request is registration-owned authorization context. Binding is the complete
 // selected endpoint binding, including extension fields, never the event binding
 // for an upload. Each callback receives a detached copy it may retain or modify.
-// An absent binding starts anonymously. Only an actual 401 is handed to an
-// explicitly configured provider, whose host trust policy controls discovery.
+// An absent binding uses optional cached credentials, otherwise starts anonymously.
+// Only an actual challenge is handed to an explicitly configured provider, whose
+// host trust policy controls discovery.
 type Request struct {
 	Binding     json.RawMessage
 	BackendID   string
@@ -34,8 +34,9 @@ type Credential struct {
 	Attempt any
 }
 
-// Challenge describes an actual 401 response. Header is a detached copy. Neither
-// the request Authorization header nor the response body is passed to callbacks.
+// Challenge describes an actual 401 or Bearer insufficient_scope 403 response.
+// Header is a detached copy. Neither the request Authorization header nor the
+// response body is passed to callbacks.
 type Challenge struct {
 	StatusCode int
 	Header     http.Header
@@ -51,6 +52,15 @@ type Challenge struct {
 type Provider interface {
 	Credential(context.Context, Request) (Credential, error)
 	Challenge(context.Context, Request, Challenge) (*Credential, error)
+}
+
+// PreemptiveProvider optionally supplies previously authorized credentials for an
+// absent binding. A nil credential is a cache miss, not an acquisition failure.
+// Lookup must not initiate discovery, acquisition, or interactive login. A
+// non-nil success must contain a valid bearer, just like Provider.Credential.
+// Implementations must honor cancellation and support concurrent calls.
+type PreemptiveProvider interface {
+	PreemptiveCredential(context.Context, Request) (*Credential, error)
 }
 
 // EnvironmentProvider is the non-interactive default for bearer + tokenEnv.
@@ -79,16 +89,14 @@ func (EnvironmentProvider) Challenge(context.Context, Request, Challenge) (*Cred
 	return nil, nil
 }
 
-var bearerPattern = regexp.MustCompile(`^[A-Za-z0-9._~+/-]+=*$`)
-
-func validBearer(token string) bool { return bearerPattern.MatchString(token) }
+func validBearer(token string) bool { return authutil.ValidBearer(token) }
 func copyRequest(r Request) Request { r.Binding = append(json.RawMessage(nil), r.Binding...); return r }
 
 // Do applies registration-aware credentials to one independently authorized POST.
 // retrySafe must be false for arbitrary effectful operations (including uploads).
-// With true, a 401 may be retried once using the exact GetBody representation and
+// With true, a 401 or Bearer insufficient_scope 403 may be retried once using the exact GetBody representation and
 // request identity. Other statuses and network failures are never retried. A final
-// 401 is also reported to the provider, but cannot trigger another retry. Redirects
+// challenge is also reported to the provider, but cannot trigger another retry. Redirects
 // are disabled; the caller owns response validation and closing its body.
 // The supplied client's transport must not follow redirects itself or inject
 // credentials for another scope. No transport is closed or mutated by Do.
@@ -137,15 +145,8 @@ func DoWithHeaders(client *http.Client, req *http.Request, request Request, prov
 		return reject(ErrScope)
 	}
 	// Permit HTTP only at local endpoints, consistent with event transport policy.
-	endpoint, err := url.Parse(request.Destination)
-	if err != nil || endpoint.Hostname() == "" || endpoint.Opaque != "" || strings.Contains(request.Destination, "#") {
+	if !authutil.ValidURL(request.Destination, true) {
 		return reject(ErrScope)
-	}
-	if endpoint.Scheme != "https" {
-		ip := net.ParseIP(endpoint.Hostname())
-		if endpoint.Scheme != "http" || !(endpoint.Hostname() == "localhost" || (ip != nil && ip.IsLoopback())) {
-			return reject(ErrScope)
-		}
 	}
 	if err := req.Context().Err(); err != nil {
 		return reject(redactError(ErrCredential, err))
@@ -178,6 +179,14 @@ func DoWithHeaders(client *http.Client, req *http.Request, request Request, prov
 		credential, err = provider.Credential(req.Context(), copyRequest(request))
 		if err != nil {
 			return reject(redactProviderError(err))
+		}
+	} else if lookup, ok := provider.(PreemptiveProvider); ok {
+		cached, err := lookup.PreemptiveCredential(req.Context(), copyRequest(request))
+		if err != nil {
+			return reject(redactProviderError(err))
+		}
+		if cached != nil {
+			credential, authenticated = *cached, true
 		}
 	}
 	copied := http.Client{}
@@ -221,7 +230,7 @@ func DoWithHeaders(client *http.Client, req *http.Request, request Request, prov
 			}
 			return nil, redactError(ErrTransport, err)
 		}
-		if provider == nil || response.StatusCode != http.StatusUnauthorized {
+		if provider == nil || !(response.StatusCode == http.StatusUnauthorized || insufficientScope(response)) {
 			return response, nil
 		}
 		next, err := provider.Challenge(req.Context(), copyRequest(request), Challenge{StatusCode: response.StatusCode, Header: response.Header.Clone(), Attempt: credential.Attempt})

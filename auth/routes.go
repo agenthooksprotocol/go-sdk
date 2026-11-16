@@ -6,10 +6,12 @@ import (
 )
 
 // ProviderFuncs adapts host callbacks to Provider. A missing CredentialFunc is
-// unsupported, while a missing ChallengeFunc declines recovery.
+// unsupported. Missing ChallengeFunc and PreemptiveCredentialFunc callbacks
+// decline recovery and cached credentials, respectively.
 type ProviderFuncs struct {
-	CredentialFunc func(context.Context, Request) (Credential, error)
-	ChallengeFunc  func(context.Context, Request, Challenge) (*Credential, error)
+	CredentialFunc           func(context.Context, Request) (Credential, error)
+	PreemptiveCredentialFunc func(context.Context, Request) (*Credential, error)
+	ChallengeFunc            func(context.Context, Request, Challenge) (*Credential, error)
 }
 
 func (p ProviderFuncs) Credential(ctx context.Context, r Request) (Credential, error) {
@@ -21,6 +23,16 @@ func (p ProviderFuncs) Credential(ctx context.Context, r Request) (Credential, e
 	}
 	return p.CredentialFunc(ctx, copyRequest(r))
 }
+func (p ProviderFuncs) PreemptiveCredential(ctx context.Context, r Request) (*Credential, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, redactError(ErrCredential, err)
+	}
+	if p.PreemptiveCredentialFunc == nil {
+		return nil, nil
+	}
+	return p.PreemptiveCredentialFunc(ctx, copyRequest(r))
+}
+
 func (p ProviderFuncs) Challenge(ctx context.Context, r Request, c Challenge) (*Credential, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, redactError(ErrCredential, err)
@@ -64,8 +76,8 @@ func (bearerProvider) Challenge(context.Context, Request, Challenge) (*Credentia
 }
 
 // Routes composes providers by binding, never by success/failure fallback.
-// Bearer defaults to EnvironmentProvider. OAuth also receives actual 401s for
-// unbound targets; it must enforce host discovery/trust policy itself.
+// Bearer defaults to EnvironmentProvider. OAuth also receives cached lookup
+// and actual challenges for unbound targets; it must enforce host trust policy.
 type Routes struct{ Bearer, OAuth Provider }
 type router struct{ routes Routes }
 type routedAttempt struct {
@@ -120,6 +132,38 @@ func (p *router) Credential(ctx context.Context, r Request) (Credential, error) 
 	}
 	return p.wrap(provider, r, c), nil
 }
+func (p *router) PreemptiveCredential(ctx context.Context, r Request) (*Credential, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, redactError(ErrCredential, err)
+	}
+	if len(r.Binding) != 0 {
+		return nil, &Error{Code: CodeInvalidConfiguration}
+	}
+	if _, err := NormalizeTarget(r); err != nil {
+		return nil, err
+	}
+	provider := p.routes.OAuth
+	lookup, ok := provider.(PreemptiveProvider)
+	if !ok {
+		return nil, nil
+	}
+	cached, err := lookup.PreemptiveCredential(ctx, copyRequest(r))
+	if err != nil {
+		return nil, redactProviderError(err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, redactError(ErrCredential, err)
+	}
+	if cached == nil {
+		return nil, nil
+	}
+	if cached.Type != "bearer" || !validBearer(cached.Token) {
+		return nil, &Error{Code: CodeCredentialUnavailable}
+	}
+	wrapped := p.wrap(provider, r, *cached)
+	return &wrapped, nil
+}
+
 func (p *router) Challenge(ctx context.Context, r Request, c Challenge) (*Credential, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, redactError(ErrCredential, err)

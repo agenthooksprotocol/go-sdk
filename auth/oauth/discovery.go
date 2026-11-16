@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/agenthooksprotocol/go-sdk/auth"
+	"github.com/agenthooksprotocol/go-sdk/internal/authutil"
 )
 
 type metadata struct {
@@ -94,7 +95,6 @@ func (p *Provider) resolve(ctx context.Context, request auth.Request, challenge 
 			return ClientConfig{}, metadata{}, fail(auth.CodeDiscoveryFailed)
 		}
 	}
-	policy := func(ctx context.Context, raw string) error { return p.check(ctx, raw, Metadata) }
 	issuers := append([]string(nil), resource.AuthorizationServers...)
 	if explicit {
 		issuers = []string{preset.Issuer}
@@ -103,7 +103,7 @@ func (p *Provider) resolve(ctx context.Context, request auth.Request, challenge 
 	if err != nil {
 		return ClientConfig{}, metadata{}, safe(ctx, err, auth.CodeUntrustedDestination)
 	}
-	config.Scopes = append([]string(nil), config.Scopes...)
+	config = cloneConfig(config)
 	if !validConfig(config) || config.Resource != resource.Resource || !contains(issuers, config.Issuer) {
 		return ClientConfig{}, metadata{}, fail(auth.CodeInvalidConfiguration)
 	}
@@ -114,14 +114,21 @@ func (p *Provider) resolve(ctx context.Context, request auth.Request, challenge 
 	if err != nil {
 		return ClientConfig{}, metadata{}, fail(auth.CodeDiscoveryFailed)
 	}
-	if required != "" && !scopeList.MatchString(required) {
+	if required != "" && !authutil.ValidScopeList(required) {
 		return ClientConfig{}, metadata{}, fail(auth.CodeAccessDenied)
 	}
 	for _, scope := range strings.Fields(required) {
-		if !contains(config.Scopes, scope) {
+		if !contains(allowedScopes(config), scope) {
 			return ClientConfig{}, metadata{}, fail(auth.CodeAccessDenied)
 		}
 	}
+	config.RequiredScopes = sortedUnique(append(config.RequiredScopes, strings.Fields(required)...))
+	return p.resolveMetadata(ctx, config)
+}
+
+// resolveMetadata refreshes issuer capabilities without revisiting trusted PRM.
+func (p *Provider) resolveMetadata(ctx context.Context, config ClientConfig) (ClientConfig, metadata, error) {
+	policy := func(ctx context.Context, raw string) error { return p.check(ctx, raw, Metadata) }
 	locations := discoveryLocations(config.Issuer, "oauth-authorization-server", false)[:1]
 	locations = appendUniqueDiscovery(locations, discoveryLocations(config.Issuer, "openid-configuration", false)[0])
 	locations = appendUniqueDiscovery(locations, discoveryLocations(config.Issuer, "openid-configuration", true)[0])
@@ -191,10 +198,7 @@ func resourceCovers(resource, endpoint string) bool {
 	return target.EscapedPath() == path || strings.HasPrefix(target.EscapedPath(), path+"/")
 }
 
-func discoveryHTTPS(raw string) bool {
-	u, err := url.Parse(raw)
-	return err == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil && u.Opaque == "" && !strings.Contains(raw, "#")
-}
+func discoveryHTTPS(raw string) bool { return authutil.ValidURL(raw, false) }
 
 func discoveryIssuer(raw string) bool {
 	if !discoveryHTTPS(raw) {
@@ -275,88 +279,23 @@ func resourceMetadataHint(header string) (string, error) {
 	return bearerParameter(header, "resource_metadata")
 }
 func bearerParameter(header, parameter string) (string, error) {
-	if len(header) > 65536 {
+	challenges, ok := authutil.ParseWWWAuthenticate(header)
+	if !ok {
 		return "", errDiscovery
 	}
-	i, scheme, hint := 0, "", ""
-	seen := false
-	for i < len(header) {
-		for i < len(header) && (header[i] == ' ' || header[i] == '\t' || header[i] == ',' || header[i] == '\r' || header[i] == '\n') {
-			i++
-		}
-		if i == len(header) {
-			break
-		}
-		start := i
-		for i < len(header) && discoveryToken(header[i]) {
-			i++
-		}
-		if i == start {
-			return "", errDiscovery
-		}
-		token := header[start:i]
-		for i < len(header) && (header[i] == ' ' || header[i] == '\t') {
-			i++
-		}
-		if i == len(header) || header[i] != '=' {
-			scheme = token
+	value, seen := "", false
+	for _, challenge := range challenges {
+		if !strings.EqualFold(challenge.Scheme, "Bearer") {
 			continue
 		}
-		i++
-		for i < len(header) && (header[i] == ' ' || header[i] == '\t') {
-			i++
+		candidate, present := challenge.Params[parameter]
+		if !present {
+			continue
 		}
-		value := ""
-		if i < len(header) && header[i] == '"' {
-			i++
-			var b strings.Builder
-			closed := false
-			for i < len(header) {
-				ch := header[i]
-				i++
-				if ch == '"' {
-					closed = true
-					break
-				}
-				if ch == '\\' {
-					if i == len(header) {
-						return "", errDiscovery
-					}
-					ch = header[i]
-					i++
-				}
-				if ch < 32 || ch == 127 {
-					return "", errDiscovery
-				}
-				b.WriteByte(ch)
-			}
-			if !closed {
-				return "", errDiscovery
-			}
-			value = b.String()
-		} else {
-			start = i
-			for i < len(header) && discoveryToken(header[i]) {
-				i++
-			}
-			if i == start {
-				return "", errDiscovery
-			}
-			value = header[start:i]
-		}
-		if i < len(header) && header[i] != ',' && header[i] != ' ' && header[i] != '\t' && header[i] != '\r' && header[i] != '\n' {
+		if seen || (parameter == "resource_metadata" && !discoveryHTTPS(candidate)) || (parameter == "scope" && candidate == "") {
 			return "", errDiscovery
 		}
-		if strings.EqualFold(scheme, "Bearer") && strings.EqualFold(token, parameter) {
-			if seen || (parameter == "resource_metadata" && !discoveryHTTPS(value)) || (parameter == "scope" && value == "") {
-				return "", errDiscovery
-			}
-			hint, seen = value, true
-		}
+		value, seen = candidate, true
 	}
-	return hint, nil
-}
-
-func discoveryToken(c byte) bool {
-	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("!#$%&'*+-.^_`|~", rune(c))
+	return value, nil
 }

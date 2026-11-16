@@ -17,6 +17,30 @@ const (
 	CodeProviderFailed        Code = "provider_failed"
 )
 
+// Recovery describes the host action appropriate for an auth failure.
+type Recovery string
+
+const (
+	RecoveryConfigure Recovery = "configure"
+	RecoveryLogin     Recovery = "login"
+	RecoveryRetry     Recovery = "retry"
+	RecoveryNone      Recovery = "none"
+)
+
+// Recovery returns a secret-free, stable recovery action for the error code.
+func (e *Error) Recovery() Recovery {
+	switch safeCode(e.Code) {
+	case CodeInvalidConfiguration, CodeUnsupportedBinding, CodeCredentialUnavailable, CodeUntrustedDestination:
+		return RecoveryConfigure
+	case CodeInteractionRequired, CodeRefreshRejected:
+		return RecoveryLogin
+	case CodeAccessDenied:
+		return RecoveryNone
+	default:
+		return RecoveryRetry
+	}
+}
+
 // Error exposes only an allowlisted code. It intentionally has no raw cause,
 // endpoint, response body, callback URL or credential fields. Use errors.As to
 // inspect Code and errors.Is for the existing auth sentinels. Cancellation is

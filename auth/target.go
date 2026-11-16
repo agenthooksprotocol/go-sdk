@@ -2,9 +2,8 @@ package auth
 
 import (
 	"encoding/json"
-	"net"
-	"net/url"
-	"strings"
+
+	"github.com/agenthooksprotocol/go-sdk/internal/authutil"
 )
 
 // BindingKind distinguishes absent, bearer and OAuth bindings without changing
@@ -52,17 +51,7 @@ func (t Target) OAuth() (OAuthBinding, bool) {
 	return b, t.kind == BindingOAuth
 }
 
-func validTargetURL(raw string, local bool) bool {
-	u, err := url.Parse(raw)
-	if err != nil || u.Hostname() == "" || u.User != nil || u.Opaque != "" || strings.Contains(raw, "#") {
-		return false
-	}
-	if u.Scheme == "https" {
-		return true
-	}
-	ip := net.ParseIP(u.Hostname())
-	return local && u.Scheme == "http" && (u.Hostname() == "localhost" || (ip != nil && ip.IsLoopback()))
-}
+func validTargetURL(raw string, local bool) bool { return authutil.ValidURL(raw, local) }
 
 // NormalizeTarget validates handwritten binding variants, preserving all raw
 // extension fields. Local HTTP is permitted only for literal loopback/localhost
@@ -100,7 +89,7 @@ func NormalizeTarget(request Request) (Target, error) {
 			return Target{}, &Error{Code: CodeUnsupportedBinding}
 		}
 		for _, scope := range b.Scopes {
-			if scope == "" || strings.IndexFunc(scope, func(r rune) bool { return r < 0x21 || r > 0x7e || r == '"' || r == '\\' }) >= 0 {
+			if !authutil.ValidScope(scope) {
 				return Target{}, invalid
 			}
 		}
