@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"testing"
@@ -83,5 +84,46 @@ func TestManagedHostErrorCodeRedaction(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// Host infrastructure often wraps classified failures. Copying their safe code
+// must neither preserve a secret-bearing chain nor erase a recognized code.
+func TestManagedWrappedHostCodeAllowlist(t *testing.T) {
+	const secret = "private-host-detail"
+	codes := []auth.Code{
+		auth.CodeInvalidConfiguration, auth.CodeUnsupportedBinding,
+		auth.CodeCredentialUnavailable, auth.CodeInteractionRequired,
+		auth.CodeAccessDenied, auth.CodeRefreshRejected, auth.CodeDiscoveryFailed,
+		auth.CodeUntrustedDestination, auth.CodeProviderFailed, auth.Code(secret),
+	}
+	for _, code := range codes {
+		t.Run(string(code), func(t *testing.T) {
+			_, p, request := setup(t, "client_credentials")
+			p.options.SelectClient = func(context.Context, auth.Request, []string, string) (ClientConfig, error) {
+				return ClientConfig{}, fmt.Errorf("%s: %w", secret, &auth.Error{Code: code})
+			}
+			_, err := p.Prepare(budget(t), request)
+			var classified *auth.Error
+			if !errors.As(err, &classified) {
+				t.Fatalf("missing classified error: %v", err)
+			}
+			expected := code
+			if code == auth.Code(secret) {
+				expected = auth.CodeProviderFailed
+			}
+			if classified.Code != expected {
+				t.Fatalf("exported code = %q; want %q", classified.Code, expected)
+			}
+			for _, exposed := range []any{err, classified} {
+				encoded, marshalErr := json.Marshal(exposed)
+				if marshalErr != nil {
+					t.Fatal(marshalErr)
+				}
+				if strings.Contains(string(encoded), secret) || !strings.Contains(string(encoded), string(expected)) {
+					t.Fatalf("unsafe or missing serialized classification: %s", encoded)
+				}
+			}
+		})
 	}
 }
