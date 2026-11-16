@@ -1,6 +1,9 @@
 package auth
 
-import "errors"
+import (
+	"encoding/json"
+	"errors"
+)
 
 // Code is a stable, secret-free operational classification, not a wire value.
 type Code string
@@ -41,11 +44,18 @@ func (e *Error) Recovery() Recovery {
 	}
 }
 
-// Error exposes only an allowlisted code. It intentionally has no raw cause,
+// SDK-returned Error carries only an allowlisted code. Formatting, recovery and
+// JSON also allowlist Code for directly host-constructed values. It has no raw cause,
 // endpoint, response body, callback URL or credential fields. Use errors.As to
 // inspect Code and errors.Is for the existing auth sentinels. Cancellation is
 // joined separately, without retaining the provider's error chain.
 type Error struct{ Code Code }
+
+// MarshalJSON preserves the Code field name while redacting unknown codes.
+// A value receiver protects both Error values and pointers supplied by hosts.
+func (e Error) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct{ Code Code }{Code: safeCode(e.Code)})
+}
 
 func safeCode(code Code) Code {
 	switch code {
