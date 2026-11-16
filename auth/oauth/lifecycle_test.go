@@ -237,6 +237,33 @@ func TestLifecycleRefreshUsesPreviousGrant(t *testing.T) {
 				if !record.Rejected || record.AccessToken != "" {
 					t.Fatal("broadened refresh grant remained dispatchable")
 				}
+				recreated, err := New(p.options)
+				if err != nil {
+					t.Fatal(err)
+				}
+				request, err := http.NewRequestWithContext(budget(t), http.MethodPost, r.Destination, strings.NewReader(`{}`))
+				if err != nil {
+					t.Fatal(err)
+				}
+				response, err := auth.Do(f.server.Client(), request, r, auth.Route(auth.Routes{OAuth: recreated}), false)
+				assertCode(t, err, auth.CodeAccessDenied)
+				if response != nil {
+					response.Body.Close()
+					t.Fatal("quarantined grant produced a delivery response")
+				}
+				if f.eventCalls.Load() != 0 {
+					t.Fatal("recreated provider dispatched unauthorized access")
+				}
+				retained, err := f.store.Load(budget(t), first.Attempt.(attempted).key)
+				if err != nil || retained == nil || !retained.Rejected || retained.AccessToken != "" || retained.RefreshToken != "rotated-refresh" {
+					t.Fatal("recreated provider lost refresh quarantine")
+				}
+				f.grantsMu.Lock()
+				latest := f.grants[len(f.grants)-1]
+				f.grantsMu.Unlock()
+				if latest.Get("grant_type") != "refresh_token" || latest.Get("refresh_token") != "rotated-refresh" {
+					t.Fatal("recreated provider did not retain rotated refresh for repair")
+				}
 			}
 		})
 	}

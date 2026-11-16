@@ -25,6 +25,7 @@ proof of runtime behavior. Its IDs map to these native tests:
 | `invalid-callback-does-not-consume` | `TestManagedCallbackBindingAndNoImplicitConsent` |
 | `loopback-redirect` | `TestLifecyclePendingRequirementsAndLiteralLoopback` |
 | `narrowed-refresh-scope-inheritance` | `TestCanonicalTokenResponses` (both refresh vectors), `TestLifecycleRefreshUsesPreviousGrant` |
+| `refresh-forbids-grant-broadening` | `TestCanonicalTokenResponses/refresh-forbids-grant-broadening`, `TestLifecycleRefreshUsesPreviousGrant/refresh-broadened-scope` (real initial narrowing, denied refresh, rotated refresh retained, recreated Route + Do never dispatches quarantined access) |
 | `pending-scope-context-replacement` | `TestLifecyclePendingScopeContextReplacement` |
 | `pending-budget-replacement` | `TestLifecyclePendingBudgetReplacement` |
 | `scope-challenge-without-required-scope` | `TestLifecycleNoScopeChallengeUsesOnlyHostRequirement` |

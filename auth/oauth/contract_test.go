@@ -43,6 +43,7 @@ type contractFixture struct {
 		Allowed          []string        `json:"allowed"`
 		Required         []string        `json:"required"`
 		Response         json.RawMessage `json:"response"`
+		Error            string          `json:"error"`
 		Accepted         bool            `json:"accepted"`
 		Usable           bool            `json:"usable"`
 		Expiry           string          `json:"expiry"`
@@ -86,6 +87,12 @@ func TestCanonicalGrantKeys(t *testing.T) {
 func TestCanonicalTokenResponses(t *testing.T) {
 	for _, vector := range readContract(t).Tokens {
 		t.Run(vector.ID, func(t *testing.T) {
+			var responseFields struct {
+				RefreshToken string `json:"refresh_token"`
+			}
+			if err := json.Unmarshal(vector.Response, &responseFields); err != nil {
+				t.Fatal(err)
+			}
 			var issuer string
 			var tokenCalls atomic.Int32
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -103,7 +110,7 @@ func TestCanonicalTokenResponses(t *testing.T) {
 						expectedGrant = "refresh_token"
 						expectedRefresh := "previous-refresh"
 						if call > 1 {
-							expectedRefresh = "fixture-refresh"
+							expectedRefresh = responseFields.RefreshToken
 						}
 						if r.Form.Get("refresh_token") != expectedRefresh {
 							t.Error("refresh material not used")
@@ -151,11 +158,14 @@ func TestCanonicalTokenResponses(t *testing.T) {
 			} else if err == nil {
 				t.Fatal("unusable token accepted")
 			}
+			if vector.Error != "" {
+				assertCode(t, err, auth.Code(vector.Error))
+			}
 			record, loadErr := store.Load(budget(t), p.key(request, config))
 			if loadErr != nil {
 				t.Fatal(loadErr)
 			}
-			if vector.RefreshPreserved && (record == nil || record.RefreshToken != "fixture-refresh") {
+			if vector.RefreshPreserved && (record == nil || record.RefreshToken != responseFields.RefreshToken) {
 				t.Fatal("returned refresh credential not retained")
 			}
 			if vector.Accepted {
