@@ -1,7 +1,7 @@
 # OAuth lifecycle test coverage
 
 `sdk-auth-lifecycle.json` is an exact copy of the canonical protocol repository's
-`interop/fixtures/sdk-auth-lifecycle.json`. It contains fake credentials only.
+`conformance/draft/sdk-auth-lifecycle.json`. It contains fake credentials only.
 Recovery, key and token-response vectors are executable inputs to
 `TestRecoveryContractVectors`, `TestCanonicalGrantKeys` and
 `TestCanonicalTokenResponses`. Token tests use verified TLS token endpoints and
