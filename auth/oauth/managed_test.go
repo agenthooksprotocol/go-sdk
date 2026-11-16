@@ -189,7 +189,14 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 		if mode == "extra-scope" {
 			scopes = "events admin"
 		}
-		json.NewEncoder(w).Encode(map[string]any{"access_token": "access-token", "refresh_token": "refresh-token", "token_type": "Bearer", "expires_in": 3600, "scope": scopes})
+		response := map[string]any{"access_token": "access-token", "refresh_token": "refresh-token", "token_type": "Bearer", "expires_in": 3600, "scope": scopes}
+		if mode == "missing-type" {
+			delete(response, "token_type")
+		}
+		if mode == "wrong-type" {
+			response["token_type"] = "MAC"
+		}
+		json.NewEncoder(w).Encode(response)
 	case "/events":
 		f.eventCalls.Add(1)
 		if r.Header.Get("Authorization") == "Bearer access-token" {
@@ -497,7 +504,7 @@ func TestManagedCallbackBindingAndNoImplicitConsent(t *testing.T) {
 	}
 }
 func TestManagedTrustScopesRedirectsAndErrorRedaction(t *testing.T) {
-	for _, mode := range []string{"deny-metadata", "deny-token", "deny-authorization", "extra-scope", "redirect", "bad-selection"} {
+	for _, mode := range []string{"deny-metadata", "deny-token", "deny-authorization", "extra-scope", "missing-type", "wrong-type", "redirect", "bad-selection"} {
 		t.Run(mode, func(t *testing.T) {
 			f, p, r := setup(t, "client_credentials")
 			options := p.options

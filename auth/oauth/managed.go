@@ -240,7 +240,7 @@ func (p *Provider) save(ctx context.Context, key, expected string, next *Record)
 	return nil
 }
 func (p *Provider) record(ctx context.Context, c ClientConfig, token *oauth2.Token) (*Record, error) {
-	if token == nil || !strings.EqualFold(token.Type(), "Bearer") || !bearerToken.MatchString(token.AccessToken) || !token.Expiry.After(time.Now()) {
+	if token == nil || !strings.EqualFold(token.TokenType, "Bearer") || !bearerToken.MatchString(token.AccessToken) || !token.Expiry.After(time.Now()) {
 		return nil, fail(auth.CodeCredentialUnavailable)
 	}
 	scopes := append([]string(nil), c.Scopes...)
