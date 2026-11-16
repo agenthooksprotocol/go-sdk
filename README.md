@@ -687,13 +687,13 @@ configuration, unsupported binding, unavailable credentials, interaction require
 access denied, rejected refresh, failed discovery, untrusted destination and
 provider failure; they are SDK outcomes, not protocol wire fields.
 
-**Managed OAuth is not yet available.** Both PKCE and client-credentials acquisition
-remain host-owned. [The OAuth compatibility spike](auth/oauth/README.md) verifies
-`golang.org/x/oauth2` grant APIs and documents the security gate, including its
-missing resource-bound refresh option. It does not implement discovery, login,
-persistence or an `auth.Provider`. The dependency is test-only but, as a Go
-subpackage dependency, appears in this module's `go.mod`; production auth/client
-packages do not import it.
+For managed PKCE and client credentials, use the optional
+[`auth/oauth` provider](auth/oauth/README.md). Supply host-controlled network/trust
+policy, coordinated credential storage and token validation, then use
+`Prepare`/`Complete` for consent without implicit browsers, listeners or workers.
+The adapter implements protected-resource discovery and resource-bound refresh
+using `golang.org/x/oauth2`. Core auth/client packages do not import the optional
+subpackage; its dependency remains in the shared Go module manifest.
 
 Content selection does not grant access. `client.ContentOptions` supplies
 receiver-scoped disclosure decisions and host-owned content resolution.

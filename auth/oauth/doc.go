@@ -1,8 +1,7 @@
-// Package oauth reserves the optional managed OAuth integration boundary.
-//
-// Managed acquisition is deliberately not implemented: golang.org/x/oauth2
-// supplies grant mechanics, but not the mandatory AHP/MCP discovery, trust,
-// resource-validation, or coordinated persistence policy. See README.md for the
-// security gate and executable dependency compatibility evidence. This package
-// does not implement auth.Provider and starts no network or background work.
+// Package oauth provides optional managed PKCE and client-credentials
+// authentication for AHP registration transports. It reuses golang.org/x/oauth2
+// grant mechanics with protected-resource discovery and resource-bound refresh.
+// Hosts supply trusted network policy, identity/token validation and coordinated
+// storage, and explicitly control consent through Prepare, Complete and Cancel.
+// The package starts no browser, listener, worker or default credential store.
 package oauth

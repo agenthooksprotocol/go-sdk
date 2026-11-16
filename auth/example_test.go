@@ -19,7 +19,7 @@ func ExampleRoute() {
 				return "example-token", nil
 			},
 		}),
-		// OAuth: hostOAuth, // a host-owned auth.Provider, not a managed SDK flow
+		// OAuth: managed, // optional auth/oauth provider, or a host-owned provider
 	})
 	request := auth.Request{
 		BackendID: "example", Destination: "https://backend.example/events", Purpose: auth.Event,

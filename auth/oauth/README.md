@@ -1,90 +1,152 @@
-# Managed OAuth: security gate held
+# Set up managed OAuth for hook backends
 
-**No managed `auth.Provider` is shipped in this package.** Neither PKCE nor
-client credentials is exposed as a supported managed flow. Existing hosts can
-continue to supply their own `auth.Provider`; merely importing this package does
-not enable discovery or acquisition. No browser, listener, store, token source,
-worker, or network operation is created by this package.
+Use `auth/oauth` when a host needs authorization-code PKCE or client-credentials
+support without implementing the OAuth protocol itself. The adapter uses
+`golang.org/x/oauth2` for grant requests and PKCE. It implements AHP's protected
+resource and authorization-server discovery, resource-bound refresh, and the
+`auth.Provider` interface. Importing it does not start network activity.
 
-The dependency compatibility spike uses **Go 1.27.3** and
-`golang.org/x/oauth2 v0.38.0`. Run it with:
+## Supply host policy and storage
+
+Construct a provider with explicit host-owned dependencies:
+
+```go
+managed, err := oauth.New(oauth.Options{
+    Namespace:        accountID,
+    Store:            credentialStore,
+    HTTPClient:       policyHTTPClient,
+    CheckDestination: checkDestination,
+    SelectClient:     selectTrustedClient,
+    ValidateToken:    validateToken,
+})
+if err != nil {
+    return err
+}
+provider := auth.Route(auth.Routes{
+    Bearer: auth.NewBearerProvider(auth.BearerOptions{
+        ResolveSecret: resolveSecret,
+    }),
+    OAuth: managed,
+})
+// Supply provider through client.Options.AuthProvider.
+```
+
+The host functions have these contracts:
+
+- **`HTTPClient`** has an explicit transport enforcing TLS, DNS/connect and egress
+  policy, including protection against DNS rebinding. It must not inject ambient
+  credentials or internally follow redirects. The adapter copies the client,
+  disables redirects and cookies, and never closes it.
+- **`CheckDestination(ctx, url, purpose)`** permits each metadata, authorization
+  and token URL before use. Purposes are `Metadata`, `Authorization` and
+  `TokenEndpoint`. URL checks alone cannot replace connection-level DNS policy.
+  Do not log URLs: an authorization URL contains state and PKCE parameters.
+- **`SelectClient(ctx, request, issuers, resource)`** selects a trusted local
+  issuer, client, supported flow and allowed/requested scopes from untrusted
+  advertisements. Return `ClientConfig`, including the registered redirect URI
+  for PKCE and a runtime client secret for client credentials. Resolve any
+  `clientSecretRef` through host secrets here. Explicit registration presets
+  constrain issuer, resource, client, flow and scopes; they cannot be replaced.
+  `TokenAuthMethod` may select `none`, `client_secret_basic` or
+  `client_secret_post`; discovery verifies issuer support. When omitted, the
+  adapter selects a supported method without automatic credential-style probing.
+- **`ValidateToken(ctx, client, token)`** verifies validity and resource/audience
+  under local policy, including cryptographic JWT validation where appropriate.
+  Only bearer tokens with a future expiry and the requested scope set are
+  accepted. The host retains responsibility for trusting opaque issuer tokens.
+- **`Store`** loads detached `Record` snapshots, atomically compares generations,
+  and coordinates the complete acquisition/refresh callback for a key across
+  host instances/processes. Its methods must honor context cancellation and
+  release coordination on errors or panics. Do not reenter the same provider/key
+  from a store callback. Secure persistence and durable schema migrations belong
+  to the host; no filesystem format or default store is installed.
+
+All network, policy and store work uses the supplied context. Provider operations
+require a context with an enclosing deadline; they never extend it. The host must
+ensure its callbacks honor cancellation. No browser, callback listener, worker,
+credential database or automatically refreshing background source is created.
+
+## Present and complete a PKCE login
+
+Prepare authorization before starting a session when the host can present UI:
+
+```go
+ctx, cancel := context.WithTimeout(parent, time.Minute)
+defer cancel()
+
+prepared, err := managed.Prepare(ctx, request)
+if err != nil {
+    return err // inspect auth.Error.Code; do not print raw host errors
+}
+if prepared.Login != nil {
+    login := prepared.Login
+    presentAuthorizationURL(login.AuthorizationURL())
+    // The host receives this URL through its own trusted callback transport.
+    callbackURL, err := receiveCallback(ctx)
+    if err != nil {
+        managed.Cancel(login)
+        return err
+    }
+    _, err = managed.Complete(ctx, login, callbackURL)
+    return err
+}
+// prepared.Credential is ready; normal delivery acquires through auth.Provider.
+```
+
+Login completion validates state, exact redirect path, optional/advertised issuer
+response and the original deadline/cancellation. A pending login is single-use.
+Repeated preparations for the same provider/key share the pending login. Its
+maximum lifetime is ten minutes, and each provider holds at most 128 active
+pending logins. Use `Cancel` when abandoning consent; cancellation never erases
+stored credentials. Concurrent providers share token coordination through the
+host store, but their in-memory consent handles are independent.
+
+A dispatch that needs consent returns `interaction_required`; it never launches
+interactive UI or waits for a human. Call `Prepare` from the host UI path to get
+the pending login. Client credentials completes through `Prepare` without UI and
+requires explicit issuer grant support.
+
+## Discovery, isolation and failure recovery
+
+For an unbound HTTP endpoint, delivery starts anonymously. On a real 401 the
+adapter honors the Bearer challenge's `resource_metadata`, otherwise tries the
+endpoint-path and origin-root RFC 9728 locations in order. It validates resource
+coverage and discovers the exact selected issuer using OAuth/OIDC well-known
+locations. Server-required scopes must already be permitted locally;
+`scopes_supported` never grants consent. No dynamic client registration is
+performed: the host selects an already registered client.
+
+Tokens and refresh requests carry the validated RFC 8707 resource. Store keys
+include namespace, backend, complete destination, event/upload purpose, binding,
+issuer, resource, client, flow, token-auth method and scopes. Uploads never inherit
+event tokens. A stale 401 cannot invalidate a newer generation. The provider
+never independently replays a delivery; `auth.Do` retains its existing bounded
+safe-retry rules. Configured Authorization headers bypass the entire auth path.
+
+Known OAuth `temporarily_unavailable`/`server_error` responses retain credentials
+for a later attempt. Definitive `invalid_grant` becomes `refresh_rejected`; call
+`Prepare` again to obtain repair consent. Before a rotating refresh, the adapter
+persists an ambiguity marker. Cancellation, an ambiguous network outcome or a
+failed post-exchange commit retains the old secrets but does **not** blindly
+reuse the old refresh token. `Prepare` offers a fresh login for explicit repair.
+This conservative policy cannot guarantee transactional rollback at an external
+authorization server.
+
+Use `errors.As(err, *auth.Error)` for safe classifications and `errors.Is` for
+native cancellation/deadlines. Diagnostics discard raw upstream response bodies,
+callback URLs, credentials and host error chains. Login/config/record formatting
+is redacted; explicitly accessing secret fields still requires host care.
+
+## Verify an integration
 
 ```sh
 go test ./auth/oauth
+go test -race ./auth/...
 ```
 
-## Verified, but not a managed implementation
-
-The TLS `httptest` cases exercise real `oauth2.Config` and
-`clientcredentials.Config` requests, not mocks of those APIs:
-
-- `GenerateVerifier`, `S256ChallengeOption`, `VerifierOption`, and `Exchange`
-  support host-controlled PKCE mechanics. The host still owns state validation,
-  callback transport, issuer/resource validation, and persistence.
-- Initial code exchange accepts `resource` through `SetAuthURLParam`.
-- Client credentials accepts `resource` through `EndpointParams`.
-- **Refresh does not preserve the initial exchange's `resource` parameter.**
-  `Config.TokenSource` has no refresh-parameter option. A managed implementation
-  needs a separately reviewed resource-bound refresh path; a generic token
-  source alone is insufficient.
-- Explicit token endpoint `AuthStyle` avoids automatic credential-style probing
-  and its possible repeated token POST. Native cancellation reaches grant calls.
-
-These tests demonstrate library compatibility, **not** compliant AHP behavior.
-They use fake credentials and an in-process TLS issuer. There are no store-boundary
-or managed-flow parity claims, because those boundaries have not been implemented.
-The dependency is currently used only by compatibility tests; Go does not isolate
-subpackage test dependencies into a separate optional dependency manifest.
-
-## Required before exposing an adapter
-
-`spec/draft/capability-auth.md:101–155` in the protocol repository is normative.
-Static configured token endpoints cannot replace discovery. A managed adapter
-must satisfy these gates:
-
-1. Without binding/Authorization, attempt the endpoint anonymously first. On
-   401, parse `WWW-Authenticate`; honor `resource_metadata`, or try path-specific
-   then origin-root RFC 9728 metadata locations in MCP order.
-2. Validate the RFC 9728 section 3.3 resource identifier, choose only locally
-   trusted authorization servers, and perform MCP's ordered OAuth/OIDC metadata
-   discovery. Require exact issuer identity. Explicit OAuth bindings constrain
-   this discovery; a failed explicit binding must never switch identities.
-3. Apply host URL, destination, DNS, TLS and redirect policy to **every** metadata,
-   authorization, token and registration endpoint. Redirects must not leak
-   credentials. Bound response sizes, discovery steps and operation deadlines.
-4. Request only locally permitted scopes; neither challenge scopes nor
-   `scopes_supported` grant consent. Bind all grants **and refreshes** to the
-   validated RFC 8707 resource. Validate token type, validity and permissions.
-5. Use host-controlled atomic persistence/coordination keyed by credential
-   namespace, issuer, resource, client, flow, scopes and independently authorized
-   destination/purpose. Test concurrent refresh, rotation, stale 401s and store
-   failure/cancellation. Do not retain operation contexts in background sources.
-6. For PKCE, reserve/dedupe pending login before asynchronous work, verify state,
-   callback URI and issuer, consume only its own generation, and let the host own
-   display, callback transport and cancellation. Client credentials additionally
-   requires explicit issuer support. Unsupported flows need typed outcomes.
-7. Integrate `auth.Request`, `Credential`, and `Challenge` with safe classified
-   errors and native cancellation. No response bodies, tokens or callback URLs
-   may appear in error chains. Never independently replay effectful deliveries.
-
-## Host-controlled mechanics example (not an AHP adapter)
-
-The test suite contains the executable form of this fragment. These URLs must
-come from already validated metadata, not an arbitrary registration/challenge:
-
-```go
-ctx = context.WithValue(ctx, oauth2.HTTPClient, trustedHTTPClient)
-verifier := oauth2.GenerateVerifier() // host retains this with random state
-loginURL := config.AuthCodeURL(state,
-    oauth2.S256ChallengeOption(verifier),
-    oauth2.SetAuthURLParam("resource", validatedResource))
-// Host displays loginURL and receives callback; validate state/issuer/URI first.
-token, err := config.Exchange(ctx, code,
-    oauth2.VerifierOption(verifier),
-    oauth2.SetAuthURLParam("resource", validatedResource))
-// Host must still validate and atomically persist token; do not log token/err.
-```
-
-Do not copy this fragment as a complete provider: it intentionally omits the
-security gates above. Managed implementation is **blocked**, not attempted-and-
-successful, and the complete parity suite has **not** been run for an adapter.
+The behavior suite uses verified TLS issuers and host-store boundaries. It covers
+both flows, state/issuer/redirect validation, metadata trust, resource-bound
+refresh, concurrent acquisition, independent destinations/uploads/namespaces,
+stale rejections, transient and definitive failures, cancellation and failed
+commits. The original low-level `auth.Provider` remains available for hosts with
+existing OAuth infrastructure.
