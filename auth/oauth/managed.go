@@ -37,7 +37,18 @@ func New(options Options) (*Provider, error) {
 	return &Provider{options: options, client: client, pending: make(map[string]*PendingLogin)}, nil
 }
 
-func fail(code auth.Code) error { return &auth.Error{Code: code} }
+// fail is the managed error-copy boundary: exported Code must be safe even
+// when a host callback supplies an auth.Error with an arbitrary string.
+func fail(code auth.Code) error {
+	switch code {
+	case auth.CodeInvalidConfiguration, auth.CodeUnsupportedBinding, auth.CodeCredentialUnavailable,
+		auth.CodeInteractionRequired, auth.CodeAccessDenied, auth.CodeRefreshRejected,
+		auth.CodeDiscoveryFailed, auth.CodeUntrustedDestination, auth.CodeProviderFailed:
+	default:
+		code = auth.CodeProviderFailed
+	}
+	return &auth.Error{Code: code}
+}
 func safe(ctx context.Context, err error, fallback auth.Code) error {
 	if ctx.Err() != nil {
 		return errors.Join(fail(fallback), ctx.Err())
