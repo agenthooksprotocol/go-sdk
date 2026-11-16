@@ -110,8 +110,8 @@ requires explicit issuer grant support.
 
 For an unbound HTTP endpoint, delivery starts anonymously. On a real 401 the
 adapter honors the Bearer challenge's `resource_metadata`, otherwise tries the
-endpoint-path and origin-root RFC 9728 locations in order. It validates resource
-coverage and discovers the exact selected issuer using OAuth/OIDC well-known
+endpoint-path and origin-root RFC 9728 locations in order. It validates the exact RFC 9728 retrieval-source resource identifier in addition
+to resource coverage, and discovers the exact selected issuer using OAuth/OIDC well-known
 locations. Server-required scopes must already be permitted locally;
 `scopes_supported` never grants consent. No dynamic client registration is
 performed: the host selects an already registered client.

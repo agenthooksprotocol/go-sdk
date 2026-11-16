@@ -15,7 +15,7 @@ import (
 )
 
 func TestManagedDiscoveryFallbackAndExactIssuer(t *testing.T) {
-	for _, mode := range []string{"fallback", "wrong-resource", "wrong-issuer", "missing-pkce", "unadvertised-machine", "private-token", "oversized"} {
+	for _, mode := range []string{"fallback", "covering-wrong-source", "wrong-resource", "wrong-issuer", "missing-pkce", "unadvertised-machine", "private-token", "oversized"} {
 		t.Run(mode, func(t *testing.T) {
 			var server *httptest.Server
 			var paths []string
@@ -38,6 +38,9 @@ func TestManagedDiscoveryFallbackAndExactIssuer(t *testing.T) {
 					fallthrough
 				case "/.well-known/oauth-protected-resource":
 					resource := server.URL + "/events"
+					if mode == "fallback" || mode == "covering-wrong-source" {
+						resource = server.URL
+					}
 					if mode == "wrong-resource" {
 						resource = server.URL + "/other"
 					}

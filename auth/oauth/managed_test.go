@@ -86,6 +86,7 @@ type fixture struct {
 	mode         atomic.Value
 	tokenCalls   atomic.Int32
 	refreshCalls atomic.Int32
+	eventCalls   atomic.Int32
 	grantsMu     sync.Mutex
 	grants       []url.Values
 	started      chan struct{}
@@ -190,8 +191,13 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(map[string]any{"access_token": "access-token", "refresh_token": "refresh-token", "token_type": "Bearer", "expires_in": 3600, "scope": scopes})
 	case "/events":
-		w.WriteHeader(401)
+		f.eventCalls.Add(1)
+		if r.Header.Get("Authorization") == "Bearer access-token" {
+			fmt.Fprint(w, `{}`)
+			return
+		}
 		w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+f.server.URL+`/custom-resource"`)
+		w.WriteHeader(401)
 	default:
 		w.WriteHeader(404)
 	}

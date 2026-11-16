@@ -21,6 +21,7 @@ import (
 
 var _ auth.Provider = (*Provider)(nil)
 var bearerToken = regexp.MustCompile(`^[A-Za-z0-9._~+/-]+=*$`)
+var scopeList = regexp.MustCompile(`^[\x21\x23-\x5B\x5D-\x7E]+(?: [\x21\x23-\x5B\x5D-\x7E]+)*$`)
 
 // New requires explicit host network, identity, persistence and token-validation
 // policy. No default HTTP client, store, issuer or background task is installed.

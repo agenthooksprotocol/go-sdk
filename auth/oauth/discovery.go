@@ -25,6 +25,7 @@ type metadata struct {
 type protectedResource struct {
 	Resource             string   `json:"resource"`
 	AuthorizationServers []string `json:"authorization_servers"`
+	BearerMethods        []string `json:"bearer_methods_supported"`
 }
 
 const discoveryLimit = 1 << 20
@@ -39,39 +40,61 @@ func (p *Provider) resolve(ctx context.Context, request auth.Request, challenge 
 	if target.Kind() == auth.BindingBearer || !discoveryHTTPS(request.Destination) {
 		return ClientConfig{}, metadata{}, fail(auth.CodeUnsupportedBinding)
 	}
-	hint, err := resourceMetadataHint(challenge)
-	if err != nil {
-		return ClientConfig{}, metadata{}, fail(auth.CodeDiscoveryFailed)
-	}
-	candidates := []string{hint}
-	if hint == "" {
-		candidates = discoveryLocations(request.Destination, "oauth-protected-resource", false)
-	}
-	policy := func(ctx context.Context, raw string) error { return p.check(ctx, raw, Metadata) }
+	preset, explicit := target.OAuth()
 	var resource protectedResource
-	found := false
-	for _, location := range candidates {
-		ok, err := fetchDiscovery(ctx, &p.client, policy, location, &resource)
+	if explicit {
+		// An explicit OAuth preset already selects resource and issuer. Never
+		// let a challenge replace that identity with an advertised one.
+		resource = protectedResource{Resource: preset.Resource, AuthorizationServers: []string{preset.Issuer}}
+	} else {
+		hint, err := resourceMetadataHint(challenge)
 		if err != nil {
 			return ClientConfig{}, metadata{}, fail(auth.CodeDiscoveryFailed)
 		}
-		if ok {
+		candidates := []string{hint}
+		if hint == "" {
+			candidates = discoveryLocations(request.Destination, "oauth-protected-resource", false)
+		}
+		found := false
+		for index, location := range candidates {
+			var candidate protectedResource
+			ok, err := fetchDiscovery(ctx, &p.client, func(ctx context.Context, raw string) error { return p.check(ctx, raw, Metadata) }, location, &candidate)
+			if err != nil {
+				return ClientConfig{}, metadata{}, safe(ctx, err, auth.CodeDiscoveryFailed)
+			}
+			if !ok {
+				continue
+			}
+			expected := request.Destination
+			if hint == "" && index > 0 {
+				endpoint, _ := url.Parse(request.Destination)
+				expected = endpoint.Scheme + "://" + endpoint.Host
+			}
+			// RFC 9728 section 3.3 requires IDENTICAL source identifiers,
+			// independently of coverage and the host's trust decision.
+			if candidate.Resource != expected {
+				return ClientConfig{}, metadata{}, fail(auth.CodeDiscoveryFailed)
+			}
+			resource = candidate
 			found = true
 			break
 		}
+		if !found {
+			return ClientConfig{}, metadata{}, fail(auth.CodeDiscoveryFailed)
+		}
 	}
-	if !found || !resourceCovers(resource.Resource, request.Destination) || len(resource.AuthorizationServers) == 0 {
+	if !resourceCovers(resource.Resource, request.Destination) || len(resource.AuthorizationServers) == 0 {
 		return ClientConfig{}, metadata{}, fail(auth.CodeDiscoveryFailed)
+	}
+	if resource.BearerMethods != nil && !contains(resource.BearerMethods, "header") {
+		return ClientConfig{}, metadata{}, fail(auth.CodeUnsupportedBinding)
 	}
 	for _, issuer := range resource.AuthorizationServers {
 		if !discoveryIssuer(issuer) {
 			return ClientConfig{}, metadata{}, fail(auth.CodeDiscoveryFailed)
 		}
 	}
-	preset, explicit := target.OAuth()
-	if explicit && (preset.Resource != resource.Resource || !contains(resource.AuthorizationServers, preset.Issuer)) {
-		return ClientConfig{}, metadata{}, fail(auth.CodeInvalidConfiguration)
-	}
+	policy := func(ctx context.Context, raw string) error { return p.check(ctx, raw, Metadata) }
 	issuers := append([]string(nil), resource.AuthorizationServers...)
 	if explicit {
 		issuers = []string{preset.Issuer}
@@ -90,6 +113,9 @@ func (p *Provider) resolve(ctx context.Context, request auth.Request, challenge 
 	required, err := bearerParameter(challenge, "scope")
 	if err != nil {
 		return ClientConfig{}, metadata{}, fail(auth.CodeDiscoveryFailed)
+	}
+	if required != "" && !scopeList.MatchString(required) {
+		return ClientConfig{}, metadata{}, fail(auth.CodeAccessDenied)
 	}
 	for _, scope := range strings.Fields(required) {
 		if !contains(config.Scopes, scope) {
@@ -155,8 +181,11 @@ func resourceCovers(resource, endpoint string) bool {
 	}
 	base, _ := url.Parse(resource)
 	target, _ := url.Parse(endpoint)
-	if base.RawQuery != "" || strings.Contains(resource, "?") || base.Scheme != target.Scheme || base.Host != target.Host {
+	if base.Scheme != target.Scheme || base.Host != target.Host {
 		return false
+	}
+	if base.RawQuery != "" || base.ForceQuery {
+		return resource == endpoint
 	}
 	path := strings.TrimSuffix(base.EscapedPath(), "/")
 	return target.EscapedPath() == path || strings.HasPrefix(target.EscapedPath(), path+"/")
@@ -184,7 +213,7 @@ func appendUniqueDiscovery(values []string, value string) []string {
 	return append(values, value)
 }
 
-// Preserve escaped path segments, but remove queries from well-known URLs.
+// Preserve the source identifier, including escaped paths and query, for RFC 9728.
 func discoveryLocations(raw, name string, appendPath bool) []string {
 	u, _ := url.Parse(raw)
 	base := u.Scheme + "://" + u.Host
@@ -192,9 +221,18 @@ func discoveryLocations(raw, name string, appendPath bool) []string {
 	if path == "/" {
 		path = ""
 	}
-	first := base + "/.well-known/" + name + path
+	// RFC 8414 AS lookup removes a terminating issuer slash; RFC 9728
+	// protected-resource lookup preserves the resource source identifier.
+	if name != "oauth-protected-resource" {
+		path = strings.TrimRight(path, "/")
+	}
+	query := ""
+	if u.RawQuery != "" || u.ForceQuery {
+		query = "?" + u.RawQuery
+	}
+	first := base + "/.well-known/" + name + path + query
 	if appendPath {
-		first = base + strings.TrimSuffix(path, "/") + "/.well-known/" + name
+		first = base + strings.TrimSuffix(path, "/") + "/.well-known/" + name + query
 	}
 	return appendUniqueDiscovery([]string{first}, base+"/.well-known/"+name)
 }
@@ -310,7 +348,7 @@ func bearerParameter(header, parameter string) (string, error) {
 			return "", errDiscovery
 		}
 		if strings.EqualFold(scheme, "Bearer") && strings.EqualFold(token, parameter) {
-			if seen || (parameter == "resource_metadata" && !discoveryHTTPS(value)) {
+			if seen || (parameter == "resource_metadata" && !discoveryHTTPS(value)) || (parameter == "scope" && value == "") {
 				return "", errDiscovery
 			}
 			hint, seen = value, true

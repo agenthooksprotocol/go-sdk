@@ -73,9 +73,9 @@ func TestManagedAdvertisedCallbackIssuerRequired(t *testing.T) {
 }
 func TestDiscoveryLocationsPreserveIssuerPath(t *testing.T) {
 	got := discoveryLocations("https://issuer.example/tenant/", "oauth-authorization-server", false)
-	want := []string{"https://issuer.example/.well-known/oauth-authorization-server/tenant/", "https://issuer.example/.well-known/oauth-authorization-server"}
+	want := []string{"https://issuer.example/.well-known/oauth-authorization-server/tenant", "https://issuer.example/.well-known/oauth-authorization-server"}
 	if !slices.Equal(got, want) {
-		t.Fatalf("trailing issuer path changed: %v", got)
+		t.Fatalf("RFC 8414 issuer lookup path changed: %v", got)
 	}
 	got = discoveryLocations("https://issuer.example/tenant/", "openid-configuration", true)
 	if got[0] != "https://issuer.example/tenant/.well-known/openid-configuration" {
