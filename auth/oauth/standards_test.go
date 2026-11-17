@@ -65,7 +65,7 @@ func TestManagedAdvertisedCallbackIssuerRequired(t *testing.T) {
 		t.Fatal(err)
 	}
 	u, _ := url.Parse(state.Login.AuthorizationURL())
-	_, err = p.Complete(ctx, state.Login, "https://client.example/callback?"+url.Values{"state": {u.Query().Get("state")}, "code": {"code"}}.Encode())
+	_, err = p.Complete(ctx, r, "https://client.example/callback?"+url.Values{"state": {u.Query().Get("state")}, "code": {"code"}}.Encode())
 	assertCode(t, err, auth.CodeAccessDenied)
 	if f.tokenCalls.Load() != 0 {
 		t.Fatal("missing advertised issuer reached exchange")

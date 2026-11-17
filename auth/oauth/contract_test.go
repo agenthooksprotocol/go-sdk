@@ -3,9 +3,13 @@ package oauth
 import (
 	"context"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -48,6 +52,7 @@ type contractFixture struct {
 		Usable           bool            `json:"usable"`
 		Expiry           string          `json:"expiry"`
 		Granted          []string        `json:"granted"`
+		Effective        []string        `json:"effective"`
 		RefreshPreserved bool            `json:"refresh_preserved"`
 	} `json:"token_responses"`
 }
@@ -168,12 +173,21 @@ func TestCanonicalTokenResponses(t *testing.T) {
 			if vector.RefreshPreserved && (record == nil || record.RefreshToken != responseFields.RefreshToken) {
 				t.Fatal("returned refresh credential not retained")
 			}
+			if !vector.Accepted && vector.Exchange != "refresh" && record != nil {
+				t.Fatal("invalid initial response persisted a record")
+			}
+			if record != nil && usable(record) != vector.Accepted {
+				t.Fatal("stored access token usability mismatch")
+			}
 			if vector.Accepted {
 				if record == nil {
 					t.Fatal("accepted grant not persisted")
 				}
-				if !slices.Equal(sortedScopes(record.Scopes), sortedScopes(vector.Granted)) {
+				if !slices.Equal(merge(record.Scopes), merge(vector.Granted)) {
 					t.Fatalf("granted scopes = %v; want %v", record.Scopes, vector.Granted)
+				}
+				if vector.Effective != nil && !slices.Equal(intersect(record.Scopes, vector.Allowed), merge(vector.Effective)) {
+					t.Fatalf("effective scopes = %v; want %v", intersect(record.Scopes, vector.Allowed), vector.Effective)
 				}
 				if (vector.Expiry == "unknown") != record.ExpiresAt.IsZero() {
 					t.Fatal("expiry classification mismatch")
@@ -201,5 +215,93 @@ func TestCanonicalTokenResponses(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// lifecycleCoverage maps every lifecycle id in the vendored fixture to the
+// native tests exercising it at real store, network and transport boundaries.
+var lifecycleCoverage = map[string][]string{
+	"cached-token-metadata-outage":                     {"TestCachedUnboundUnsafeDeliveryAfterProviderRecreation"},
+	"unbound-preemptive-unsafe-delivery":               {"TestCachedUnboundUnsafeDeliveryAfterProviderRecreation"},
+	"unbound-lookup-anonymous-fallback":                {"TestUnboundLookupAnonymousFallback"},
+	"unbound-lookup-refreshes-expired-token":           {"TestUnboundLookupRefreshesExpiredToken"},
+	"refresh-unknown-expiry-rotation":                  {"TestLifecycleRefreshUnknownExpiryRotation", "TestCanonicalTokenResponses"},
+	"transient-refresh-failure":                        {"TestManagedTemporaryRefreshRetainsAndDefinitiveRejectionRepairs", "TestLifecycleNonOAuthRefreshFailureRetainsRetry", "TestManagedCancellationLeavesAmbiguityAndReleasesCoordination"},
+	"refresh-invalid-grant-drops-tokens":               {"TestLifecycleRefreshInvalidGrant"},
+	"refresh-invalid-grant-stale-does-not-wipe":        {"TestLifecycleRefreshInvalidGrant"},
+	"token-validation-failure-clears-in-flight":        {"TestLifecycleTokenValidationFailureClearsInFlight", "TestLifecycleTokenValidity"},
+	"client-credentials-transient-reissue":             {"TestClientCredentialsTransientReissueWithoutLogin", "TestLifecycleClientCredentialsTransientReissue"},
+	"delivery-never-creates-pending-login":             {"TestLifecycleDeliveryNeverCreatesPendingLogin"},
+	"pending-login-fixed-lifetime":                     {"TestPendingLoginFixedLifetime"},
+	"pending-login-cross-process-completion":           {"TestPendingLoginCrossProcessCompletion"},
+	"pending-login-reuse":                              {"TestPendingLoginReuse", "TestPendingLoginReuseAcrossCeilings"},
+	"pending-login-supersede":                          {"TestPendingLoginSupersede"},
+	"pending-login-supersede-scope-union":              {"TestPendingLoginSupersedeScopeUnion"},
+	"pending-login-end-states":                         {"TestPendingLoginEndStates"},
+	"metadata-and-secret-rotation":                     {"TestMetadataCapabilityAndRuntimeSecretRotation", "TestLifecycleCompletionUsesCurrentSecretAndPolicy"},
+	"scope-ceiling-widening-keeps-grant":               {"TestLifecycleScopeCeilingWideningKeepsGrant", "TestCanonicalGrantKeys"},
+	"insufficient-scope-step-up":                       {"TestLifecycleStepUpRoundTrip", "TestInsufficientScopeTransport"},
+	"step-up-requirement-operation-scoped":             {"TestLifecycleStepUpRequirementOperationScoped"},
+	"step-up-required-scopes-round-trip":               {"TestLifecycleStepUpRoundTrip"},
+	"challenged-replay-once":                           {"TestManagedChallengedReplayOnce", "TestChallengedReplayMethods"},
+	"configured-preset-no-protected-resource-metadata": {"TestMetadataCapabilityAndRuntimeSecretRotation", "TestCanonicalTokenResponses"},
+	"explicit-shared-grant":                            {"TestGrantSharingRequiresPartitionAndIndependentApproval"},
+	"invalid-callback-does-not-consume":                {"TestManagedCallbackBindingAndNoImplicitConsent"},
+	"loopback-redirect":                                {"TestLifecycleLiteralLoopbackRedirect"},
+	"narrowed-refresh-scope-inheritance":               {"TestLifecycleRefreshUsesPreviousGrant", "TestCanonicalTokenResponses"},
+	"scope-challenge-without-required-scope":           {"TestLifecycleNoScopeChallengeUsesOnlyHostRequirement"},
+	"refresh-broadening-scope-ignored":                 {"TestLifecycleRefreshUsesPreviousGrant", "TestCanonicalTokenResponses"},
+	"scope-ceiling-narrowing-keeps-grant":              {"TestLifecycleScopeCeilingNarrowingKeepsGrant", "TestCanonicalTokenResponses"},
+	"unreplayed-challenge-prepares-next-attempt":       {"TestUnreplayedChallengePreparesNextAttempt"},
+	"up-front-refresh-failure-no-anonymous-fallback":   {"TestUpFrontRefreshFailureNoAnonymousFallback"},
+	"prepare-required-outside-ceiling-denied":          {"TestLifecyclePrepareRequiredOutsideCeilingDenied"},
+	"extra-granted-scope-ignored":                      {"TestLifecycleExtraGrantedScopeIgnored", "TestCanonicalTokenResponses"},
+}
+
+func TestLifecycleCoverageManifest(t *testing.T) {
+	data, err := os.ReadFile("testdata/sdk-auth-lifecycle.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		Lifecycle []struct {
+			ID string `json:"id"`
+		} `json:"lifecycle"`
+	}
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	tests := map[string]bool{}
+	for _, dir := range []string{".", ".."} {
+		files, _ := filepath.Glob(filepath.Join(dir, "*_test.go"))
+		for _, file := range files {
+			parsed, err := parser.ParseFile(token.NewFileSet(), file, nil, parser.SkipObjectResolution)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, decl := range parsed.Decls {
+				if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil && strings.HasPrefix(fn.Name.Name, "Test") {
+					tests[fn.Name.Name] = true
+				}
+			}
+		}
+	}
+	ids := map[string]bool{}
+	for _, entry := range fixture.Lifecycle {
+		ids[entry.ID] = true
+		names := lifecycleCoverage[entry.ID]
+		if len(names) == 0 {
+			t.Errorf("lifecycle id %q has no native test", entry.ID)
+		}
+		for _, name := range names {
+			if !tests[name] {
+				t.Errorf("lifecycle id %q maps to missing test %s", entry.ID, name)
+			}
+		}
+	}
+	for id := range lifecycleCoverage {
+		if !ids[id] {
+			t.Errorf("coverage maps unknown lifecycle id %q", id)
+		}
 	}
 }

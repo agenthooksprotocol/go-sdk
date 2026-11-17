@@ -1,8 +1,10 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -46,16 +48,19 @@ type Challenge struct {
 // Provider owns acquisition, trust, consent, refresh, rotation and coordination.
 // Calls are synchronous in the delivery context and must honor cancellation.
 // Implementations must support concurrent calls. Their lifecycle belongs to the
-// host, not Hooks. Challenge may return nil to decline recovery. A replacement
-// permits at most one retry, only when the SDK operation explicitly allows it.
-// Provider errors are redacted; there is never anonymous fallback.
+// host, not Hooks. Challenge must stop serving the rejected credential and may
+// return nil to decline recovery. A replacement permits at most one replay, only
+// for a replayable request (see Do). Provider errors are redacted to an
+// allowlisted *Error code, otherwise provider_failed; there is never anonymous
+// fallback for a bound request.
 type Provider interface {
 	Credential(context.Context, Request) (Credential, error)
 	Challenge(context.Context, Request, Challenge) (*Credential, error)
 }
 
 // PreemptiveProvider optionally supplies previously authorized credentials for an
-// absent binding. A nil credential is a cache miss, not an acquisition failure.
+// absent binding, so a known destination gets its stored token on the first
+// attempt. A nil credential is a cache miss and the request is sent anonymously.
 // Lookup must not initiate discovery, acquisition, or interactive login. A
 // non-nil success must contain a valid bearer, just like Provider.Credential.
 // Implementations must honor cancellation and support concurrent calls.
@@ -77,11 +82,11 @@ func (EnvironmentProvider) Credential(ctx context.Context, request Request) (Cre
 		TokenRef string
 	}
 	if json.Unmarshal(request.Binding, &binding) != nil || binding.Type != "bearer" || binding.TokenEnv == "" || binding.TokenRef != "" {
-		return Credential{}, ErrCredential
+		return Credential{}, &Error{Code: CodeCredentialUnavailable}
 	}
 	token, err := ResolveSecret(ctx, binding.TokenEnv, "", nil)
 	if err != nil || !validBearer(token) {
-		return Credential{}, ErrCredential
+		return Credential{}, &Error{Code: CodeCredentialUnavailable}
 	}
 	return Credential{Type: "bearer", Token: token}, nil
 }
@@ -93,15 +98,35 @@ func validBearer(token string) bool { return authutil.ValidBearer(token) }
 func copyRequest(r Request) Request { r.Binding = append(json.RawMessage(nil), r.Binding...); return r }
 
 // Do applies registration-aware credentials to one independently authorized POST.
-// retrySafe must be false for arbitrary effectful operations (including uploads).
-// With true, a 401 or Bearer insufficient_scope 403 may be retried once using the exact GetBody representation and
-// request identity. Other statuses and network failures are never retried. A final
-// challenge is also reported to the provider, but cannot trigger another retry. Redirects
-// are disabled; the caller owns response validation and closing its body.
-// The supplied client's transport must not follow redirects itself or inject
-// credentials for another scope. No transport is closed or mutated by Do.
-func Do(client *http.Client, req *http.Request, request Request, provider Provider, retrySafe bool) (*http.Response, error) {
-	return DoWithHeaders(client, req, request, provider, retrySafe, nil)
+// After a 401 or Bearer insufficient_scope 403 the provider handles the
+// challenge; Do then replays at most once, with the same buffered body (and so
+// the same JSON-RPC id), only for an event POST whose body is a hooks/intercept,
+// hooks/configuration or hooks/capabilities request. Notifications and uploads
+// are never replayed. Other statuses and network failures are never retried. A
+// final challenge is also reported to the provider, but cannot trigger another
+// replay. Redirects are disabled; the caller owns response validation and
+// closing its body. The supplied client's transport must not follow redirects
+// itself or inject credentials for another scope. No transport is closed or
+// mutated by Do.
+func Do(client *http.Client, req *http.Request, request Request, provider Provider) (*http.Response, error) {
+	return DoWithHeaders(client, req, request, provider, nil)
+}
+
+// replayable reports whether a buffered event body is a JSON-RPC request whose
+// method permits challenged replay.
+func replayable(body []byte) bool {
+	var message struct {
+		ID     json.RawMessage `json:"id"`
+		Method string          `json:"method"`
+	}
+	if json.Unmarshal(body, &message) != nil || len(message.ID) == 0 || string(message.ID) == "null" {
+		return false
+	}
+	switch message.Method {
+	case "hooks/intercept", "hooks/configuration", "hooks/capabilities":
+		return true
+	}
+	return false
 }
 
 // ApplyHeaders overlays configured headers case-insensitively after defaults/auth.
@@ -131,7 +156,7 @@ func ApplyHeaders(req *http.Request, headers http.Header) {
 // DoWithHeaders applies registration headers last. Explicit Authorization skips
 // credential acquisition, discovery, and all challenge/retry handling. Existing
 // redirect behavior is unchanged. Headers never reach provider-owned requests.
-func DoWithHeaders(client *http.Client, req *http.Request, request Request, provider Provider, retrySafe bool, headers http.Header) (*http.Response, error) {
+func DoWithHeaders(client *http.Client, req *http.Request, request Request, provider Provider, headers http.Header) (*http.Response, error) {
 	if req == nil {
 		return nil, ErrScope
 	}
@@ -189,6 +214,17 @@ func DoWithHeaders(client *http.Client, req *http.Request, request Request, prov
 			credential, authenticated = *cached, true
 		}
 	}
+	// Only a replayable event request is buffered; its exact bytes are resent.
+	var body []byte
+	if request.Purpose == Event && req.Body != nil && req.Body != http.NoBody {
+		var err error
+		body, err = io.ReadAll(req.Body)
+		req.Body.Close()
+		if err != nil {
+			return nil, ErrTransport
+		}
+	}
+	replay := provider != nil && replayable(body)
 	copied := http.Client{}
 	if client != nil {
 		copied = *client
@@ -196,6 +232,9 @@ func DoWithHeaders(client *http.Client, req *http.Request, request Request, prov
 	copied.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	copied.Jar = nil
 	current := req.Clone(req.Context())
+	if body != nil {
+		current.Body = io.NopCloser(bytes.NewReader(body))
+	}
 	for attempt := 0; ; attempt++ {
 		if err := req.Context().Err(); err != nil {
 			if current.Body != nil {
@@ -242,16 +281,12 @@ func DoWithHeaders(client *http.Client, req *http.Request, request Request, prov
 			response.Body.Close()
 			return nil, redactError(ErrCredential, err)
 		}
-		if next == nil || !retrySafe || request.Purpose == Upload || attempt != 0 || req.GetBody == nil {
+		if next == nil || !replay || attempt != 0 {
 			return response, nil
 		}
 		response.Body.Close()
-		body, err := req.GetBody()
-		if err != nil {
-			return nil, ErrTransport
-		}
 		current = req.Clone(req.Context())
-		current.Body = body
+		current.Body = io.NopCloser(bytes.NewReader(body))
 		credential = *next
 		authenticated = true
 	}

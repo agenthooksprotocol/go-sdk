@@ -82,7 +82,7 @@ func TestPreemptiveFirstSend(t *testing.T) {
 					}
 					return &http.Response{StatusCode: 401, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(""))}, nil
 				})}
-				response, err := Do(client, req, Request{Destination: req.URL.String(), Purpose: purpose}, provider, false)
+				response, err := Do(client, req, Request{Destination: req.URL.String(), Purpose: purpose}, provider)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -128,7 +128,7 @@ func TestPreemptiveOverrideAndCancellation(t *testing.T) {
 			if mode == "override" {
 				headers = http.Header{"authorization": {"Bearer override"}}
 			}
-			response, err := DoWithHeaders(client, req, Request{Destination: req.URL.String(), Purpose: Event}, provider, false, headers)
+			response, err := DoWithHeaders(client, req, Request{Destination: req.URL.String(), Purpose: Event}, provider, headers)
 			cancel()
 			if mode == "override" {
 				if err != nil {
@@ -169,7 +169,7 @@ func TestInsufficientScopeTransport(t *testing.T) {
 				calls++
 				return &http.Response{StatusCode: 403, Header: http.Header{"Www-Authenticate": {header}}, Body: io.NopCloser(strings.NewReader(""))}, nil
 			})}
-			response, err := Do(client, req, Request{Destination: req.URL.String(), Purpose: purpose}, provider, purpose == Upload)
+			response, err := Do(client, req, Request{Destination: req.URL.String(), Purpose: purpose}, provider)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -204,7 +204,7 @@ func TestInsufficientScopeSafeRetryBound(t *testing.T) {
 		challenged++
 		return &Credential{Type: "bearer", Token: "approved"}, nil
 	}}})
-	req, _ := http.NewRequest(http.MethodPost, "https://resource.example/events", strings.NewReader("body"))
+	req, _ := http.NewRequest(http.MethodPost, "https://resource.example/events", strings.NewReader(`{"jsonrpc":"2.0","id":"stable","method":"hooks/intercept"}`))
 	client := &http.Client{Transport: headerCapture(func(r *http.Request) (*http.Response, error) {
 		sent++
 		if sent == 2 && r.Header.Get("Authorization") != "Bearer approved" {
@@ -212,7 +212,7 @@ func TestInsufficientScopeSafeRetryBound(t *testing.T) {
 		}
 		return &http.Response{StatusCode: 403, Header: http.Header{"Www-Authenticate": {`Bearer error="insufficient_scope"`}}, Body: io.NopCloser(strings.NewReader(""))}, nil
 	})}
-	response, err := Do(client, req, Request{Destination: req.URL.String(), Purpose: Event}, provider, true)
+	response, err := Do(client, req, Request{Destination: req.URL.String(), Purpose: Event}, provider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,9 +230,26 @@ func TestProviderCredentialStillRequiresBearer(t *testing.T) {
 		}
 		req, _ := http.NewRequest(http.MethodPost, "https://resource.example/events", strings.NewReader("body"))
 		client := &http.Client{Transport: headerCapture(func(*http.Request) (*http.Response, error) { t.Fatal("invalid credential dispatched"); return nil, nil })}
-		_, err := Do(client, req, Request{Destination: req.URL.String(), Purpose: Event, Binding: []byte(`{"type":"oauth","flow":"client_credentials"}`)}, provider, false)
+		_, err := Do(client, req, Request{Destination: req.URL.String(), Purpose: Event, Binding: []byte(`{"type":"oauth","flow":"client_credentials"}`)}, provider)
 		if !errors.Is(err, ErrCredential) {
 			t.Fatalf("empty credential accepted: %v", err)
+		}
+	}
+}
+
+func TestChallengedReplayMethods(t *testing.T) {
+	for body, want := range map[string]bool{
+		`{"jsonrpc":"2.0","id":1,"method":"hooks/intercept"}`:       true,
+		`{"jsonrpc":"2.0","id":"x","method":"hooks/configuration"}`: true,
+		`{"jsonrpc":"2.0","id":1,"method":"hooks/capabilities"}`:    true,
+		`{"jsonrpc":"2.0","method":"hooks/intercept"}`:              false,
+		`{"jsonrpc":"2.0","id":null,"method":"hooks/intercept"}`:    false,
+		`{"jsonrpc":"2.0","method":"hooks/observe"}`:                false,
+		`{"jsonrpc":"2.0","id":1,"method":"compaction/run"}`:        false,
+		`not json`: false,
+	} {
+		if replayable([]byte(body)) != want {
+			t.Errorf("replayable(%s) != %v", body, want)
 		}
 	}
 }

@@ -510,7 +510,7 @@ func (c *Hooks) uploadContent(ctx context.Context, config map[string]any, raw []
 	if err != nil {
 		return nil, err
 	}
-	response, err := auth.DoWithHeaders(&client, request, auth.Request{Binding: binding, BackendID: backendID, Destination: endpoint, Purpose: auth.Upload}, c.opts.AuthProvider, false, headers)
+	response, err := auth.DoWithHeaders(&client, request, auth.Request{Binding: binding, BackendID: backendID, Destination: endpoint, Purpose: auth.Upload}, c.opts.AuthProvider, headers)
 	if err != nil {
 		return nil, errors.New("content upload failed")
 	}

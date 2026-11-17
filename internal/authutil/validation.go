@@ -33,3 +33,14 @@ func ValidURL(raw string, allowLocalHTTP bool) bool {
 	ip := net.ParseIP(u.Hostname())
 	return allowLocalHTTP && u.Scheme == "http" && (u.Hostname() == "localhost" || (ip != nil && ip.IsLoopback()))
 }
+
+// KnownCode reports whether code is one of the nine safe auth error codes.
+func KnownCode(code string) bool {
+	switch code {
+	case "invalid_configuration", "unsupported_binding", "credential_unavailable",
+		"interaction_required", "access_denied", "refresh_rejected", "discovery_failed",
+		"untrusted_destination", "provider_failed":
+		return true
+	}
+	return false
+}

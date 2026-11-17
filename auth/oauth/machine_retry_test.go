@@ -19,7 +19,7 @@ func TestClientCredentialsTransientReissueWithoutLogin(t *testing.T) {
 			_, err = p.Challenge(budget(t), r, auth.Challenge{StatusCode: http.StatusUnauthorized, Attempt: first.Attempt})
 			assertCode(t, err, auth.CodeProviderFailed)
 			stored, err := f.store.Load(budget(t), first.Attempt.(attempted).key)
-			if err != nil || stored == nil || stored.RefreshToken == "" || stored.RefreshRejected {
+			if err != nil || stored == nil || stored.RefreshToken == "" {
 				t.Fatal("transient machine failure discarded grant")
 			}
 			f.mode.Store("ok")
@@ -30,10 +30,7 @@ func TestClientCredentialsTransientReissueWithoutLogin(t *testing.T) {
 			if f.refreshCalls.Load() != 0 || f.tokenCalls.Load() != 3 {
 				t.Fatal("machine grant did not reissue noninteractively")
 			}
-			p.mu.Lock()
-			pending := len(p.pending)
-			p.mu.Unlock()
-			if pending != 0 {
+			if anyPending(f.store) {
 				t.Fatal("machine failure allocated pending consent")
 			}
 		})

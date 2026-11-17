@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 	"testing"
 
@@ -56,9 +55,7 @@ func TestManagedHostErrorCodeRedaction(t *testing.T) {
 				case "credential":
 					_, err = p.Credential(budget(t), r)
 				case "complete":
-					u, _ := url.Parse(login.AuthorizationURL())
-					callback := "https://client.example/callback?" + url.Values{"state": {u.Query().Get("state")}, "code": {"test-code"}}.Encode()
-					_, err = p.Complete(budget(t), login, callback)
+					_, err = p.Complete(budget(t), r, callback(login, "test-code"))
 				}
 				var classified *auth.Error
 				if !errors.As(err, &classified) {

@@ -3,6 +3,8 @@ package auth
 import (
 	"encoding/json"
 	"errors"
+
+	"github.com/agenthooksprotocol/go-sdk/internal/authutil"
 )
 
 // Code is a stable, secret-free operational classification, not a wire value.
@@ -44,28 +46,52 @@ func (e *Error) Recovery() Recovery {
 	}
 }
 
-// SDK-returned Error carries only an allowlisted code. Formatting, recovery and
-// JSON also allowlist Code for directly host-constructed values. It has no raw cause,
-// endpoint, response body, callback URL or credential fields. Use errors.As to
-// inspect Code and errors.Is for the existing auth sentinels. Cancellation is
-// joined separately, without retaining the provider's error chain.
-type Error struct{ Code Code }
+// SDK-returned Error carries only an allowlisted code and validated required
+// scopes: on interaction_required for a host to pass back to an explicit
+// prepare, on access_denied for diagnostics only. Formatting, recovery and JSON also
+// allowlist host-constructed values. It has no raw cause, endpoint, response
+// body, callback URL or credential fields. Use errors.As to inspect it and
+// errors.Is for the existing auth sentinels. Cancellation is joined separately,
+// without retaining the provider's error chain.
+type Error struct {
+	Code   Code
+	Scopes []string
+}
 
-// MarshalJSON preserves the Code field name while redacting unknown codes.
-// A value receiver protects both Error values and pointers supplied by hosts.
+// MarshalJSON redacts unknown codes and scopes. A value receiver protects both
+// Error values and pointers supplied by hosts.
 func (e Error) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct{ Code Code }{Code: safeCode(e.Code)})
+	safe := Classify(&e)
+	return json.Marshal(struct {
+		Code   Code
+		Scopes []string `json:",omitempty"`
+	}{safe.Code, safe.Scopes})
+}
+
+// Classify copies the first *Error in err's chain without the chain itself,
+// keeping only an allowlisted code and, where that code permits, grammatically
+// valid scopes. It returns nil when err contains no *Error.
+func Classify(err error) *Error {
+	var classified *Error
+	if !errors.As(err, &classified) || classified == nil {
+		return nil
+	}
+	result := &Error{Code: safeCode(classified.Code)}
+	if result.Code == CodeInteractionRequired || result.Code == CodeAccessDenied {
+		for _, scope := range classified.Scopes {
+			if authutil.ValidScope(scope) {
+				result.Scopes = append(result.Scopes, scope)
+			}
+		}
+	}
+	return result
 }
 
 func safeCode(code Code) Code {
-	switch code {
-	case CodeInvalidConfiguration, CodeUnsupportedBinding, CodeCredentialUnavailable,
-		CodeInteractionRequired, CodeAccessDenied, CodeRefreshRejected, CodeDiscoveryFailed,
-		CodeUntrustedDestination, CodeProviderFailed:
+	if authutil.KnownCode(string(code)) {
 		return code
-	default:
-		return CodeProviderFailed
 	}
+	return CodeProviderFailed
 }
 func (e *Error) Error() string { return "auth: " + string(safeCode(e.Code)) }
 func (e *Error) Is(target error) bool {
@@ -85,23 +111,11 @@ func redactProviderError(err error) error {
 	return redactError(errors.Join(ErrCredential, classifiedError(err)), err)
 }
 
-// classifiedError copies only known codes from an untrusted provider error.
+// classifiedError copies only an allowlisted SDK error from an untrusted
+// provider error. Any other provider error is an operational failure.
 func classifiedError(err error) error {
-	var classified *Error
-	if errors.As(err, &classified) && classified != nil {
-		return &Error{Code: safeCode(classified.Code)}
-	}
-	for _, known := range []struct {
-		sentinel error
-		code     Code
-	}{
-		{ErrConfig, CodeInvalidConfiguration},
-		{ErrScope, CodeUntrustedDestination},
-		{ErrCredential, CodeCredentialUnavailable},
-	} {
-		if errors.Is(err, known.sentinel) {
-			return &Error{Code: known.code}
-		}
+	if classified := Classify(err); classified != nil {
+		return classified
 	}
 	return &Error{Code: CodeProviderFailed}
 }

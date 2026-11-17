@@ -28,7 +28,7 @@ type providerRoundTrip func(*http.Request) (*http.Response, error)
 
 func (f providerRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 func providerRequest() (*http.Request, Request) {
-	r, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://backend.example/event", bytes.NewBufferString(`{"id":"stable"}`))
+	r, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://backend.example/event", bytes.NewBufferString(`{"jsonrpc":"2.0","id":"stable","method":"hooks/intercept"}`))
 	return r, Request{Binding: json.RawMessage(`{"type":"oauth","flow":"client_credentials","issuer":"https://issuer.example","resource":"resource","clientId":"client","clientSecretRef":"ref","scopes":["event"],"extension":{"trusted":true}}`), BackendID: "example.backend", Destination: r.URL.String(), Purpose: Event}
 }
 func providerResponse(status int) *http.Response {
@@ -58,7 +58,7 @@ func TestProviderChallengePreservesBindingBodyAndOpaqueAttempt(t *testing.T) {
 		calls++
 		data, _ := io.ReadAll(r.Body)
 		r.Body.Close()
-		if string(data) != `{"id":"stable"}` {
+		if string(data) != `{"jsonrpc":"2.0","id":"stable","method":"hooks/intercept"}` {
 			t.Fatal("body changed")
 		}
 		want := "Bearer first"
@@ -70,7 +70,7 @@ func TestProviderChallengePreservesBindingBodyAndOpaqueAttempt(t *testing.T) {
 		}
 		return providerResponse(401), nil
 	})}
-	resp, err := Do(client, req, scope, provider, true)
+	resp, err := Do(client, req, scope, provider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestProviderAbsentBindingAndUnsafeReplay(t *testing.T) {
 				}
 				return providerResponse(200), nil
 			})}
-			resp, err := Do(client, req, scope, p, safe)
+			resp, err := Do(client, req, scope, p)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -148,7 +148,7 @@ func TestProviderFailsClosedAndRedacts(t *testing.T) {
 				t.Fatal("dispatched unauthorized request")
 				return nil, nil
 			})}
-			_, err := Do(client, req, scope, provider, true)
+			_, err := Do(client, req, scope, provider)
 			if err == nil || strings.Contains(err.Error(), "secret") {
 				t.Fatalf("unredacted/missing error %v", err)
 			}
@@ -163,7 +163,7 @@ func TestProviderCancellationAndRedirect(t *testing.T) {
 		cancel()
 		return Credential{Type: "bearer", Token: "valid"}, nil
 	}}
-	_, err := Do(&http.Client{Transport: providerRoundTrip(func(*http.Request) (*http.Response, error) { t.Fatal("dispatched canceled request"); return nil, nil })}, req, scope, p, true)
+	_, err := Do(&http.Client{Transport: providerRoundTrip(func(*http.Request) (*http.Response, error) { t.Fatal("dispatched canceled request"); return nil, nil })}, req, scope, p)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestProviderCancellationAndRedirect(t *testing.T) {
 		r.Header.Set("Location", "https://other.example")
 		return r, nil
 	})}
-	resp, err := Do(client, req, scope, nil, true)
+	resp, err := Do(client, req, scope, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

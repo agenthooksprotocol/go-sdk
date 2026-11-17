@@ -109,32 +109,6 @@ func TestManagedChallengeScopesAreNotConsent(t *testing.T) {
 		t.Fatal("server-selected scope reached token exchange")
 	}
 }
-func TestManagedOriginalConsentCancellation(t *testing.T) {
-	f, p, r := setup(t, "authorization_code_pkce")
-	ctx, cancel := context.WithCancel(budget(t))
-	state, err := p.Prepare(ctx, r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cancel()
-	unbound := r
-	unbound.Binding = nil
-	if _, err := p.Credential(ctx, unbound); !errors.Is(err, context.Canceled) {
-		t.Fatal("anonymous credential selection lost cancellation")
-	}
-	u, _ := url.Parse(state.Login.AuthorizationURL())
-	_, err = p.Complete(budget(t), state.Login, "https://client.example/callback?"+url.Values{"state": {u.Query().Get("state")}, "code": {"code"}}.Encode())
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("original cancellation lost: %v", err)
-	}
-	if f.tokenCalls.Load() != 0 {
-		t.Fatal("cancelled login reached exchange")
-	}
-	repaired, err := p.Prepare(budget(t), r)
-	if err != nil || repaired.Login == state.Login {
-		t.Fatal("cancelled consent cannot be replaced")
-	}
-}
 func TestResourceCoverageAndChallengeParsing(t *testing.T) {
 	for _, test := range []struct {
 		resource, endpoint string

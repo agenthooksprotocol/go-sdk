@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -80,18 +81,21 @@ func (s *memoryStore) Coordinate(ctx context.Context, key string, work func(cont
 }
 
 type fixture struct {
-	server       *httptest.Server
-	store        *memoryStore
-	flow         string
-	mode         atomic.Value
-	tokenCalls   atomic.Int32
-	refreshCalls atomic.Int32
-	eventCalls   atomic.Int32
-	grantsMu     sync.Mutex
-	grants       []url.Values
-	started      chan struct{}
-	release      chan struct{}
-	resource     string
+	server        *httptest.Server
+	store         *memoryStore
+	flow          string
+	mode          atomic.Value
+	tokenCalls    atomic.Int32
+	refreshCalls  atomic.Int32
+	eventCalls    atomic.Int32
+	metadataCalls atomic.Int32
+	grantsMu      sync.Mutex
+	grants        []url.Values
+	started       chan struct{}
+	release       chan struct{}
+	resource      string
+	onRefresh     func()
+	bodies        []string
 }
 
 func setup(t *testing.T, flow string) (*fixture, *Provider, auth.Request) {
@@ -124,6 +128,9 @@ func setup(t *testing.T, flow string) (*fixture, *Provider, auth.Request) {
 }
 func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	if strings.HasPrefix(r.URL.Path, "/.well-known/") || r.URL.Path == "/custom-resource" {
+		f.metadataCalls.Add(1)
+	}
 	switch r.URL.Path {
 	case "/.well-known/oauth-protected-resource/events", "/.well-known/oauth-protected-resource", "/custom-resource":
 		json.NewEncoder(w).Encode(map[string]any{"resource": f.resource, "authorization_servers": []string{f.server.URL}})
@@ -140,6 +147,9 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 		f.grantsMu.Unlock()
 		if r.PostForm.Get("grant_type") == "refresh_token" {
 			f.refreshCalls.Add(1)
+			if f.onRefresh != nil {
+				f.onRefresh()
+			}
 		}
 		clientID := r.PostForm.Get("client_id")
 		if id, secret, ok := r.BasicAuth(); ok {
@@ -193,6 +203,9 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		scopes := "events"
 		if mode == "extra-scope" {
+			scopes = "events admin openid"
+		}
+		if mode == "admin-scope" {
 			scopes = "events admin"
 		}
 		response := map[string]any{"access_token": "access-token", "refresh_token": "refresh-token", "token_type": "Bearer", "expires_in": 3600, "scope": scopes}
@@ -222,7 +235,11 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(response)
 	case "/events":
 		f.eventCalls.Add(1)
-		if r.Header.Get("Authorization") == "Bearer access-token" {
+		body, _ := io.ReadAll(r.Body)
+		f.grantsMu.Lock()
+		f.bodies = append(f.bodies, string(body))
+		f.grantsMu.Unlock()
+		if r.Header.Get("Authorization") == "Bearer access-token" && f.mode.Load().(string) != "reject-events" {
 			fmt.Fprint(w, `{}`)
 			return
 		}
@@ -248,23 +265,44 @@ func assertCode(t *testing.T, err error, code auth.Code) {
 		t.Fatal("error leaked secret")
 	}
 }
-func finishLogin(t *testing.T, p *Provider, r auth.Request) auth.Credential {
+
+// callback builds the redirect a real authorization server would send for login.
+func callback(login *PendingLogin, code string) string {
+	u, _ := url.Parse(login.AuthorizationURL())
+	return "https://client.example/callback?" + url.Values{"state": {u.Query().Get("state")}, "code": {code}, "iss": {u.Scheme + "://" + u.Host}}.Encode()
+}
+func finishLogin(t *testing.T, p *Provider, r auth.Request, required ...string) auth.Credential {
 	t.Helper()
 	ctx := budget(t)
-	state, err := p.Prepare(ctx, r)
+	state, err := p.Prepare(ctx, r, required...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if state.Login == nil {
 		t.Fatal("expected consent")
 	}
-	u, _ := url.Parse(state.Login.AuthorizationURL())
-	callback := "https://client.example/callback?" + url.Values{"state": {u.Query().Get("state")}, "code": {"test-code"}, "iss": {state.Login.config.Issuer}}.Encode()
-	credential, err := p.Complete(ctx, state.Login, callback)
+	credential, err := p.Complete(ctx, r, callback(state.Login, "test-code"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return credential
+}
+
+// pendingRecord reads the stored login for r's grant.
+func pendingRecord(t *testing.T, f *fixture, p *Provider, r auth.Request) *PendingRecord {
+	t.Helper()
+	config, _, cached, err := p.cachedBinding(budget(t), r)
+	if err != nil || !cached {
+		t.Fatalf("binding: %v", err)
+	}
+	record, err := f.store.Load(budget(t), p.key(r, config))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record == nil {
+		return nil
+	}
+	return record.Pending
 }
 func expire(t *testing.T, f *fixture, c auth.Credential) {
 	t.Helper()
@@ -297,22 +335,23 @@ func TestManagedPKCECompletionAndPendingDedup(t *testing.T) {
 		t.Fatal(err)
 	}
 	again, err := p.Prepare(ctx, r)
-	if err != nil || state.Login != again.Login {
+	if err != nil || state.Login.AuthorizationURL() != again.Login.AuthorizationURL() {
 		t.Fatal("pending login was not shared")
 	}
+	pending := pendingRecord(t, f, p, r)
 	u, _ := url.Parse(state.Login.AuthorizationURL())
 	q := u.Query()
-	digest := sha256.Sum256([]byte(state.Login.verifier))
+	digest := sha256.Sum256([]byte(pending.Verifier))
 	if q.Get("code_challenge_method") != "S256" || q.Get("code_challenge") != base64.RawURLEncoding.EncodeToString(digest[:]) || q.Get("resource") != f.resource {
 		t.Fatal("PKCE/resource lost")
 	}
 	callback := "https://client.example/callback?" + url.Values{"state": {q.Get("state")}, "code": {"test-code"}, "iss": {f.server.URL}}.Encode()
-	credential, err := p.Complete(ctx, state.Login, callback)
+	credential, err := p.Complete(ctx, r, callback)
 	if err != nil || credential.Token != "access-token" {
 		t.Fatalf("completion: %v", err)
 	}
-	_, err = p.Complete(ctx, state.Login, callback)
-	assertCode(t, err, auth.CodeInvalidConfiguration)
+	_, err = p.Complete(ctx, r, callback)
+	assertCode(t, err, auth.CodeInteractionRequired)
 	cached, err := p.Prepare(ctx, r)
 	if err != nil || cached.Credential == nil {
 		t.Fatalf("restore: %v", err)
@@ -323,11 +362,15 @@ func TestManagedPKCECompletionAndPendingDedup(t *testing.T) {
 	f.grantsMu.Lock()
 	grant := f.grants[0]
 	f.grantsMu.Unlock()
-	if grant.Get("code_verifier") != state.Login.verifier || grant.Get("redirect_uri") != "https://client.example/callback" {
+	if grant.Get("code_verifier") != pending.Verifier || grant.Get("redirect_uri") != "https://client.example/callback" {
 		t.Fatal("code exchange lost binding")
 	}
-	if text := fmt.Sprintf("%+v %#v %+v", state.Login, state.Login, state); strings.Contains(text, "test-code") || strings.Contains(text, state.Login.state) || strings.Contains(text, state.Login.verifier) {
+	if text := fmt.Sprintf("%+v %#v %+v %+v %#v", state.Login, state.Login, state, pending, *pending); strings.Contains(text, pending.State) || strings.Contains(text, pending.Verifier) || strings.Contains(text, "https://") {
 		t.Fatal("login formatting leaked secrets")
+	}
+	var missing *PendingLogin
+	if missing.AuthorizationURL() != "" || !missing.Deadline().IsZero() {
+		t.Fatal("nil pending login accessor")
 	}
 }
 func TestManagedClientCredentialsSingleFlightAndIsolation(t *testing.T) {
@@ -406,12 +449,20 @@ func TestManagedResourceBoundRefreshAndStaleRejection(t *testing.T) {
 	if form.Get("resource") != f.resource || form.Get("refresh_token") != "refresh-token" {
 		t.Fatal("refresh lost audience")
 	}
-	recovered, err := p.Challenge(ctx, r, auth.Challenge{StatusCode: 401, Attempt: first.Attempt})
+	// A rejection of an older token never drops the current one.
+	stale := first.Attempt.(attempted)
+	stale.token = "older-access"
+	recovered, err := p.Challenge(ctx, r, auth.Challenge{StatusCode: 401, Attempt: stale})
 	if err != nil || recovered == nil {
 		t.Fatal(err)
 	}
 	if f.refreshCalls.Load() != 1 {
 		t.Fatal("stale rejection refreshed current generation")
+	}
+	// Rejecting the current token drops it, so it is never resent.
+	recovered, err = p.Challenge(ctx, r, auth.Challenge{StatusCode: 401, Attempt: recovered.Attempt})
+	if err != nil || recovered == nil || f.refreshCalls.Load() != 2 {
+		t.Fatal("rejected current token was not dropped and renewed")
 	}
 }
 func TestManagedTemporaryRefreshRetainsAndDefinitiveRejectionRepairs(t *testing.T) {
@@ -423,7 +474,7 @@ func TestManagedTemporaryRefreshRetainsAndDefinitiveRejectionRepairs(t *testing.
 	_, err := p.Prepare(ctx, r)
 	assertCode(t, err, auth.CodeProviderFailed)
 	record, err := f.store.Load(ctx, first.Attempt.(attempted).key)
-	if err != nil || record.RefreshToken != "refresh-token" || record.RefreshUncertain {
+	if err != nil || record.RefreshToken != "refresh-token" {
 		t.Fatal("known-safe temporary failure discarded credentials")
 	}
 	f.mode.Store("ok")
@@ -440,9 +491,7 @@ func TestManagedTemporaryRefreshRetainsAndDefinitiveRejectionRepairs(t *testing.
 		t.Fatal("rejected refresh cannot be repaired by consent")
 	}
 	f.mode.Store("ok")
-	u, _ := url.Parse(repair.Login.AuthorizationURL())
-	_, err = p.Complete(ctx, repair.Login, "https://client.example/callback?"+url.Values{"state": {u.Query().Get("state")}, "code": {"repair"}}.Encode())
-	if err != nil {
+	if _, err = p.Complete(ctx, r, callback(repair.Login, "repair")); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -462,8 +511,8 @@ func TestManagedCancellationLeavesAmbiguityAndReleasesCoordination(t *testing.T)
 	}
 	close(f.release)
 	record, _ := f.store.Load(budget(t), first.Attempt.(attempted).key)
-	if record == nil || !record.RefreshUncertain || record.RefreshToken != "refresh-token" {
-		t.Fatal("ambiguous rotation was silently reused")
+	if record == nil || record.RefreshToken != "refresh-token" || usable(record) {
+		t.Fatal("ambiguous rotation lost refresh material")
 	}
 	f.mode.Store("ok")
 	repair, err := p.Prepare(budget(t), r)
@@ -484,8 +533,8 @@ func TestManagedFailedRefreshCommitDoesNotReuseOldGeneration(t *testing.T) {
 	f.store.failSave.Store(false)
 	f.mode.Store("ok")
 	record, _ := f.store.Load(budget(t), first.Attempt.(attempted).key)
-	if record == nil || !record.RefreshUncertain {
-		t.Fatal("failed commit lost ambiguity marker")
+	if record == nil || record.RefreshToken != "refresh-token" || usable(record) {
+		t.Fatal("failed commit changed the stored grant")
 	}
 	repair, err := p.Prepare(budget(t), r)
 	if err != nil || repair.Credential == nil || repair.Login != nil {
@@ -518,20 +567,24 @@ func TestManagedCallbackBindingAndNoImplicitConsent(t *testing.T) {
 			case "duplicate":
 				q.Add("state", q.Get("state"))
 			}
-			_, err = p.Complete(ctx, prepared.Login, redirect+"?"+q.Encode())
-			assertCode(t, err, auth.CodeAccessDenied)
+			_, err = p.Complete(ctx, r, redirect+"?"+q.Encode())
+			if change == "state" {
+				assertCode(t, err, auth.CodeInteractionRequired)
+			} else {
+				assertCode(t, err, auth.CodeAccessDenied)
+			}
 			if f.tokenCalls.Load() != 0 {
 				t.Fatal("invalid callback reached exchange")
 			}
 			valid := url.Values{"state": {u.Query().Get("state")}, "code": {"code"}}
-			if _, err := p.Complete(ctx, prepared.Login, "https://client.example/callback?"+valid.Encode()); err != nil {
+			if _, err := p.Complete(ctx, r, "https://client.example/callback?"+valid.Encode()); err != nil {
 				t.Fatalf("stray callback consumed pending login: %v", err)
 			}
 		})
 	}
 }
 func TestManagedTrustScopesRedirectsAndErrorRedaction(t *testing.T) {
-	for _, mode := range []string{"deny-metadata", "deny-token", "deny-authorization", "extra-scope", "missing-type", "wrong-type", "redirect", "bad-selection"} {
+	for _, mode := range []string{"deny-metadata", "deny-token", "deny-authorization", "missing-type", "wrong-type", "redirect", "bad-selection"} {
 		t.Run(mode, func(t *testing.T) {
 			f, p, r := setup(t, "client_credentials")
 			options := p.options
@@ -591,33 +644,4 @@ func TestManagedChallengeDiscoveryAndForeignAttempt(t *testing.T) {
 	assertCode(t, err, auth.CodeInvalidConfiguration)
 	_, err = p.Prepare(context.Background(), r)
 	assertCode(t, err, auth.CodeInvalidConfiguration)
-}
-func TestManagedCancelledPendingAndNewerLoginGeneration(t *testing.T) {
-	f, p, r := setup(t, "authorization_code_pkce")
-	ctx := budget(t)
-	first, err := p.Prepare(ctx, r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	p.Cancel(first.Login)
-	_, err = p.Complete(ctx, first.Login, "https://client.example/callback?state=x&code=x")
-	assertCode(t, err, auth.CodeInvalidConfiguration)
-	second, err := p.Prepare(ctx, r)
-	if err != nil || second.Login == first.Login {
-		t.Fatal("cancelled login reused")
-	}
-	options := p.options
-	other, err := New(options)
-	if err != nil {
-		t.Fatal(err)
-	}
-	finishLogin(t, other, r)
-	u, _ := url.Parse(second.Login.AuthorizationURL())
-	credential, err := p.Complete(ctx, second.Login, "https://client.example/callback?"+url.Values{"state": {u.Query().Get("state")}, "code": {"old"}}.Encode())
-	if err != nil || credential.Token == "" {
-		t.Fatal(err)
-	}
-	if f.tokenCalls.Load() != 1 {
-		t.Fatal("stale pending login overwrote new generation")
-	}
 }

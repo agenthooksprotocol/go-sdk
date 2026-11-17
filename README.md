@@ -636,9 +636,10 @@ fail closed. An absent binding starts anonymously; an explicitly supplied provid
 may authorize recovery from an actual challenge according to host trust policy.
 
 Event and upload bindings are independent: uploads never inherit event
-credentials. Authenticated interceptor delivery permits one challenge retry with
-the same request identity/body and remaining context budget. Notifications and
-uploads are not replayed. Redirects are never followed. Separately scoped
+credentials. After a handled 401 or Bearer `insufficient_scope` 403,
+`hooks/intercept`, `hooks/configuration` and `hooks/capabilities` requests are
+replayed once with the same body and request id within the remaining context
+budget. Notifications and uploads are not replayed. Redirects are never followed. Separately scoped
 `auth` transports support custom transport configuration;
 deployment-specific TLS/workload mechanisms stay transport-owned. Borrowed HTTP
 clients are never closed.
@@ -679,7 +680,9 @@ shape and HTTPS issuer/resource URLs, **not** issuer trust, permissions or netwo
 policy. The router creates no credential cache, shared registry or worker.
 
 Registration-aware failures support `errors.As(err, &authError)` for `*auth.Error`
-and its stable `Code`; `errors.Is` still matches the existing auth sentinels and
+and its stable `Code` (plus validated required `Scopes`: on `interaction_required`
+to pass back to `Prepare`, on `access_denied` for diagnostics); a provider error that is not an `*auth.Error` becomes
+`provider_failed`; `errors.Is` still matches the existing auth sentinels and
 native cancellation/deadline identities. Provider messages, raw causes, callback
 URLs and response bodies are discarded. Low-level scoped token transports retain
 their existing sentinel-only errors. Operational codes distinguish invalid

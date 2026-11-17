@@ -14,7 +14,7 @@ import (
 )
 
 func routeRequest(destination, binding string, purpose Operation) (*http.Request, Request) {
-	req, _ := http.NewRequest(http.MethodPost, destination, bytes.NewBufferString(`{"id":"stable"}`))
+	req, _ := http.NewRequest(http.MethodPost, destination, bytes.NewBufferString(`{"jsonrpc":"2.0","id":"stable","method":"hooks/intercept"}`))
 	return req, Request{BackendID: "backend", Destination: destination, Purpose: purpose, Binding: json.RawMessage(binding)}
 }
 
@@ -55,7 +55,7 @@ func TestRouteMixedBearerOAuth(t *testing.T) {
 		{"/event", `{"type":"bearer","tokenRef":"vault/event"}`, Event}, {"/upload", oauthPreset, Upload},
 	} {
 		req, r := routeRequest(server.URL+tc.path, tc.binding, tc.purpose)
-		resp, err := Do(server.Client(), req, r, provider, false)
+		resp, err := Do(server.Client(), req, r, provider)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -85,7 +85,7 @@ func TestRouteFailuresNeverFallBack(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req, r := routeRequest(server.URL, tc.binding, Event)
-			_, err := Do(server.Client(), req, r, Route(tc.options), true)
+			_, err := Do(server.Client(), req, r, Route(tc.options))
 			var classified *Error
 			if !errors.As(err, &classified) || classified.Code != tc.code || !errors.Is(err, ErrCredential) {
 				t.Fatalf("unexpected classification: %v", err)
@@ -117,7 +117,7 @@ func TestRouteExplicitAuthorization(t *testing.T) {
 		return nil, nil
 	}}})
 	req, r := routeRequest(server.URL, oauthPreset, Event)
-	resp, err := DoWithHeaders(server.Client(), req, r, provider, true, http.Header{"authorization": {"custom"}})
+	resp, err := DoWithHeaders(server.Client(), req, r, provider, http.Header{"authorization": {"custom"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestRouteUnconfiguredChallengeAndBoundedReplay(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
 				body, _ := io.ReadAll(r.Body)
-				if string(body) != `{"id":"stable"}` {
+				if string(body) != `{"jsonrpc":"2.0","id":"stable","method":"hooks/intercept"}` {
 					t.Error("replay body changed")
 				}
 				if calls == 1 && r.Header.Get("Authorization") != "" {
@@ -160,7 +160,7 @@ func TestRouteUnconfiguredChallengeAndBoundedReplay(t *testing.T) {
 				return &Credential{Type: "bearer", Token: "replacement", Attempt: identity}, nil
 			}}})
 			req, r := routeRequest(server.URL, "", purpose)
-			resp, err := Do(server.Client(), req, r, provider, true)
+			resp, err := Do(server.Client(), req, r, provider)
 			if err != nil {
 				t.Fatal(err)
 			}

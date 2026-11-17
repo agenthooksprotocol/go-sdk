@@ -110,19 +110,6 @@ func (p *Provider) resolve(ctx context.Context, request auth.Request, challenge 
 	if explicit && (config.Issuer != preset.Issuer || config.ClientID != preset.ClientID || config.Flow != preset.Flow || !sameScopes(config.Scopes, preset.Scopes)) {
 		return ClientConfig{}, metadata{}, fail(auth.CodeInvalidConfiguration)
 	}
-	required, err := bearerParameter(challenge, "scope")
-	if err != nil {
-		return ClientConfig{}, metadata{}, fail(auth.CodeDiscoveryFailed)
-	}
-	if required != "" && !authutil.ValidScopeList(required) {
-		return ClientConfig{}, metadata{}, fail(auth.CodeAccessDenied)
-	}
-	for _, scope := range strings.Fields(required) {
-		if !contains(allowedScopes(config), scope) {
-			return ClientConfig{}, metadata{}, fail(auth.CodeAccessDenied)
-		}
-	}
-	config.RequiredScopes = sortedUnique(append(config.RequiredScopes, strings.Fields(required)...))
 	return p.resolveMetadata(ctx, config)
 }
 
@@ -151,22 +138,9 @@ func (p *Provider) resolveMetadata(ctx context.Context, config ClientConfig) (Cl
 		if config.Flow == "client_credentials" && !contains(m.GrantTypes, "client_credentials") {
 			return ClientConfig{}, metadata{}, fail(auth.CodeUnsupportedBinding)
 		}
-		methods := m.TokenAuthMethods
-		if methods == nil {
-			methods = []string{"client_secret_basic"}
-		}
-		method := config.TokenAuthMethod
-		if method == "" {
-			if config.ClientSecret == "" {
-				method = "none"
-			} else if contains(methods, "client_secret_post") {
-				method = "client_secret_post"
-			} else {
-				method = "client_secret_basic"
-			}
-		}
-		if !contains(methods, method) || (method != "none" && method != "client_secret_post" && method != "client_secret_basic") || (method == "none" && config.ClientSecret != "") || (method != "none" && config.ClientSecret == "") {
-			return ClientConfig{}, metadata{}, fail(auth.CodeUnsupportedBinding)
+		method, err := tokenMethod(config, m)
+		if err != nil {
+			return ClientConfig{}, metadata{}, err
 		}
 		config.TokenAuthMethod = method
 		if err := p.check(ctx, m.TokenEndpoint, TokenEndpoint); err != nil {
@@ -180,6 +154,29 @@ func (p *Provider) resolveMetadata(ctx context.Context, config ClientConfig) (Cl
 		return config, m, nil
 	}
 	return ClientConfig{}, metadata{}, fail(auth.CodeDiscoveryFailed)
+}
+
+// tokenMethod selects a supported token-endpoint authentication method for
+// the current client secret from issuer metadata.
+func tokenMethod(config ClientConfig, m metadata) (string, error) {
+	methods := m.TokenAuthMethods
+	if methods == nil {
+		methods = []string{"client_secret_basic"}
+	}
+	method := config.TokenAuthMethod
+	if method == "" {
+		if config.ClientSecret == "" {
+			method = "none"
+		} else if contains(methods, "client_secret_post") {
+			method = "client_secret_post"
+		} else {
+			method = "client_secret_basic"
+		}
+	}
+	if !contains(methods, method) || (method != "none" && method != "client_secret_post" && method != "client_secret_basic") || (method == "none" && config.ClientSecret != "") || (method != "none" && config.ClientSecret == "") {
+		return "", fail(auth.CodeUnsupportedBinding)
+	}
+	return method, nil
 }
 
 func resourceCovers(resource, endpoint string) bool {

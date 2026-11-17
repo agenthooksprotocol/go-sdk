@@ -3,8 +3,6 @@ package oauth
 import (
 	"context"
 	"net/http"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/agenthooksprotocol/go-sdk/auth"
@@ -21,8 +19,10 @@ const (
 )
 
 // ClientConfig is selected by local policy, never by an advertisement alone.
-// Scopes are requested scopes. AllowedScopes defaults to Scopes; RequiredScopes
-// are explicit operation requirements. ClientSecret is a
+// Scopes are requested scopes. AllowedScopes, the ceiling, defaults to Scopes;
+// it governs what the SDK requests and records, not what an issued token can
+// do (enforce that in ValidateToken). RequiredScopes are explicit operation
+// requirements. ClientSecret is a
 // runtime secret, not registration data. Its formatting is always redacted.
 type ClientConfig struct {
 	Issuer, Resource, ClientID, Flow string
@@ -41,26 +41,39 @@ func (ClientConfig) String() string   { return "oauth.ClientConfig{redacted}" }
 func (ClientConfig) GoString() string { return "oauth.ClientConfig{redacted}" }
 
 // Record is an opaque-to-the-SDK host-persisted credential generation. Hosts
-// must return detached values and atomically persist complete copies. A refresh
-// with an unknown outcome retains old secrets for host-controlled retry.
+// must return detached values and atomically persist complete copies.
 type Record struct {
 	AccessToken, RefreshToken, Generation string
 	// Zero ExpiresAt means unknown expiry, not an expired credential.
-	ExpiresAt                                   time.Time
-	Scopes                                      []string
-	Rejected, RefreshRejected, RefreshUncertain bool
-	Binding                                     *BindingMetadata
+	ExpiresAt time.Time
+	// Scopes is the recorded grant: response scopes within the acquisition
+	// ceiling, or within the previous grant on refresh. Each caller's current
+	// ceiling filters it at use.
+	Scopes  []string
+	Binding *BindingMetadata
+	// Pending is the explicit host login awaiting its callback, if any.
+	Pending *PendingRecord
 }
 
 // BindingMetadata is secret-free principal and discovery state at a binding key.
 type BindingMetadata struct {
 	Config         ClientConfig
 	IssuerMetadata metadata
-	RequiredScopes []string
 }
 
-func (Record) String() string   { return "oauth.Record{redacted}" }
-func (Record) GoString() string { return "oauth.Record{redacted}" }
+// PendingRecord is a stored login. Its lifetime is fixed at creation, so any
+// process sharing the Store can complete it before ExpiresAt.
+type PendingRecord struct {
+	State, Verifier, RedirectURI, AuthorizationURL string
+	// Scopes are requested; Ceiling bounds the grant recorded on completion.
+	Scopes, Ceiling []string
+	ExpiresAt       time.Time
+}
+
+func (Record) String() string          { return "oauth.Record{redacted}" }
+func (Record) GoString() string        { return "oauth.Record{redacted}" }
+func (PendingRecord) String() string   { return "oauth.PendingRecord{redacted}" }
+func (PendingRecord) GoString() string { return "oauth.PendingRecord{redacted}" }
 
 // Store owns persistence and cross-instance/process coordination. Coordinate
 // must serialize the complete callback for a key, honor cancellation while
@@ -90,41 +103,43 @@ type Options struct {
 	// ValidateToken must verify token validity and resource/audience under local
 	// policy (including JWT verification where applicable). Never log its input.
 	ValidateToken func(context.Context, ClientConfig, *oauth2.Token) error
+	// LoginLifetime fixes how long a pending login stays completable. Zero means
+	// the default and maximum of 10 minutes.
+	LoginLifetime time.Duration
 }
 
-// Provider has no workers, listeners or owned HTTP lifecycle. The host owns it.
-// mu guards only pending-map membership: entries are immutable except the
-// atomic consumed flag. No host callbacks, network calls or stores run under mu.
-// Writers: Prepare inserts/prunes, Complete/Cancel remove their exact entry.
-// Cancellation never resurrects a consumed entry; expired entries are pruned
-// during preparation. Bounded entries hold at most 128 active login secrets.
+// Provider has no workers, listeners, owned HTTP lifecycle or in-memory login
+// state. Pending logins live in the Store. The host owns the Provider.
 type Provider struct {
 	options Options
 	client  http.Client
-	mu      sync.Mutex
-	pending map[string]*PendingLogin
 }
 
-// PendingLogin is a single-use, bounded consent operation. Only the explicit
-// AuthorizationURL accessor reveals the URL; formatting never reveals secrets.
-// It is tied to this provider, original target, redirect, state and deadline.
-// Copying this handle shares state; no secret or atomic is copied by value.
-type PendingLogin struct{ *pendingState }
-type pendingState struct {
-	owner                                                      *Provider
-	key, expected, identity, authorizationURL, state, verifier string
-	config                                                     ClientConfig
-	metadata                                                   metadata
-	request                                                    auth.Request
-	deadline                                                   time.Time
-	source                                                     context.Context
-	used                                                       atomic.Bool
+// PendingLogin describes a stored login. Only the explicit AuthorizationURL
+// accessor reveals the URL; formatting never reveals it.
+type PendingLogin struct {
+	authorizationURL string
+	deadline         time.Time
 }
 
-func (PendingLogin) String() string              { return "oauth.PendingLogin{redacted}" }
-func (PendingLogin) GoString() string            { return "oauth.PendingLogin{redacted}" }
-func (p *PendingLogin) AuthorizationURL() string { return p.authorizationURL }
-func (p *PendingLogin) Deadline() time.Time      { return p.deadline }
+func (PendingLogin) String() string   { return "oauth.PendingLogin{redacted}" }
+func (PendingLogin) GoString() string { return "oauth.PendingLogin{redacted}" }
+
+// AuthorizationURL returns the URL the host opens for consent.
+func (p *PendingLogin) AuthorizationURL() string {
+	if p == nil {
+		return ""
+	}
+	return p.authorizationURL
+}
+
+// Deadline is the fixed expiry of the stored login.
+func (p *PendingLogin) Deadline() time.Time {
+	if p == nil {
+		return time.Time{}
+	}
+	return p.deadline
+}
 
 // Preparation contains exactly one of Credential and Login on success.
 type Preparation struct {
