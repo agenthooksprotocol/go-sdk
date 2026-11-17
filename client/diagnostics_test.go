@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/auth"
 	"github.com/agenthooksprotocol/go-sdk/diagnostic"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -108,5 +111,48 @@ func TestDeliveryDiagnosticCodesRetainAtomicPrefix(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// A typed auth failure from the real authenticated HTTP transport reaches the
+// delivery diagnostic redacted, so a host can prompt login for that backend.
+func TestDeliveryDiagnosticCarriesTypedAuthError(t *testing.T) {
+	const secret = "secret-provider-detail"
+	for _, tc := range []struct {
+		name string
+		err  error
+		want *auth.Error
+	}{
+		{"interaction-required", errors.Join(errors.New(secret), &auth.Error{Code: auth.CodeInteractionRequired, Scopes: []string{"events", "bad scope"}}), &auth.Error{Code: auth.CodeInteractionRequired, Scopes: []string{"events"}}},
+		{"unclassified", errors.New(secret), &auth.Error{Code: auth.CodeProviderFailed}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := clientAuthProvider{credential: func(context.Context, auth.Request) (auth.Credential, error) { return auth.Credential{}, tc.err }}
+			transport, err := newAuthenticatedBackendTransport(registrationAuthTestBackend(t, "https://not-dispatched.example/hooks"), nil, provider)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer transport.Close()
+			hooks, _ := testClient(t, "fail-open", "fail-open")
+			hooks.backends[1].transport = transport
+			result, err := hooks.intercept(context.Background(), "tool.before", testInput())
+			if err != nil {
+				t.Fatal(err)
+			}
+			waitObservations(t, result)
+			if len(result.Diagnostics) != 1 {
+				t.Fatalf("diagnostics: %+v", result.Diagnostics)
+			}
+			failure := result.Diagnostics[0]
+			if failure.Auth == nil || !reflect.DeepEqual(*failure.Auth, *tc.want) || failure.BackendID != hooks.backends[1].id {
+				t.Fatalf("auth diagnostic = %+v", failure.Auth)
+			}
+			if classified := auth.Classify(failure); classified == nil || classified.Code != tc.want.Code {
+				t.Fatalf("error chain lost the auth code: %v", failure)
+			}
+			if strings.Contains(fmt.Sprintf("%v %+v", failure, failure.Auth), secret) {
+				t.Fatal("provider error leaked")
+			}
+		})
 	}
 }

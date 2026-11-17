@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	ahp "github.com/agenthooksprotocol/go-sdk"
 	"github.com/agenthooksprotocol/go-sdk/auth"
 	"io"
@@ -185,6 +186,11 @@ func (t *httpBackend) Exchange(ctx context.Context, body []byte, notification bo
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+		// Keep only the redacted, typed auth error so hosts can tell, for
+		// example, interaction_required from a transport failure.
+		if classified := auth.Classify(err); classified != nil {
+			return nil, fmt.Errorf("backend HTTP exchange failed: %w", classified)
 		}
 		return nil, errors.New("backend HTTP exchange failed")
 	}
