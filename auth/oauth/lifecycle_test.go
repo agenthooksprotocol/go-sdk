@@ -780,3 +780,37 @@ func TestLifecycleSentExchangeCompletesDetached(t *testing.T) {
 		t.Fatal("sent exchange was abandoned on caller cancellation")
 	}
 }
+
+// stalledDial models a connect that never completes: nothing is written.
+type stalledDial struct{ base http.RoundTripper }
+
+func (s stalledDial) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.URL.Path == "/token" {
+		select {
+		case <-r.Context().Done():
+			return nil, r.Context().Err()
+		case <-time.After(10 * time.Second):
+		}
+	}
+	return s.base.RoundTrip(r)
+}
+
+// Before the request is written, caller cancellation still aborts a token
+// exchange promptly and releases the grant lock.
+func TestLifecycleCancelBeforeSendReturnsPromptly(t *testing.T) {
+	f, p, r := setup(t, "authorization_code_pkce")
+	first := finishLogin(t, p, r)
+	expire(t, f, first)
+	p.client.Transport = stalledDial{p.client.Transport}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	go func() { time.Sleep(100 * time.Millisecond); cancel() }()
+	start := time.Now()
+	_, err := p.Prepare(ctx, r)
+	if !errors.Is(err, context.Canceled) || time.Since(start) > 2*time.Second {
+		t.Fatalf("cancelled pre-send exchange blocked %v: %v", time.Since(start), err)
+	}
+	record, _ := f.store.Load(budget(t), first.Attempt.(attempted).key)
+	if record == nil || record.RefreshToken != "refresh-token" {
+		t.Fatal("unsent refresh changed the stored grant")
+	}
+}

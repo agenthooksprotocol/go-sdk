@@ -11,10 +11,12 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/agenthooksprotocol/go-sdk/auth"
@@ -536,15 +538,31 @@ func persisting(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(ctx), persistBudget)
 }
 
-// sending detaches a token request from caller cancellation once it starts:
-// a sent code or refresh token is spent, so its response is received and
-// committed within persistBudget. A nil cancel means the caller already
-// cancelled and nothing was sent.
+// sending detaches a token request from caller cancellation once the request
+// is written: a sent code or refresh token is spent, so its response is
+// received and committed within persistBudget. Until then (policy checks, DNS,
+// connect, TLS) caller cancellation still aborts it. A nil cancel means the
+// caller already cancelled and nothing was sent.
 func sending(ctx context.Context) (context.Context, context.CancelFunc) {
 	if ctx.Err() != nil {
 		return ctx, nil
 	}
-	return persisting(ctx)
+	detached, cancel := persisting(ctx)
+	var mu sync.Mutex
+	wrote := false
+	stop := context.AfterFunc(ctx, func() {
+		mu.Lock()
+		defer mu.Unlock()
+		if !wrote {
+			cancel()
+		}
+	})
+	detached = httptrace.WithClientTrace(detached, &httptrace.ClientTrace{WroteRequest: func(httptrace.WroteRequestInfo) {
+		mu.Lock()
+		defer mu.Unlock()
+		wrote = true
+	}})
+	return detached, func() { stop(); cancel() }
 }
 
 // commit persists a spent exchange's outcome, then reports its validation error.
