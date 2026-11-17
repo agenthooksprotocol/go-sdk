@@ -272,6 +272,7 @@ var lifecycleCoverage = map[string][]string{
 	"challenge-renews-rejected-unexpired-token":        {"TestChallengeRenewsRejectedUnexpiredToken", "TestManagedResourceBoundRefreshAndStaleRejection"},
 	"step-up-keeps-previous-grant":                     {"TestLifecycleStepUpKeepsPreviousGrant", "TestCanonicalTokenResponses"},
 	"stale-metadata-refetch-once":                      {"TestStaleMetadataRefetchOnce"},
+	"ambiguous-renewal-failure-no-refetch":             {"TestAmbiguousRenewalFailureNoRefetch"},
 	"extra-granted-scope-ignored":                      {"TestLifecycleExtraGrantedScopeIgnored", "TestCanonicalTokenResponses"},
 }
 

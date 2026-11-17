@@ -142,11 +142,13 @@ no deadline) using the issuer
 metadata persisted with the binding (fetching only the stored issuer's metadata
 if none is persisted). Only a store miss or host policy refusal sends
 anonymously; a known binding whose grant cannot be renewed, including one that
-needs consent, fails the operation. If renewal fails on persisted metadata
-without an OAuth error response (network, TLS, 404/410, moved endpoint), the
+needs consent, fails the operation. If the token endpoint provably did not
+process a renewal (DNS, connect or TLS-handshake failure, or HTTP 404/410), the
 lookup refetches the stored issuer's metadata once, persists it if the issuer is
-unchanged and retries once; otherwise it returns `discovery_failed`, which
-`Prepare` repairs. A 401 marks the rejected token stale even
+unchanged and retries once; a changed issuer or failed refetch returns
+`discovery_failed`, which `Prepare` repairs. Ambiguous failures (timeouts,
+resets, 5xx, redirects, non-OAuth bodies) return `provider_failed` with no
+refetch or immediate retry, so a spent refresh token is never replayed. A 401 marks the rejected token stale even
 before its expiry, so it is renewed rather than resent.
 A challenge on a notification or upload is not replayed but still runs challenge
 handling, so the next operation sends a credential. Local policy still runs before using a stored

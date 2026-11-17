@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -540,18 +541,33 @@ func (p *Provider) machine(ctx context.Context, key string, c ClientConfig, m me
 	return p.commit(ctx, key, generation(previous), next, err)
 }
 
-// errEndpoint marks a token request that failed without an OAuth error
-// response (network, TLS, 404/410, moved endpoint): persisted metadata may be
-// stale. It never reaches callers; acquire reports it as a flag.
+// errEndpoint marks a token request the endpoint provably did not process
+// (DNS, TCP connect or TLS handshake failure, or HTTP 404/410): persisted
+// metadata may be stale, and a retry cannot replay a spent refresh token.
+// It never reaches callers; acquireOnce reports it as a flag.
 var errEndpoint = &auth.Error{Code: auth.CodeProviderFailed}
+
+// unsent reports a transport failure before the request reached the endpoint.
+func unsent(err error) bool {
+	var dns *net.DNSError
+	var op *net.OpError
+	var verify *tls.CertificateVerificationError
+	var header tls.RecordHeaderError
+	var alert tls.AlertError
+	return errors.As(err, &dns) || (errors.As(err, &op) && op.Op == "dial") || errors.As(err, &verify) || errors.As(err, &header) || errors.As(err, &alert)
+}
 
 func acquisitionError(ctx context.Context, err error, interactive bool) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 	var rejected *oauth2.RetrieveError
-	if !errors.As(err, &rejected) || rejected.ErrorCode == "" {
+	if errors.Is(err, errEndpoint) || (errors.As(err, &rejected) && rejected.Response != nil && (rejected.Response.StatusCode == http.StatusNotFound || rejected.Response.StatusCode == http.StatusGone)) {
 		return errEndpoint
+	}
+	// Anything else may have been processed: no refetch, no immediate retry.
+	if rejected == nil {
+		return fail(auth.CodeProviderFailed)
 	}
 	switch rejected.ErrorCode {
 	case "invalid_grant":

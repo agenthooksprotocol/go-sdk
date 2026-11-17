@@ -3,6 +3,7 @@ package oauth
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -331,11 +332,11 @@ func TestUpFrontRenewalWithoutDeadline(t *testing.T) {
 	}
 }
 
-// A renewal failing on persisted metadata without an OAuth error refetches the
-// stored issuer's metadata once and retries; OAuth errors never refetch; a
-// changed issuer is discovery_failed.
+// A renewal the token endpoint provably did not process (connect failure or
+// 404/410) refetches the stored issuer's metadata once and retries; a changed
+// issuer is discovery_failed.
 func TestStaleMetadataRefetchOnce(t *testing.T) {
-	for _, mode := range []string{"moved-endpoint", "oauth-error", "moved-issuer"} {
+	for _, mode := range []string{"moved-endpoint", "connect-failure", "oauth-error", "moved-issuer"} {
 		t.Run(mode, func(t *testing.T) {
 			f, p, r := setup(t, "client_credentials")
 			r.Binding = nil
@@ -346,6 +347,15 @@ func TestStaleMetadataRefetchOnce(t *testing.T) {
 				binding, _ := f.store.Load(budget(t), key)
 				moved := cloneRecord(binding)
 				moved.Binding.IssuerMetadata.TokenEndpoint, moved.Generation = f.server.URL+"/moved-token", randomID()
+				if mode == "connect-failure" {
+					closed, err := net.Listen("tcp", "127.0.0.1:0")
+					if err != nil {
+						t.Fatal(err)
+					}
+					moved.Binding.IssuerMetadata.TokenEndpoint = "https://" + closed.Addr().String() + "/token"
+					closed.Close()
+					p.options.CheckDestination = func(ctx context.Context, raw string, _ Purpose) error { return ctx.Err() }
+				}
 				if ok, err := f.store.CompareAndSwap(budget(t), key, binding.Generation, moved); !ok || err != nil {
 					t.Fatal(err)
 				}
@@ -362,7 +372,7 @@ func TestStaleMetadataRefetchOnce(t *testing.T) {
 				t.Fatal("refetch ran protected-resource discovery")
 			}
 			switch mode {
-			case "moved-endpoint":
+			case "moved-endpoint", "connect-failure":
 				if err != nil || credential == nil || f.metadataCalls.Load() != metadata+1 {
 					t.Fatalf("stale endpoint not refetched once and retried: %v", err)
 				}
@@ -377,6 +387,34 @@ func TestStaleMetadataRefetchOnce(t *testing.T) {
 				}
 			case "moved-issuer":
 				assertCode(t, err, auth.CodeDiscoveryFailed)
+			}
+		})
+	}
+}
+
+// Ambiguous renewal failures (5xx, non-OAuth body) and OAuth errors return
+// their error with no metadata refetch and no immediate retry, so a spent
+// refresh token is never replayed.
+func TestAmbiguousRenewalFailureNoRefetch(t *testing.T) {
+	for mode, code := range map[string]auth.Code{"temporary": auth.CodeProviderFailed, "non-oauth": auth.CodeProviderFailed, "redirect": auth.CodeProviderFailed, "reject": auth.CodeRefreshRejected} {
+		t.Run(mode, func(t *testing.T) {
+			f, p, r := setup(t, "authorization_code_pkce")
+			r.Binding = nil
+			finishLogin(t, p, r)
+			expireStored(t, f, p, r)
+			f.mode.Store(mode)
+			metadata := f.metadataCalls.Load()
+			_, err := p.PreemptiveCredential(budget(t), r)
+			if mode == "redirect" {
+				var classified *auth.Error
+				if !errors.As(err, &classified) {
+					t.Fatalf("redirect: %v", err)
+				}
+			} else {
+				assertCode(t, err, code)
+			}
+			if f.metadataCalls.Load() != metadata || f.refreshCalls.Load() != 1 {
+				t.Fatal("ambiguous renewal refetched metadata or replayed the refresh token")
 			}
 		})
 	}

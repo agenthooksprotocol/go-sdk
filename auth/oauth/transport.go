@@ -62,6 +62,9 @@ func (t *tokenTransport) RoundTrip(request *http.Request) (*http.Response, error
 	// return underlying network error text, which may contain credentials/URLs.
 	response, err := t.base.RoundTrip(copy)
 	if err != nil {
+		if ctx.Err() == nil && unsent(err) {
+			return nil, errEndpoint
+		}
 		return nil, safe(ctx, err, auth.CodeProviderFailed)
 	}
 	if response.StatusCode >= 300 && response.StatusCode < 400 {
