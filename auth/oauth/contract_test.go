@@ -271,6 +271,7 @@ var lifecycleCoverage = map[string][]string{
 	"known-binding-without-token-requires-login":       {"TestKnownBindingWithoutTokenRequiresLogin"},
 	"challenge-renews-rejected-unexpired-token":        {"TestChallengeRenewsRejectedUnexpiredToken", "TestManagedResourceBoundRefreshAndStaleRejection"},
 	"step-up-keeps-previous-grant":                     {"TestLifecycleStepUpKeepsPreviousGrant", "TestCanonicalTokenResponses"},
+	"stale-metadata-refetch-once":                      {"TestStaleMetadataRefetchOnce"},
 	"extra-granted-scope-ignored":                      {"TestLifecycleExtraGrantedScopeIgnored", "TestCanonicalTokenResponses"},
 }
 

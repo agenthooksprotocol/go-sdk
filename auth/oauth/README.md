@@ -120,7 +120,9 @@ required scopes. Otherwise it supersedes the login. With the same redirect it
 requests the old login's scopes plus the new ceiling-filtered request and stores
 the union of both ceilings; a different redirect or grant starts from the new
 caller alone. The stored ceiling bounds the grant recorded on completion; the
-merged sets only grow, so alternating callers converge. A login ends once:
+merged sets only grow, so alternating callers converge. Reuse needs the exact redirect, so hosts sharing a store must keep the redirect
+stable per grant key (or give per-process loopback redirects distinct grant
+partitions). A login ends once:
 completion (including denial), supersede, `Cancel` or expiry; a callback for an
 ended login fails with `interaction_required`. `Cancel` never erases stored
 credentials.
@@ -140,7 +142,11 @@ no deadline) using the issuer
 metadata persisted with the binding (fetching only the stored issuer's metadata
 if none is persisted). Only a store miss or host policy refusal sends
 anonymously; a known binding whose grant cannot be renewed, including one that
-needs consent, fails the operation. A 401 marks the rejected token stale even
+needs consent, fails the operation. If renewal fails on persisted metadata
+without an OAuth error response (network, TLS, 404/410, moved endpoint), the
+lookup refetches the stored issuer's metadata once, persists it if the issuer is
+unchanged and retries once; otherwise it returns `discovery_failed`, which
+`Prepare` repairs. A 401 marks the rejected token stale even
 before its expiry, so it is renewed rather than resent.
 A challenge on a notification or upload is not replayed but still runs challenge
 handling, so the next operation sends a credential. Local policy still runs before using a stored

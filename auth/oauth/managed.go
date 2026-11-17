@@ -358,6 +358,13 @@ func (p *Provider) prepare(ctx context.Context, r auth.Request, challenge string
 // refreshes, reissues client credentials or (only when interactive) creates a
 // stored login.
 func (p *Provider) acquire(ctx context.Context, r auth.Request, key string, config ClientConfig, m metadata, stepUp, interactive bool) (Preparation, error) {
+	result, err, _ := p.acquireOnce(ctx, r, key, config, m, stepUp, interactive)
+	return result, err
+}
+
+// acquireOnce also reports whether the token endpoint failed without an
+// OAuth error response, i.e. the metadata used may be stale.
+func (p *Provider) acquireOnce(ctx context.Context, r auth.Request, key string, config ClientConfig, m metadata, stepUp, interactive bool) (Preparation, error, bool) {
 	var result Preparation
 	err := p.options.Store.Coordinate(ctx, key, func(ctx context.Context) error {
 		record, err := p.options.Store.Load(ctx, key)
@@ -394,9 +401,9 @@ func (p *Provider) acquire(ctx context.Context, r auth.Request, key string, conf
 		return err
 	})
 	if err != nil {
-		return Preparation{}, safe(ctx, err, auth.CodeProviderFailed)
+		return Preparation{}, safe(ctx, err, auth.CodeProviderFailed), errors.Is(err, errEndpoint)
 	}
-	return result, nil
+	return result, nil, false
 }
 func generation(r *Record) string {
 	if r == nil {
@@ -532,23 +539,30 @@ func (p *Provider) machine(ctx context.Context, key string, c ClientConfig, m me
 	next, err := p.grant(ctx, c, merge(granted, allowedScopes(c)...), token, nil)
 	return p.commit(ctx, key, generation(previous), next, err)
 }
+
+// errEndpoint marks a token request that failed without an OAuth error
+// response (network, TLS, 404/410, moved endpoint): persisted metadata may be
+// stale. It never reaches callers; acquire reports it as a flag.
+var errEndpoint = &auth.Error{Code: auth.CodeProviderFailed}
+
 func acquisitionError(ctx context.Context, err error, interactive bool) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 	var rejected *oauth2.RetrieveError
-	if errors.As(err, &rejected) {
-		switch rejected.ErrorCode {
-		case "invalid_grant":
-			if interactive {
-				return fail(auth.CodeInteractionRequired)
-			}
-			return fail(auth.CodeCredentialUnavailable)
-		case "invalid_client", "unauthorized_client", "unsupported_grant_type":
-			return fail(auth.CodeInvalidConfiguration)
-		case "access_denied", "invalid_scope":
-			return fail(auth.CodeAccessDenied)
+	if !errors.As(err, &rejected) || rejected.ErrorCode == "" {
+		return errEndpoint
+	}
+	switch rejected.ErrorCode {
+	case "invalid_grant":
+		if interactive {
+			return fail(auth.CodeInteractionRequired)
 		}
+		return fail(auth.CodeCredentialUnavailable)
+	case "invalid_client", "unauthorized_client", "unsupported_grant_type":
+		return fail(auth.CodeInvalidConfiguration)
+	case "access_denied", "invalid_scope":
+		return fail(auth.CodeAccessDenied)
 	}
 	return fail(auth.CodeProviderFailed)
 }
@@ -823,6 +837,16 @@ func (p *Provider) PreemptiveCredential(ctx context.Context, r auth.Request) (*a
 	} else if config.TokenAuthMethod, err = tokenMethod(config, m); err != nil {
 		return nil, err
 	}
-	result, err := p.acquire(ctx, r, key, config, m, false, false)
+	result, err, stale := p.acquireOnce(ctx, r, key, config, m, false, false)
+	if stale {
+		// Refetch only the stored issuer's metadata once, persist it and retry.
+		if config, m, err = p.resolveMetadata(ctx, config); err != nil {
+			return nil, safe(ctx, err, auth.CodeDiscoveryFailed)
+		}
+		if err = p.persistBinding(ctx, r, config, m); err != nil {
+			return nil, err
+		}
+		result, err = p.acquire(ctx, r, key, config, m, false, false)
+	}
 	return result.Credential, err
 }

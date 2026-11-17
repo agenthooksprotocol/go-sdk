@@ -330,3 +330,54 @@ func TestUpFrontRenewalWithoutDeadline(t *testing.T) {
 		t.Fatalf("renewal without a deadline failed: %v", err)
 	}
 }
+
+// A renewal failing on persisted metadata without an OAuth error refetches the
+// stored issuer's metadata once and retries; OAuth errors never refetch; a
+// changed issuer is discovery_failed.
+func TestStaleMetadataRefetchOnce(t *testing.T) {
+	for _, mode := range []string{"moved-endpoint", "oauth-error", "moved-issuer"} {
+		t.Run(mode, func(t *testing.T) {
+			f, p, r := setup(t, "client_credentials")
+			r.Binding = nil
+			learnUnbound(t, f, p, r)
+			expireStored(t, f, p, r)
+			if mode != "oauth-error" {
+				key := p.bindingKey(r)
+				binding, _ := f.store.Load(budget(t), key)
+				moved := cloneRecord(binding)
+				moved.Binding.IssuerMetadata.TokenEndpoint, moved.Generation = f.server.URL+"/moved-token", randomID()
+				if ok, err := f.store.CompareAndSwap(budget(t), key, binding.Generation, moved); !ok || err != nil {
+					t.Fatal(err)
+				}
+			}
+			switch mode {
+			case "oauth-error":
+				f.mode.Store("invalid-client")
+			case "moved-issuer":
+				f.mode.Store("moved-issuer")
+			}
+			resources, metadata := f.resourceCalls.Load(), f.metadataCalls.Load()
+			credential, err := p.PreemptiveCredential(budget(t), r)
+			if f.resourceCalls.Load() != resources {
+				t.Fatal("refetch ran protected-resource discovery")
+			}
+			switch mode {
+			case "moved-endpoint":
+				if err != nil || credential == nil || f.metadataCalls.Load() != metadata+1 {
+					t.Fatalf("stale endpoint not refetched once and retried: %v", err)
+				}
+				stored, _ := f.store.Load(budget(t), p.bindingKey(r))
+				if stored.Binding.IssuerMetadata.TokenEndpoint != f.server.URL+"/token" {
+					t.Fatal("refetched metadata not persisted")
+				}
+			case "oauth-error":
+				assertCode(t, err, auth.CodeInvalidConfiguration)
+				if f.metadataCalls.Load() != metadata {
+					t.Fatal("OAuth error triggered a metadata refetch")
+				}
+			case "moved-issuer":
+				assertCode(t, err, auth.CodeDiscoveryFailed)
+			}
+		})
+	}
+}

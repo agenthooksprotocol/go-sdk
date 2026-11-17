@@ -139,7 +139,11 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 	case "/.well-known/oauth-protected-resource/events", "/.well-known/oauth-protected-resource", "/custom-resource":
 		json.NewEncoder(w).Encode(map[string]any{"resource": f.resource, "authorization_servers": []string{f.server.URL}})
 	case "/.well-known/oauth-authorization-server":
-		json.NewEncoder(w).Encode(map[string]any{"issuer": f.server.URL, "authorization_endpoint": f.server.URL + "/authorize", "token_endpoint": f.server.URL + "/token", "grant_types_supported": []string{"authorization_code", "client_credentials", "refresh_token"}, "code_challenge_methods_supported": []string{"S256"}, "token_endpoint_auth_methods_supported": []string{"client_secret_post", "client_secret_basic", "none"}, "authorization_response_iss_parameter_supported": f.mode.Load().(string) == "require-issuer"})
+		issuer := f.server.URL
+		if f.mode.Load().(string) == "moved-issuer" {
+			issuer += "/moved"
+		}
+		json.NewEncoder(w).Encode(map[string]any{"issuer": issuer, "authorization_endpoint": f.server.URL + "/authorize", "token_endpoint": f.server.URL + "/token", "grant_types_supported": []string{"authorization_code", "client_credentials", "refresh_token"}, "code_challenge_methods_supported": []string{"S256"}, "token_endpoint_auth_methods_supported": []string{"client_secret_post", "client_secret_basic", "none"}, "authorization_response_iss_parameter_supported": f.mode.Load().(string) == "require-issuer"})
 	case "/token":
 		f.tokenCalls.Add(1)
 		if err := r.ParseForm(); err != nil {
