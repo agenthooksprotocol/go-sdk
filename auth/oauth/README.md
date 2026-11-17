@@ -116,10 +116,11 @@ creating context. Completion validates state, exact redirect path and the
 optional/advertised issuer response before claiming the login; an invalid
 callback does not consume it. A later `Prepare` reuses an unexpired login when
 the grant and redirect match and its scopes cover the new requested and
-required scopes. Otherwise it supersedes the login, requesting the old login's
-scopes plus the new ceiling-filtered request and storing the union of both
-ceilings, which bounds the grant recorded on completion. Both only grow, so
-alternating callers converge. A login ends once:
+required scopes. Otherwise it supersedes the login. With the same redirect it
+requests the old login's scopes plus the new ceiling-filtered request and stores
+the union of both ceilings; a different redirect or grant starts from the new
+caller alone. The stored ceiling bounds the grant recorded on completion; the
+merged sets only grow, so alternating callers converge. A login ends once:
 completion (including denial), supersede, `Cancel` or expiry; a callback for an
 ended login fails with `interaction_required`. `Cancel` never erases stored
 credentials.
@@ -133,8 +134,9 @@ completes through `Prepare` without UI and requires explicit issuer grant suppor
 An unknown unbound HTTP endpoint starts anonymously. A previously authorized
 unbound endpoint sends its cached bearer up front, including for notifications
 and uploads, even after provider recreation or during a metadata outage. That
-lookup never runs protected-resource discovery or creates a login; with a
-context deadline it refreshes or re-acquires an expired grant using the issuer
+lookup never runs protected-resource discovery or creates a login; it refreshes
+or re-acquires an expired grant (within a 30-second budget when the context has
+no deadline) using the issuer
 metadata persisted with the binding (fetching only the stored issuer's metadata
 if none is persisted). Only a store miss or host policy refusal sends
 anonymously; a known binding whose grant cannot be renewed, including one that

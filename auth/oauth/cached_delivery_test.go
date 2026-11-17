@@ -52,6 +52,9 @@ func TestCachedUnboundUnsafeDeliveryAfterProviderRecreation(t *testing.T) {
 			if response.StatusCode != http.StatusOK || f.eventCalls.Load() != 1 {
 				t.Fatalf("unsafe delivery did not send cached bearer on first attempt: %d", response.StatusCode)
 			}
+			if prepared, err := recreated.Prepare(budget(t), r); err != nil || prepared.Credential == nil {
+				t.Fatalf("host prepare did not serve the cached token: %v", err)
+			}
 			if outage.calls.Load() != 0 || f.tokenCalls.Load() != 1 {
 				t.Fatal("cached grant performed metadata/token HTTP")
 			}
@@ -313,5 +316,17 @@ func TestChallengeRenewsRejectedUnexpiredToken(t *testing.T) {
 	}
 	if response, err = doNotification(t, f, p, r); err != nil || response.StatusCode != http.StatusOK {
 		t.Fatalf("next operation resent the rejected token: %v", err)
+	}
+}
+
+// A known binding renewed without a caller deadline uses a bounded default budget.
+func TestUpFrontRenewalWithoutDeadline(t *testing.T) {
+	f, p, r := setup(t, "client_credentials")
+	r.Binding = nil
+	learnUnbound(t, f, p, r)
+	expireStored(t, f, p, r)
+	credential, err := p.PreemptiveCredential(context.Background(), r)
+	if err != nil || credential == nil || f.tokenCalls.Load() != 2 {
+		t.Fatalf("renewal without a deadline failed: %v", err)
 	}
 }

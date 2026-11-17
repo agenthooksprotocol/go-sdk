@@ -27,6 +27,9 @@ var _ auth.PreemptiveProvider = (*Provider)(nil)
 
 const maxLoginLifetime = 10 * time.Minute
 
+// lookupBudget bounds an up-front renewal whose context has no deadline.
+const lookupBudget = 30 * time.Second
+
 // New requires explicit host network, identity, persistence and token-validation
 // policy. No default HTTP client, store, issuer or background task is installed.
 func New(options Options) (*Provider, error) {
@@ -588,11 +591,14 @@ func (p *Provider) login(ctx context.Context, key string, record *Record, c Clie
 	now := time.Now()
 	if record != nil && record.Pending != nil && record.Pending.ExpiresAt.After(now) {
 		pending := record.Pending
-		if pending.RedirectURI == c.RedirectURI && scopeSubset(wanted, pending.Scopes) {
-			return &PendingLogin{authorizationURL: pending.AuthorizationURL, deadline: pending.ExpiresAt}, nil
+		if pending.RedirectURI == c.RedirectURI {
+			if scopeSubset(wanted, pending.Scopes) {
+				return &PendingLogin{authorizationURL: pending.AuthorizationURL, deadline: pending.ExpiresAt}, nil
+			}
+			// Same grant and redirect: only the scopes differ, so merge.
+			c.Scopes = merge(c.Scopes, pending.Scopes...)
+			ceiling = merge(ceiling, pending.Ceiling...)
 		}
-		c.Scopes = merge(c.Scopes, pending.Scopes...)
-		ceiling = merge(ceiling, pending.Ceiling...)
 	}
 	verifier := oauth2.GenerateVerifier()
 	state := randomID()
@@ -804,8 +810,10 @@ func (p *Provider) PreemptiveCredential(ctx context.Context, r auth.Request) (*a
 	if satisfies(record, config) {
 		return p.credential(r, key, record), nil
 	}
-	if err := bounded(ctx); err != nil {
-		return nil, err
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, lookupBudget)
+		defer cancel()
 	}
 	if m.TokenEndpoint == "" {
 		// Only the stored issuer's metadata; never protected-resource discovery.

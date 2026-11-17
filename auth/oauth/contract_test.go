@@ -53,6 +53,7 @@ type contractFixture struct {
 		Expiry           string          `json:"expiry"`
 		Granted          []string        `json:"granted"`
 		Effective        []string        `json:"effective"`
+		WireRequest      []string        `json:"wire_request"`
 		RefreshPreserved bool            `json:"refresh_preserved"`
 	} `json:"token_responses"`
 }
@@ -121,7 +122,7 @@ func TestCanonicalTokenResponses(t *testing.T) {
 							t.Error("refresh material not used")
 						}
 					}
-					if vector.Exchange == "reacquire" && !slices.Equal(merge(strings.Fields(r.Form.Get("scope"))), merge(vector.PreviousGranted, intersect(merge(vector.Requested, vector.Required...), vector.Allowed)...)) {
+					if vector.Exchange == "reacquire" && (!slices.Equal(merge(strings.Fields(r.Form.Get("scope"))), merge(vector.WireRequest)) || !slices.Equal(merge(vector.WireRequest), merge(vector.PreviousGranted, intersect(merge(vector.Requested, vector.Required...), vector.Allowed)...))) {
 						t.Errorf("re-acquisition requested %q", r.Form.Get("scope"))
 					}
 					if r.Form.Get("resource") != issuer+"/events" || r.Form.Get("grant_type") != expectedGrant {

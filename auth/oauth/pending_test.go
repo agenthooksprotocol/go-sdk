@@ -139,7 +139,7 @@ func TestPendingLoginSupersede(t *testing.T) {
 				return c, err
 			}
 			var required []string
-			if change == "ceiling" {
+			if change != "scope" {
 				required = []string{"admin"}
 			}
 			old, err := p.Prepare(budget(t), r, required...)
@@ -155,6 +155,10 @@ func TestPendingLoginSupersede(t *testing.T) {
 			replacement, err := p.Prepare(budget(t), r, required...)
 			if err != nil || replacement.Login.AuthorizationURL() == old.Login.AuthorizationURL() {
 				t.Fatalf("incompatible prepare reused the login: %v", err)
+			}
+			// A different grant key or redirect starts from the new caller alone.
+			if change != "scope" && !slices.Equal(merge(loginScopes(replacement.Login)), []string{"events"}) {
+				t.Fatalf("unrelated login merged old scopes: %v", loginScopes(replacement.Login))
 			}
 			_, err = p.Complete(budget(t), r, callback(old.Login, "old"))
 			assertCode(t, err, auth.CodeInteractionRequired)
