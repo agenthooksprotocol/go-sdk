@@ -471,6 +471,9 @@ func (p *Provider) obtain(ctx context.Context, r auth.Request, config ClientConf
 			}
 		}
 		result, err, reason := p.acquireOnce(ctx, r, p.key(r, config), config, m, stepUp, interactive)
+		if err == nil {
+			p.renew(ctx, config, m, interactive)
+		}
 		if reason != errInvalidClient || config.source != sourceDCR {
 			return result, err, reason == errEndpoint
 		}

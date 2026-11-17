@@ -549,16 +549,33 @@ func renewable(t *testing.T) (*dcrFixture, *auth.Credential) {
 	if f.registerCalls.Load() != 1 {
 		t.Fatal("renewed outside the margin")
 	}
+	// Let the post-acquisition renewal checks (not due) finish first.
+	time.Sleep(100 * time.Millisecond)
 	f.editRegistration(t, func(record *Record) { record.Registration.RegisteredAt = time.Now().Add(-10 * time.Hour) })
 	expireGrant(t, f, credential)
 	return f, credential
 }
 
+func eventually(t *testing.T, what string, ok func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); !ok(); time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+	}
+}
+
 func TestProactiveRenewal(t *testing.T) {
 	f, _ := renewable(t)
-	credential, err := lookup(t, f.provider(), f.request("backend"))
+	p, r := f.provider(), f.request("backend")
+	// The operation acquires with the current registration; renewal follows.
+	credential, err := lookup(t, p, r)
+	mustToken(t, credential, err, "access-dcr-1")
+	eventually(t, "renewal", func() bool { return f.registration(t, f.config).Registration.ClientID == "dcr-2" })
+	expireGrant(t, f, credential)
+	credential, err = lookup(t, p, r)
 	mustToken(t, credential, err, "access-dcr-2")
-	if f.registerCalls.Load() != 2 || slices.Contains(f.tokenClients[2:], "dcr-1") {
+	if f.registerCalls.Load() != 2 {
 		t.Fatal("proactive renewal")
 	}
 }
@@ -571,12 +588,14 @@ func TestProactiveRenewalOnceAcrossProcesses(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if c, err := processes[i%2].Credential(budget(t), f.request("backend")); err != nil || c.Token != "access-dcr-2" {
+			if _, err := processes[i%2].Credential(budget(t), f.request("backend")); err != nil {
 				t.Errorf("credential %v", err)
 			}
 		}()
 	}
 	wg.Wait()
+	eventually(t, "renewal", func() bool { return f.registration(t, f.config).Registration.ClientID == "dcr-2" })
+	time.Sleep(100 * time.Millisecond)
 	if f.registerCalls.Load() != 2 {
 		t.Fatalf("renewals = %d", f.registerCalls.Load()-1)
 	}
@@ -587,9 +606,34 @@ func TestProactiveRenewalFailureKeepsRegistration(t *testing.T) {
 	f.set(func(f *dcrFixture) { f.respond = respondStatus(429, nil, "") })
 	credential, err := lookup(t, f.provider(), f.request("backend"))
 	mustToken(t, credential, err, "access-dcr-1")
+	eventually(t, "failed marker", func() bool { return f.registration(t, f.config).RegistrationFailure != nil })
 	record := f.registration(t, f.config)
-	if f.registerCalls.Load() != 2 || record.Registration.ClientID != "dcr-1" || record.RegistrationFailure == nil || record.RegistrationFailure.Attempts != 1 {
+	if f.registerCalls.Load() != 2 || record.Registration.ClientID != "dcr-1" || record.RegistrationFailure.Attempts != 1 {
 		t.Fatalf("failed renewal: %+v", record)
+	}
+}
+
+// A slow failing renewal never fails, delays or extends the operation.
+func TestSlowFailedRenewalDoesNotAffectLookup(t *testing.T) {
+	f, _ := renewable(t)
+	f.set(func(f *dcrFixture) {
+		f.respond = func(w http.ResponseWriter, _ int) {
+			time.Sleep(700 * time.Millisecond)
+			w.WriteHeader(503)
+		}
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	credential, err := f.provider().PreemptiveCredential(ctx, f.request("backend"))
+	elapsed := time.Since(started)
+	mustToken(t, credential, err, "access-dcr-1")
+	if elapsed >= 300*time.Millisecond {
+		t.Fatalf("lookup waited %v for renewal", elapsed)
+	}
+	eventually(t, "failed marker", func() bool { return f.registration(t, f.config).RegistrationFailure != nil })
+	if record := f.registration(t, f.config); record.Registration.ClientID != "dcr-1" || f.registerCalls.Load() != 2 {
+		t.Fatalf("renewal outcome: %+v", record)
 	}
 }
 

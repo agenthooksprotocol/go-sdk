@@ -309,7 +309,7 @@ var lifecycleCoverage = map[string][]string{
 	"registration-retry-after-honoured":                    {"TestRegistrationRetryAfter"},
 	"marker-update-atomic-across-processes":                {"TestMarkerUpdateAtomicAcrossProcesses"},
 	"proactive-reregistration-once-across-processes":       {"TestProactiveRenewalOnceAcrossProcesses"},
-	"proactive-renewal-failure-keeps-current-registration": {"TestProactiveRenewalFailureKeepsRegistration"},
+	"proactive-renewal-failure-keeps-current-registration": {"TestProactiveRenewalFailureKeepsRegistration", "TestSlowFailedRenewalDoesNotAffectLookup"},
 }
 
 func TestLifecycleCoverageManifest(t *testing.T) {

@@ -171,14 +171,7 @@ func (p *Provider) registered(ctx context.Context, c ClientConfig, m metadata, i
 		}
 		if reg := record.Registration; reg != nil && (reg.SecretExpiresAt.IsZero() || time.Now().Before(reg.SecretExpiresAt)) {
 			if secret, ok := p.secret(ctx, c, reg); ok {
-				current := use(c, reg, secret)
-				c = current
-				if c.Flow != pkceFlow && p.renewalDue(reg) && (interactive || !blocked(record, digest)) {
-					// A failed proactive renewal keeps the current registration.
-					if renewed, err := p.register(ctx, key, record, current, m, digest); err == nil {
-						c = renewed
-					}
-				}
+				c = use(c, reg, secret)
 				return nil
 			}
 		}
@@ -195,6 +188,35 @@ func (p *Provider) registered(ctx context.Context, c ClientConfig, m metadata, i
 		return c, safe(ctx, err, auth.CodeProviderFailed)
 	}
 	return c, nil
+}
+
+// renew proactively re-registers a client-credentials client whose secret
+// expires within the renewal margin, after a successful acquisition with the
+// current registration. It is detached best-effort work bounded by its own
+// commit budget: it holds the registration lock, re-checks that the record is
+// still the one used and still due, and updates the failed marker on failure,
+// but never affects the operation's result, error or wait.
+func (p *Provider) renew(ctx context.Context, c ClientConfig, m metadata, interactive bool) {
+	if c.source != sourceDCR || c.Flow == pkceFlow {
+		return
+	}
+	detached, cancel := persisting(ctx)
+	go func() {
+		defer cancel()
+		key, digest := p.registrationKey(c), requestDigest(c.Registration)
+		p.options.Store.Coordinate(detached, key, func(ctx context.Context) error {
+			record, err := p.options.Store.Load(ctx, key)
+			if err != nil || record == nil || record.Registration == nil {
+				return nil
+			}
+			reg := record.Registration
+			if reg.Generation != c.registered || reg.RequestDigest != digest || !p.renewalDue(reg) || !time.Now().Before(reg.SecretExpiresAt) || (!interactive && blocked(record, digest)) {
+				return nil
+			}
+			_, err = p.register(ctx, key, record, c, m, digest)
+			return err
+		})
+	}()
 }
 
 func use(c ClientConfig, reg *RegistrationRecord, secret string) ClientConfig {

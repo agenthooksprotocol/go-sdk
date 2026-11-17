@@ -164,8 +164,10 @@ stored. Changing `RegistrationPolicy` makes the stored registration stale.
 Only an explicit `Prepare` registers a PKCE client; delivery paths return
 `interaction_required`. Client credentials also register during challenge
 handling and the up-front lookup, and renew proactively when the secret expires
-within `min(10% of its lifetime, Options.RenewalMargin)`; a failed renewal
-keeps the current registration. A token-endpoint `invalid_client` deletes that
+within `min(10% of its lifetime, Options.RenewalMargin)`. Renewal runs as
+detached best-effort work after an acquisition with the current registration;
+it never affects that operation, and a failed renewal keeps the current
+registration. A token-endpoint `invalid_client` deletes that
 registration generation: client credentials re-register and re-acquire once,
 PKCE needs a new `Prepare`. Every failed registration stores a backoff marker
 (`RegistrationBackoff`, default 1 minute doubling, and any `Retry-After`, capped
