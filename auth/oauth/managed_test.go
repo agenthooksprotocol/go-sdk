@@ -96,6 +96,7 @@ type fixture struct {
 	release       chan struct{}
 	resource      string
 	onRefresh     func()
+	tokenBody     atomic.Value
 	bodies        []string
 }
 
@@ -173,6 +174,18 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		mode := f.mode.Load().(string)
+		if body, _ := f.tokenBody.Load().(string); body != "" {
+			fmt.Fprint(w, body)
+			return
+		}
+		if mode == "reset" {
+			// Reset the connection after the request was received.
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				conn.Close()
+			}
+			return
+		}
 		if mode == "cancel" {
 			select {
 			case f.started <- struct{}{}:
@@ -215,6 +228,9 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		if mode == "admin-scope" {
 			scopes = "events admin"
+		}
+		if mode == "all-scope" {
+			scopes = "events admin write"
 		}
 		response := map[string]any{"access_token": "access-token", "refresh_token": "refresh-token", "token_type": "Bearer", "expires_in": 3600, "scope": scopes}
 		if mode == "refresh-unknown-expiry" {

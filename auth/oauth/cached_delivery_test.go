@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -392,29 +393,130 @@ func TestStaleMetadataRefetchOnce(t *testing.T) {
 	}
 }
 
-// Ambiguous renewal failures (5xx, non-OAuth body) and OAuth errors return
+// Ambiguous renewal failures (read timeout, reset after send, 5xx, redirect,
+// non-OAuth body) and OAuth errors return
 // their error with no metadata refetch and no immediate retry, so a spent
 // refresh token is never replayed.
 func TestAmbiguousRenewalFailureNoRefetch(t *testing.T) {
-	for mode, code := range map[string]auth.Code{"temporary": auth.CodeProviderFailed, "non-oauth": auth.CodeProviderFailed, "redirect": auth.CodeProviderFailed, "reject": auth.CodeRefreshRejected} {
+	for mode, code := range map[string]auth.Code{"temporary": auth.CodeProviderFailed, "non-oauth": auth.CodeProviderFailed, "redirect": auth.CodeProviderFailed, "cancel": auth.CodeProviderFailed, "reset": auth.CodeProviderFailed, "reject": auth.CodeRefreshRejected} {
 		t.Run(mode, func(t *testing.T) {
 			f, p, r := setup(t, "authorization_code_pkce")
 			r.Binding = nil
 			finishLogin(t, p, r)
 			expireStored(t, f, p, r)
 			f.mode.Store(mode)
-			metadata := f.metadataCalls.Load()
-			_, err := p.PreemptiveCredential(budget(t), r)
-			if mode == "redirect" {
-				var classified *auth.Error
-				if !errors.As(err, &classified) {
-					t.Fatalf("redirect: %v", err)
-				}
-			} else {
-				assertCode(t, err, code)
+			ctx := budget(t)
+			if mode == "cancel" {
+				// A read timeout: the endpoint received the request but never answers.
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, 200*time.Millisecond)
+				defer cancel()
 			}
+			metadata := f.metadataCalls.Load()
+			_, err := p.PreemptiveCredential(ctx, r)
+			assertCode(t, err, code)
 			if f.metadataCalls.Load() != metadata || f.refreshCalls.Load() != 1 {
 				t.Fatal("ambiguous renewal refetched metadata or replayed the refresh token")
+			}
+		})
+	}
+}
+
+// The lookup sends anonymously only on a store miss or a SelectClient
+// refusal; any other failure of a known binding is returned.
+func TestUnboundLookupFailuresAreNotAnonymous(t *testing.T) {
+	for _, mode := range []string{"store-error", "invalid-config", "refusal", "binding-miss"} {
+		t.Run(mode, func(t *testing.T) {
+			f, p, r := setup(t, "client_credentials")
+			r.Binding = nil
+			if mode != "binding-miss" {
+				learnUnbound(t, f, p, r)
+			}
+			original := p.options.SelectClient
+			switch mode {
+			case "store-error":
+				p.options.Store = failingLoadStore{Store: f.store, err: errors.New("store down")}
+			case "invalid-config":
+				p.options.SelectClient = func(ctx context.Context, r auth.Request, issuers []string, resource string) (ClientConfig, error) {
+					c, err := original(ctx, r, issuers, resource)
+					c.ClientID = ""
+					return c, err
+				}
+			case "refusal":
+				p.options.SelectClient = func(context.Context, auth.Request, []string, string) (ClientConfig, error) {
+					return ClientConfig{}, errors.New("host refuses")
+				}
+			}
+			credential, err := p.PreemptiveCredential(budget(t), r)
+			if credential != nil {
+				t.Fatal("unexpected credential")
+			}
+			switch mode {
+			case "store-error":
+				assertCode(t, err, auth.CodeProviderFailed)
+			case "invalid-config":
+				assertCode(t, err, auth.CodeInvalidConfiguration)
+			default:
+				if err != nil {
+					t.Fatalf("store miss or refusal did not send anonymously: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// When the resource moves to a new issuer and the old issuer disappears, host
+// prepare and challenge handling run full discovery and repair the binding.
+func TestChangedIssuerRepairedByDiscovery(t *testing.T) {
+	for _, via := range []string{"prepare", "challenge"} {
+		t.Run(via, func(t *testing.T) {
+			f, p, r := setup(t, "client_credentials")
+			r.Binding = nil
+			var moved atomic.Bool
+			serve := f.server.Config.Handler
+			f.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if moved.Load() {
+					w.Header().Set("Content-Type", "application/json")
+					switch req.URL.Path {
+					case "/custom-resource", "/.well-known/oauth-protected-resource/events":
+						json.NewEncoder(w).Encode(map[string]any{"resource": f.resource, "authorization_servers": []string{f.server.URL + "/new"}})
+						return
+					case "/.well-known/oauth-authorization-server", "/token":
+						w.WriteHeader(http.StatusNotFound)
+						return
+					case "/.well-known/oauth-authorization-server/new":
+						json.NewEncoder(w).Encode(map[string]any{"issuer": f.server.URL + "/new", "token_endpoint": f.server.URL + "/new-token", "grant_types_supported": []string{"client_credentials"}, "token_endpoint_auth_methods_supported": []string{"client_secret_post"}})
+						return
+					case "/new-token":
+						req.URL.Path = "/token"
+					}
+				}
+				serve.ServeHTTP(w, req)
+			})
+			original := p.options.SelectClient
+			p.options.SelectClient = func(ctx context.Context, r auth.Request, issuers []string, resource string) (ClientConfig, error) {
+				c, err := original(ctx, r, issuers, resource)
+				c.Issuer = issuers[0]
+				return c, err
+			}
+			learnUnbound(t, f, p, r)
+			expireStored(t, f, p, r)
+			moved.Store(true)
+			_, err := p.PreemptiveCredential(budget(t), r)
+			assertCode(t, err, auth.CodeDiscoveryFailed)
+			if via == "prepare" {
+				if prepared, err := p.Prepare(budget(t), r); err != nil || prepared.Credential == nil {
+					t.Fatalf("prepare did not repair the binding: %v", err)
+				}
+			} else if _, err := p.Challenge(budget(t), r, auth.Challenge{StatusCode: 401, Header: http.Header{"Www-Authenticate": {`Bearer resource_metadata="` + f.server.URL + `/custom-resource"`}}}); err != nil {
+				t.Fatalf("challenge did not repair the binding: %v", err)
+			}
+			stored, _ := f.store.Load(budget(t), p.bindingKey(r))
+			if stored.Binding.Config.Issuer != f.server.URL+"/new" {
+				t.Fatal("repaired binding not persisted")
+			}
+			if credential, err := p.PreemptiveCredential(budget(t), r); err != nil || credential == nil {
+				t.Fatalf("lookup unusable after repair: %v", err)
 			}
 		})
 	}

@@ -270,3 +270,44 @@ func TestPendingLoginEndStates(t *testing.T) {
 		t.Fatal("cancel changed the stored grant")
 	}
 }
+
+// Supersede with the same redirect but different caller ceilings stores the
+// union of both ceilings, so completion records every requested scope and each
+// caller's ceiling filters it at use.
+func TestPendingLoginSupersedeCeilingUnion(t *testing.T) {
+	f, p, r := setup(t, "authorization_code_pkce")
+	original := p.options.SelectClient
+	ceiling := []string{"events", "admin"}
+	p.options.SelectClient = func(ctx context.Context, r auth.Request, issuers []string, resource string) (ClientConfig, error) {
+		c, err := original(ctx, r, issuers, resource)
+		c.AllowedScopes = ceiling
+		return c, err
+	}
+	if _, err := p.Prepare(budget(t), r, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	ceiling = []string{"events", "write"}
+	superseding, err := p.Prepare(budget(t), r, "write")
+	if err != nil || !slices.Equal(merge(loginScopes(superseding.Login)), []string{"admin", "events", "write"}) {
+		t.Fatalf("supersede did not merge scopes: %v", err)
+	}
+	if pending := pendingRecord(t, f, p, r); !slices.Equal(merge(pending.Ceiling), []string{"admin", "events", "write"}) {
+		t.Fatalf("stored ceiling = %v, want the union", pending.Ceiling)
+	}
+	f.mode.Store("all-scope")
+	credential, err := p.Complete(budget(t), r, callback(superseding.Login, "code"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, _ := f.store.Load(budget(t), credential.Attempt.(attempted).key)
+	if !sameScopes(record.Scopes, []string{"events", "admin", "write"}) {
+		t.Fatalf("completion lost scopes from the union ceiling: %v", record.Scopes)
+	}
+	if _, err := p.Prepare(budget(t), r, "write"); err != nil {
+		t.Fatalf("write caller cannot use the grant: %v", err)
+	}
+	ceiling = []string{"events", "admin"}
+	if _, err := p.Prepare(budget(t), r, "admin"); err != nil {
+		t.Fatalf("admin caller cannot use the grant: %v", err)
+	}
+}

@@ -146,7 +146,8 @@ needs consent, fails the operation. If the token endpoint provably did not
 process a renewal (DNS, connect or TLS-handshake failure, or HTTP 404/410), the
 lookup refetches the stored issuer's metadata once, persists it if the issuer is
 unchanged and retries once; a changed issuer or failed refetch returns
-`discovery_failed`, which `Prepare` repairs. Ambiguous failures (timeouts,
+`discovery_failed`. `Prepare` and challenge handling repair it, rerunning full
+discovery when the stored issuer's metadata cannot be fetched. Ambiguous failures (timeouts,
 resets, 5xx, redirects, non-OAuth bodies) return `provider_failed` with no
 refetch or immediate retry, so a spent refresh token is never replayed. A 401 marks the rejected token stale even
 before its expiry, so it is renewed rather than resent.
@@ -168,9 +169,9 @@ between independently approved bindings with the same issuer, resource, client
 and flow. Changing the allowed ceiling, a secret, the token-endpoint
 authentication method, a metadata capability or the granted scope set does not
 change grant identity; the grant is re-intersected with the current ceiling at
-use. Uploads never inherit event authorization. A challenge drops the rejected
-token, so it is never resent; a stale 401 leaves a newer token alone. The
-provider never replays a delivery itself; `auth.Do` replays only intercept,
+use. Uploads never inherit event authorization. A 401 drops the rejected
+token, so it is never resent (a stale 401 leaves a newer token alone); a 403
+`insufficient_scope` keeps it. The provider never replays a delivery itself; `auth.Do` replays only intercept,
 configuration and capabilities requests, once. Explicit Authorization headers bypass the entire auth path.
 
 A Bearer 403 with `error="insufficient_scope"` can request step-up only within the

@@ -219,6 +219,11 @@ func satisfies(record *Record, c ClientConfig) bool {
 	return usable(record) && scopeSubset(c.RequiredScopes, intersect(record.Scopes, allowedScopes(c)))
 }
 
+// refusal marks a host SelectClient refusal of a stored binding.
+type refusal struct{ error }
+
+func (r refusal) Unwrap() error { return r.error }
+
 // cachedBinding revalidates stored binding metadata against current local policy.
 func (p *Provider) cachedBinding(ctx context.Context, r auth.Request) (ClientConfig, metadata, bool, error) {
 	stored, err := p.options.Store.Load(ctx, p.bindingKey(r))
@@ -231,7 +236,7 @@ func (p *Provider) cachedBinding(ctx context.Context, r auth.Request) (ClientCon
 	b := stored.Binding
 	c, err := p.options.SelectClient(ctx, cloneRequest(r), []string{b.Config.Issuer}, b.Config.Resource)
 	if err != nil {
-		return ClientConfig{}, metadata{}, false, safe(ctx, err, auth.CodeUntrustedDestination)
+		return ClientConfig{}, metadata{}, false, refusal{safe(ctx, err, auth.CodeUntrustedDestination)}
 	}
 	c = cloneConfig(c)
 	if !validConfig(c) {
@@ -315,29 +320,31 @@ func (p *Provider) prepare(ctx context.Context, r auth.Request, challenge string
 	if err := bounded(ctx); err != nil {
 		return Preparation{}, err
 	}
-	config, m, cached, err := p.cachedBinding(ctx, r)
-	if err == nil && !cached {
-		config, m, err = p.resolve(ctx, r, challenge)
-	}
-	if err != nil {
-		return Preparation{}, safe(ctx, err, auth.CodeDiscoveryFailed)
-	}
-	required, err := challengeScopes(challenge)
+	challenged, err := challengeScopes(challenge)
 	if err != nil {
 		return Preparation{}, err
 	}
-	// Without a challenged scope, only an explicit host requirement justifies step-up.
-	if stepUp && len(required) == 0 && len(config.RequiredScopes) == 0 {
-		return Preparation{}, fail(auth.CodeAccessDenied)
+	require := func(c ClientConfig) (ClientConfig, error) {
+		// Without a challenged scope, only an explicit host requirement justifies step-up.
+		if stepUp && len(challenged) == 0 && len(c.RequiredScopes) == 0 {
+			return c, fail(auth.CodeAccessDenied)
+		}
+		c.RequiredScopes = merge(merge(c.RequiredScopes, explicit...), challenged...)
+		if !scopeSubset(c.RequiredScopes, allowedScopes(c)) {
+			return c, fail(auth.CodeAccessDenied, c.RequiredScopes...)
+		}
+		return c, nil
 	}
-	config.RequiredScopes = merge(merge(config.RequiredScopes, explicit...), required...)
-	if !scopeSubset(config.RequiredScopes, allowedScopes(config)) {
-		return Preparation{}, fail(auth.CodeAccessDenied, config.RequiredScopes...)
+	config, m, cached, err := p.cachedBinding(ctx, r)
+	if err != nil {
+		return Preparation{}, safe(ctx, err, auth.CodeDiscoveryFailed)
 	}
-	key := p.key(r, config)
-	// A usable grant requires no remote metadata or store write. Renewal
-	// refreshes capabilities outside the grant lock.
 	if cached {
+		// A usable grant requires no remote metadata or store write.
+		if config, err = require(config); err != nil {
+			return Preparation{}, err
+		}
+		key := p.key(r, config)
 		current, err := p.options.Store.Load(ctx, key)
 		if err != nil {
 			return Preparation{}, safe(ctx, err, auth.CodeProviderFailed)
@@ -345,14 +352,27 @@ func (p *Provider) prepare(ctx context.Context, r auth.Request, challenge string
 		if satisfies(current, config) {
 			return Preparation{Credential: p.credential(r, key, current)}, nil
 		}
+		// Renewal refreshes the stored issuer's capabilities; if that fails
+		// (e.g. the issuer changed), full discovery repairs the binding.
 		if config, m, err = p.resolveMetadata(ctx, config); err != nil {
+			if ctx.Err() != nil {
+				return Preparation{}, safe(ctx, err, auth.CodeDiscoveryFailed)
+			}
+			cached = false
+		}
+	}
+	if !cached {
+		if config, m, err = p.resolve(ctx, r, challenge); err != nil {
 			return Preparation{}, safe(ctx, err, auth.CodeDiscoveryFailed)
+		}
+		if config, err = require(config); err != nil {
+			return Preparation{}, err
 		}
 	}
 	if err = p.persistBinding(ctx, r, config, m); err != nil {
 		return Preparation{}, err
 	}
-	return p.acquire(ctx, r, key, config, m, stepUp, interactive)
+	return p.acquire(ctx, r, p.key(r, config), config, m, stepUp, interactive)
 }
 
 // acquire runs under the grant lock: it rechecks the stored grant, then
@@ -426,7 +446,7 @@ func (p *Provider) save(ctx context.Context, key, expected string, next *Record)
 // validExpiry accepts an absent expires_in (unknown expiry), a positive JSON
 // integer, or a string of ASCII digits with a positive value.
 func validExpiry(token *oauth2.Token) bool {
-	if !token.Expiry.IsZero() && !token.Expiry.After(time.Now()) {
+	if token.Extra(invalidExpiry) != nil || (!token.Expiry.IsZero() && !token.Expiry.After(time.Now())) {
 		return false
 	}
 	switch value := token.Extra("expires_in").(type) {
@@ -652,8 +672,11 @@ func (p *Provider) login(ctx context.Context, key string, record *Record, c Clie
 func (p *Provider) Cancel(ctx context.Context, r auth.Request) error {
 	r = cloneRequest(r)
 	config, _, cached, err := p.cachedBinding(ctx, r)
-	if err != nil || !cached {
-		return err
+	if err != nil {
+		return safe(ctx, err, auth.CodeProviderFailed)
+	}
+	if !cached {
+		return nil
 	}
 	key := p.key(r, config)
 	return p.options.Store.Coordinate(ctx, key, func(ctx context.Context) error {
@@ -788,6 +811,12 @@ func (p *Provider) Challenge(ctx context.Context, r auth.Request, c auth.Challen
 		if !ok || owner.owner != p || owner.identity != requestIdentity(r) {
 			return nil, fail(auth.CodeInvalidConfiguration)
 		}
+	} else if len(r.Binding) != 0 {
+		return nil, fail(auth.CodeInvalidConfiguration)
+	}
+	// A 401 makes the rejected token stale; a 403 keeps it and the scope
+	// requirement drives step-up.
+	if owner, ok := c.Attempt.(attempted); ok && c.StatusCode == http.StatusUnauthorized {
 		err := p.options.Store.Coordinate(ctx, owner.key, func(ctx context.Context) error {
 			current, err := p.options.Store.Load(ctx, owner.key)
 			if err != nil {
@@ -803,8 +832,6 @@ func (p *Provider) Challenge(ctx context.Context, r auth.Request, c auth.Challen
 		if err != nil {
 			return nil, safe(ctx, err, auth.CodeProviderFailed)
 		}
-	} else if len(r.Binding) != 0 {
-		return nil, fail(auth.CodeInvalidConfiguration)
 	}
 	result, err := p.prepare(ctx, cloneRequest(r), header, nil, c.StatusCode == http.StatusForbidden, false)
 	if err != nil {
@@ -828,9 +855,16 @@ func (p *Provider) PreemptiveCredential(ctx context.Context, r auth.Request) (*a
 		return nil, err
 	}
 	r = cloneRequest(r)
+	// Only a store miss or a host policy refusal is anonymous.
 	config, m, cached, err := p.cachedBinding(ctx, r)
-	if err != nil || !cached {
-		return nil, ctx.Err()
+	if err != nil {
+		if ctx.Err() != nil || !errors.As(err, new(refusal)) {
+			return nil, safe(ctx, err, auth.CodeProviderFailed)
+		}
+		return nil, nil
+	}
+	if !cached {
+		return nil, nil
 	}
 	key := p.key(r, config)
 	record, err := p.options.Store.Load(ctx, key)

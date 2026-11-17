@@ -149,31 +149,54 @@ func TestLifecycleStepUpRequirementOperationScoped(t *testing.T) {
 	}
 }
 
+// Token validity crosses the real token endpoint: a malformed expires_in is
+// never dispatched, an initial response persists nothing, and a refresh keeps
+// only a valid rotated refresh token.
 func TestLifecycleTokenValidity(t *testing.T) {
-	_, p, _ := setup(t, "authorization_code_pkce")
-	c := ClientConfig{Scopes: []string{"events"}, Resource: "unused"}
-	p.options.ValidateToken = func(context.Context, ClientConfig, *oauth2.Token) error { return nil }
-	previous := &Record{AccessToken: "old", RefreshToken: "old-refresh", Scopes: []string{"events"}, Generation: "g"}
-	for _, value := range []any{float64(0), float64(-1), 3600.5, "0", "-1", "3600.5", "1e3", "abc", true} {
-		token := (&oauth2.Token{AccessToken: "access", RefreshToken: "rotated", TokenType: "Bearer"}).WithExtra(map[string]any{"expires_in": value})
-		if record, err := p.grant(budget(t), c, c.Scopes, token, nil); record != nil || err == nil {
-			t.Fatalf("initial %v: invalid response persisted", value)
-		}
-		record, err := p.grant(budget(t), c, previous.Scopes, token, previous)
+	invalid := []string{`0`, `-1`, `3600.5`, `"0"`, `"-1"`, `"3600.5"`, `"1e3"`, `"abc"`, `true`, `{}`}
+	for _, raw := range invalid {
+		t.Run("refresh "+raw, func(t *testing.T) {
+			f, p, r := setup(t, "authorization_code_pkce")
+			first := finishLogin(t, p, r)
+			expire(t, f, first)
+			f.tokenBody.Store(`{"access_token":"new-access","refresh_token":"rotated-refresh","token_type":"Bearer","expires_in":` + raw + `}`)
+			_, err := p.Prepare(budget(t), r)
+			assertCode(t, err, auth.CodeProviderFailed)
+			record, _ := f.store.Load(budget(t), first.Attempt.(attempted).key)
+			if record == nil || record.RefreshToken != "rotated-refresh" || usable(record) {
+				t.Fatal("rotated refresh lost or invalid token stored")
+			}
+		})
+		t.Run("initial "+raw, func(t *testing.T) {
+			f, p, r := setup(t, "client_credentials")
+			f.tokenBody.Store(`{"access_token":"new-access","refresh_token":"rotated-refresh","token_type":"Bearer","expires_in":` + raw + `}`)
+			_, err := p.Credential(budget(t), r)
+			assertCode(t, err, auth.CodeProviderFailed)
+			config, _, _, _ := p.cachedBinding(budget(t), r)
+			if record, _ := f.store.Load(budget(t), p.key(r, config)); record != nil {
+				t.Fatal("invalid initial response persisted")
+			}
+		})
+	}
+	t.Run("invalid rotated refresh keeps previous", func(t *testing.T) {
+		f, p, r := setup(t, "authorization_code_pkce")
+		first := finishLogin(t, p, r)
+		expire(t, f, first)
+		f.tokenBody.Store(`{"access_token":"new-access","refresh_token":"bad\nrefresh","token_type":"MAC"}`)
+		_, err := p.Prepare(budget(t), r)
 		assertCode(t, err, auth.CodeProviderFailed)
-		if record == nil || record.RefreshToken != "rotated" || usable(record) {
-			t.Fatalf("refresh %v: rotated refresh not kept or token usable", value)
+		if record, _ := f.store.Load(budget(t), first.Attempt.(attempted).key); record == nil || record.RefreshToken != "refresh-token" {
+			t.Fatal("invalid rotated refresh replaced the previous one")
 		}
-	}
-	bad := (&oauth2.Token{AccessToken: "access", RefreshToken: "bad\nrefresh", TokenType: "MAC"})
-	if record, _ := p.grant(budget(t), c, previous.Scopes, bad, previous); record == nil || record.RefreshToken != "old-refresh" {
-		t.Fatal("invalid rotated refresh replaced previous one")
-	}
-	for _, value := range []any{float64(3600), "3600"} {
-		token := (&oauth2.Token{AccessToken: "access", TokenType: "Bearer"}).WithExtra(map[string]any{"expires_in": value})
-		if record, err := p.grant(budget(t), c, c.Scopes, token, nil); err != nil || !usable(record) {
-			t.Fatalf("valid expiry %v rejected: %v", value, err)
-		}
+	})
+	for _, raw := range []string{`3600`, `"3600"`} {
+		t.Run("valid "+raw, func(t *testing.T) {
+			f, p, r := setup(t, "client_credentials")
+			f.tokenBody.Store(`{"access_token":"access-token","token_type":"Bearer","expires_in":` + raw + `}`)
+			if credential, err := p.Credential(budget(t), r); err != nil || credential.Token != "access-token" {
+				t.Fatalf("valid expiry rejected: %v", err)
+			}
+		})
 	}
 }
 
@@ -607,5 +630,25 @@ func TestLifecycleStepUpKeepsPreviousGrant(t *testing.T) {
 	record, _ := f.store.Load(budget(t), first.Attempt.(attempted).key)
 	if !sameScopes(record.Scopes, []string{"events", "admin"}) {
 		t.Fatalf("step-up lost earlier scopes: %v", record.Scopes)
+	}
+}
+
+// A 403 insufficient_scope keeps the still-valid token: only the scope
+// requirement drives step-up.
+func TestLifecycleInsufficientScopeKeepsToken(t *testing.T) {
+	f, p, r := setup(t, "authorization_code_pkce")
+	allowAdmin(p)
+	first := finishLogin(t, p, r)
+	key := first.Attempt.(attempted).key
+	record, _ := f.store.Load(budget(t), key)
+	stripped := cloneRecord(record)
+	stripped.RefreshToken, stripped.Generation = "", randomID()
+	if ok, err := f.store.CompareAndSwap(budget(t), key, record.Generation, stripped); !ok || err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.Challenge(budget(t), r, auth.Challenge{StatusCode: 403, Header: http.Header{"Www-Authenticate": {`Bearer error="insufficient_scope", scope="admin"`}}, Attempt: first.Attempt})
+	assertCode(t, err, auth.CodeInteractionRequired)
+	if next, err := p.Credential(budget(t), r); err != nil || next.Token != first.Token {
+		t.Fatalf("step-up challenge dropped the still-valid token: %v", err)
 	}
 }
