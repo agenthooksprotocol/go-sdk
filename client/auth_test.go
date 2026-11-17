@@ -32,7 +32,10 @@ func TestRegistrationAuthEventChallengeAndNotificationReplay(t *testing.T) {
 	for _, notification := range []bool{false, true} {
 		t.Run(map[bool]string{false: "request", true: "notification"}[notification], func(t *testing.T) {
 			calls, gets, challenges := 0, 0, 0
-			body := `{"jsonrpc":"2.0","id":"same","method":"intercept"}`
+			body := `{"jsonrpc":"2.0","id":"same","method":"hooks/intercept"}`
+			if notification {
+				body = `{"jsonrpc":"2.0","method":"hooks/observe"}`
+			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
 				data, _ := io.ReadAll(r.Body)

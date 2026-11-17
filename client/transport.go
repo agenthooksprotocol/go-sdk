@@ -177,7 +177,7 @@ func (t *httpBackend) Exchange(ctx context.Context, body []byte, notification bo
 	req.Header.Set("Content-Type", "application/json")
 	var resp *http.Response
 	if t.authRequest != nil {
-		resp, err = auth.DoWithHeaders(client, req, *t.authRequest, t.provider, !notification, headers)
+		resp, err = auth.DoWithHeaders(client, req, *t.authRequest, t.provider, headers)
 	} else {
 		auth.ApplyHeaders(req, headers)
 		resp, err = client.Do(req)

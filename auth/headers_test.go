@@ -42,7 +42,7 @@ func TestConfiguredHeadersOverrideDefaultsAndSuppressAuth(t *testing.T) {
 			}
 			return &http.Response{StatusCode: 401, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
 		})}
-		response, err := DoWithHeaders(client, req, Request{Destination: req.URL.String(), Purpose: Event, Binding: []byte(`{"type":"oauth","flow":"client_credentials"}`)}, forbiddenProvider{t}, true, http.Header{"aUtHoRiZaTiOn": {authorization}, "Content-Type": {"text/custom"}, "X-Key": {"configured"}})
+		response, err := DoWithHeaders(client, req, Request{Destination: req.URL.String(), Purpose: Event, Binding: []byte(`{"type":"oauth","flow":"client_credentials"}`)}, forbiddenProvider{t}, http.Header{"aUtHoRiZaTiOn": {authorization}, "Content-Type": {"text/custom"}, "X-Key": {"configured"}})
 		if err != nil {
 			t.Fatal(err)
 		}

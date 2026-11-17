@@ -194,7 +194,7 @@ func TestRegistrationHeadersAuthRetryReusesResolution(t *testing.T) {
 	tr.authRequest = &auth.Request{Destination: srv.URL, Purpose: auth.Event, Binding: json.RawMessage(`{"type":"bearer","tokenRef":"auth"}`)}
 	tr.provider = headerRetryProvider{}
 	tr.headerResolver = func(context.Context, HeaderRequest) (string, error) { resolutions++; return "resolved", nil }
-	if _, err := tr.Exchange(context.Background(), []byte(`{"id":1}`), false); err != nil {
+	if _, err := tr.Exchange(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"hooks/configuration"}`), false); err != nil {
 		t.Fatal(err)
 	}
 	if requests != 2 || resolutions != 1 {

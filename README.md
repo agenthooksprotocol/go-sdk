@@ -636,12 +636,67 @@ fail closed. An absent binding starts anonymously; an explicitly supplied provid
 may authorize recovery from an actual challenge according to host trust policy.
 
 Event and upload bindings are independent: uploads never inherit event
-credentials. Authenticated interceptor delivery permits one challenge retry with
-the same request identity/body and remaining context budget. Notifications and
-uploads are not replayed. Redirects are never followed. Separately scoped
+credentials. After a handled 401 or Bearer `insufficient_scope` 403,
+`hooks/intercept`, `hooks/configuration` and `hooks/capabilities` requests are
+replayed once with the same body and request id within the remaining context
+budget. Notifications and uploads are not replayed. Redirects are never followed. Separately scoped
 `auth` transports support custom transport configuration;
 deployment-specific TLS/workload mechanisms stay transport-owned. Borrowed HTTP
 clients are never closed.
+
+#### Compose bearer and host OAuth providers
+
+Routing is additive; existing custom providers still receive their original
+`auth.Request`. To support references alongside host-managed OAuth, pass this
+provider through `client.Options.AuthProvider`:
+
+```go
+provider := auth.Route(auth.Routes{
+    Bearer: auth.NewBearerProvider(auth.BearerOptions{
+        ResolveSecret: resolveSecret, // func(context.Context, string) (string, error)
+    }),
+    OAuth: hostOAuth, // your auth.Provider, including trust and consent policy
+})
+hooks, err := client.New(registration, client.Options{
+    // ... other registration/event options ...
+    AuthProvider: provider,
+})
+```
+
+The bearer provider resolves exactly one `tokenEnv` or `tokenRef` via the existing
+secret helper. Missing references fail closed; installing an OAuth route never
+disables bearer or turns a bearer failure into OAuth discovery. Without a supplied
+bearer route, `auth.Route` keeps the environment-only default. The OAuth route
+also receives actual 401 challenges for initially unbound endpoints; absent a
+configured OAuth route, this returns `unsupported_binding`, not an automatic
+login. A rejected attempt returns to its issuing provider with the original opaque
+identity and exact backend/destination/purpose/binding, never another route.
+
+Use `auth.ProviderFuncs` for small callback-based providers. Use
+`auth.NormalizeTarget(request)` to obtain validated `Kind`, `Bearer` and `OAuth`
+accessors; `Request()` retains unknown wire fields and returns a detached copy.
+An OAuth resource is not the event/upload destination. Normalization validates
+shape and HTTPS issuer/resource URLs, **not** issuer trust, permissions or network
+policy. The router creates no credential cache, shared registry or worker.
+
+Registration-aware failures support `errors.As(err, &authError)` for `*auth.Error`
+and its stable `Code` (plus validated required `Scopes`: on `interaction_required`
+to pass back to `Prepare`, on `access_denied` for diagnostics); a provider error that is not an `*auth.Error` becomes
+`provider_failed`; `errors.Is` still matches the existing auth sentinels and
+native cancellation/deadline identities. Provider messages, raw causes, callback
+URLs and response bodies are discarded. Low-level scoped token transports retain
+their existing sentinel-only errors. Operational codes distinguish invalid
+configuration, unsupported binding, unavailable credentials, interaction required,
+access denied, rejected refresh, failed discovery, untrusted destination and
+provider failure; they are SDK outcomes, not protocol wire fields.
+
+For managed PKCE and client credentials, use the optional
+[`auth/oauth` provider](auth/oauth/README.md). Supply host-controlled network/trust
+policy, coordinated credential storage and token validation, then use
+`Prepare`/`Complete` for consent without implicit browsers, listeners or workers.
+The adapter implements protected-resource discovery and resource-bound refresh
+using `golang.org/x/oauth2`. Core auth/client packages do not import the optional
+subpackage; its dependency remains in the shared Go module manifest.
 
 Content selection does not grant access. `client.ContentOptions` supplies
 receiver-scoped disclosure decisions and host-owned content resolution.
