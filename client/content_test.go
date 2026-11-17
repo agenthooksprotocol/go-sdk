@@ -5,13 +5,17 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/agenthooksprotocol/go-sdk/auth"
 )
 
 // contentTestEvent completes the canonical tool.before envelope for private
@@ -454,5 +458,43 @@ func TestContentFileReferencesAreReceiverAllocated(t *testing.T) {
 	got = out["changes"].([]any)[0].(map[string]any)["after"].(map[string]any)
 	if got["body"] != nil || got["selection"] != "metadata" {
 		t.Fatal("unselected reference leaked", got)
+	}
+}
+
+// A Bearer 403 insufficient_scope on an upload runs challenge handling and the
+// upload error keeps the typed auth error, including required scopes.
+func TestContentUploadInsufficientScopeKeepsAuthError(t *testing.T) {
+	calls, challenges := 0, 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("WWW-Authenticate", `Bearer error="insufficient_scope", scope="upload"`)
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+	provider := auth.ProviderFuncs{
+		CredentialFunc: func(context.Context, auth.Request) (auth.Credential, error) {
+			return auth.Credential{Type: "bearer", Token: "narrow"}, nil
+		},
+		ChallengeFunc: func(_ context.Context, _ auth.Request, c auth.Challenge) (*auth.Credential, error) {
+			challenges++
+			if c.StatusCode != http.StatusForbidden {
+				t.Errorf("challenge status %d", c.StatusCode)
+			}
+			return nil, &auth.Error{Code: auth.CodeInteractionRequired, Scopes: []string{"upload"}}
+		},
+	}
+	c := &Hooks{opts: Options{AuthProvider: provider, Content: ContentOptions{AllowLoopbackHTTP: true, AuthorizeContent: contentTestAllow}}}
+	c.opts.Content.Resolver = func(context.Context, string) (io.ReadCloser, error) {
+		return io.NopCloser(strings.NewReader("abc")), nil
+	}
+	sub := contentTestSubscription(server.URL)
+	sub["upload"].(map[string]any)["auth"] = map[string]any{"type": "oauth", "issuer": "https://issuer.example", "resource": "https://resource.example", "clientId": "client", "flow": "authorization_code_pkce", "scopes": []string{"upload"}}
+	_, err := c.uploadContent(context.Background(), sub["upload"].(map[string]any), []byte("abc"), "b")
+	var classified *auth.Error
+	if !errors.As(err, &classified) || classified.Code != auth.CodeInteractionRequired || !slices.Equal(classified.Scopes, []string{"upload"}) {
+		t.Fatalf("upload lost the typed auth error: %v", err)
+	}
+	if calls != 1 || challenges != 1 {
+		t.Fatalf("calls=%d challenges=%d", calls, challenges)
 	}
 }

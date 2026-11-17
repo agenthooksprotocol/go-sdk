@@ -234,7 +234,7 @@ func TestCanonicalTokenResponses(t *testing.T) {
 var lifecycleCoverage = map[string][]string{
 	"cached-token-metadata-outage":                     {"TestCachedUnboundUnsafeDeliveryAfterProviderRecreation"},
 	"unbound-preemptive-unsafe-delivery":               {"TestCachedUnboundUnsafeDeliveryAfterProviderRecreation"},
-	"unbound-lookup-anonymous-fallback":                {"TestUnboundLookupAnonymousFallback", "TestUnboundLookupFailuresAreNotAnonymous"},
+	"unbound-lookup-anonymous-fallback":                {"TestUnboundLookupAnonymousFallback", "TestUnboundLookupFailuresAreNotAnonymous", "TestUnboundLookupStaleBindingIdentity"},
 	"unbound-lookup-refreshes-expired-token":           {"TestUnboundLookupRefreshesExpiredToken"},
 	"refresh-unknown-expiry-rotation":                  {"TestLifecycleRefreshUnknownExpiryRotation", "TestCanonicalTokenResponses"},
 	"transient-refresh-failure":                        {"TestManagedTemporaryRefreshRetainsAndDefinitiveRejectionRepairs", "TestLifecycleNonOAuthRefreshFailureRetainsRetry", "TestManagedCancellationLeavesAmbiguityAndReleasesCoordination"},
@@ -269,7 +269,7 @@ var lifecycleCoverage = map[string][]string{
 	"up-front-client-credentials-reacquire":            {"TestUpFrontClientCredentialsReacquire"},
 	"up-front-lookup-issuer-metadata-only":             {"TestUpFrontLookupIssuerMetadataOnly", "TestChangedIssuerRepairedByDiscovery"},
 	"known-binding-without-token-requires-login":       {"TestKnownBindingWithoutTokenRequiresLogin"},
-	"challenge-renews-rejected-unexpired-token":        {"TestChallengeRenewsRejectedUnexpiredToken", "TestManagedResourceBoundRefreshAndStaleRejection"},
+	"challenge-renews-rejected-unexpired-token":        {"TestChallengeRenewsRejectedUnexpiredToken", "TestManagedResourceBoundRefreshAndStaleRejection", "TestRejectedTokenPersistedBeforeFailedRenewal"},
 	"step-up-keeps-previous-grant":                     {"TestLifecycleStepUpKeepsPreviousGrant", "TestCanonicalTokenResponses"},
 	"stale-metadata-refetch-once":                      {"TestStaleMetadataRefetchOnce"},
 	"ambiguous-renewal-failure-no-refetch":             {"TestAmbiguousRenewalFailureNoRefetch"},

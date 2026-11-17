@@ -219,6 +219,10 @@ func satisfies(record *Record, c ClientConfig) bool {
 	return usable(record) && scopeSubset(c.RequiredScopes, intersect(record.Scopes, allowedScopes(c)))
 }
 
+// errStaleBinding marks a stored binding whose grant identity no longer
+// matches current policy. Discovery (prepare, challenge) rebuilds it.
+var errStaleBinding = &auth.Error{Code: auth.CodeDiscoveryFailed}
+
 // refusal marks a host SelectClient refusal of a stored binding.
 type refusal struct{ error }
 
@@ -253,7 +257,9 @@ func (p *Provider) cachedBinding(ctx context.Context, r auth.Request) (ClientCon
 		return ClientConfig{}, metadata{}, false, fail(auth.CodeInvalidConfiguration)
 	}
 	if p.key(r, c) != p.key(r, b.Config) {
-		return ClientConfig{}, metadata{}, false, nil
+		// Policy now selects another client, flow or partition: the stored
+		// binding is stale until discovery rebuilds it.
+		return ClientConfig{}, metadata{}, false, errStaleBinding
 	}
 	return c, b.IssuerMetadata, true, nil
 }
@@ -336,7 +342,7 @@ func (p *Provider) prepare(ctx context.Context, r auth.Request, challenge string
 		return c, nil
 	}
 	config, m, cached, err := p.cachedBinding(ctx, r)
-	if err != nil {
+	if err != nil && err != errStaleBinding {
 		return Preparation{}, safe(ctx, err, auth.CodeDiscoveryFailed)
 	}
 	if cached {
@@ -553,7 +559,7 @@ func (p *Provider) machine(ctx context.Context, key string, c ClientConfig, m me
 	}
 	c.Scopes = merge(granted, requested(c)...)
 	conf := clientcredentials.Config{ClientID: c.ClientID, ClientSecret: c.ClientSecret, TokenURL: m.TokenEndpoint, Scopes: c.Scopes, AuthStyle: authStyle(c), EndpointParams: url.Values{"resource": {c.Resource}}}
-	token, err := conf.Token(context.WithValue(ctx, oauth2.HTTPClient, p.tokenClient(ctx, c, m)))
+	token, err := conf.Token(context.WithValue(ctx, oauth2.HTTPClient, p.tokenClient(c, m, nil)))
 	if err != nil {
 		return nil, acquisitionError(ctx, err, false)
 	}
@@ -607,10 +613,19 @@ func acquisitionError(ctx context.Context, err error, interactive bool) error {
 // record untouched; a definitive invalid_grant drops both tokens.
 func (p *Provider) refresh(ctx context.Context, key string, c ClientConfig, m metadata, previous *Record) (*Record, error) {
 	conf := oauthConfig(c, m)
-	token, err := conf.TokenSource(context.WithValue(ctx, oauth2.HTTPClient, p.tokenClient(ctx, c, m)), &oauth2.Token{RefreshToken: previous.RefreshToken, Expiry: time.Now().Add(-time.Minute)}).Token()
+	var rotated string
+	token, err := conf.TokenSource(context.WithValue(ctx, oauth2.HTTPClient, p.tokenClient(c, m, &rotated)), &oauth2.Token{RefreshToken: previous.RefreshToken, Expiry: time.Now().Add(-time.Minute)}).Token()
+	var rejected *oauth2.RetrieveError
+	if err != nil && ctx.Err() == nil && !errors.As(err, &rejected) && validRefresh(rotated) {
+		// x/oauth2 rejected a 2xx response it could not decode: keep its
+		// rotated refresh token and report the invalid response.
+		kept := cloneRecord(previous)
+		kept.AccessToken, kept.RefreshToken, kept.ExpiresAt, kept.Generation = "", rotated, time.Time{}, randomID()
+		_, err = p.commit(ctx, key, previous.Generation, kept, fail(auth.CodeProviderFailed))
+		return nil, err
+	}
 	if err != nil {
-		var rejected *oauth2.RetrieveError
-		if ctx.Err() == nil && errors.As(err, &rejected) && rejected.ErrorCode == "invalid_grant" {
+		if ctx.Err() == nil && rejected != nil && rejected.ErrorCode == "invalid_grant" {
 			// Compare-and-delete: a newer record (lost CAS) is kept.
 			dropped := cloneRecord(previous)
 			dropped.AccessToken, dropped.RefreshToken, dropped.ExpiresAt, dropped.Generation = "", "", time.Time{}, randomID()
@@ -672,6 +687,9 @@ func (p *Provider) login(ctx context.Context, key string, record *Record, c Clie
 func (p *Provider) Cancel(ctx context.Context, r auth.Request) error {
 	r = cloneRequest(r)
 	config, _, cached, err := p.cachedBinding(ctx, r)
+	if err == errStaleBinding {
+		return nil
+	}
 	if err != nil {
 		return safe(ctx, err, auth.CodeProviderFailed)
 	}
@@ -754,7 +772,7 @@ func (p *Provider) Complete(ctx context.Context, r auth.Request, callback string
 		}
 		exchange := cloneConfig(config)
 		exchange.Scopes, exchange.RedirectURI = pending.Scopes, pending.RedirectURI
-		token, err := oauthConfig(exchange, m).Exchange(context.WithValue(ctx, oauth2.HTTPClient, p.tokenClient(ctx, exchange, m)), query.Get("code"), oauth2.VerifierOption(pending.Verifier), oauth2.SetAuthURLParam("resource", exchange.Resource))
+		token, err := oauthConfig(exchange, m).Exchange(context.WithValue(ctx, oauth2.HTTPClient, p.tokenClient(exchange, m, nil)), query.Get("code"), oauth2.VerifierOption(pending.Verifier), oauth2.SetAuthURLParam("resource", exchange.Resource))
 		if err != nil {
 			return acquisitionError(ctx, err, true)
 		}

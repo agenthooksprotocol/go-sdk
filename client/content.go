@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/agenthooksprotocol/go-sdk/content"
-	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
 	"io"
 	"math"
 	"math/big"
@@ -17,11 +15,15 @@ import (
 	"net/http"
 	"net/url"
 
-	ahp "github.com/agenthooksprotocol/go-sdk"
-	"github.com/agenthooksprotocol/go-sdk/auth"
+	"github.com/agenthooksprotocol/go-sdk/content"
+	"github.com/agenthooksprotocol/go-sdk/internal/ownedcontent"
+
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/auth"
 )
 
 // projectContent prepares a receiver-specific view. A returned error suppresses
@@ -512,7 +514,9 @@ func (c *Hooks) uploadContent(ctx context.Context, config map[string]any, raw []
 	}
 	response, err := auth.DoWithHeaders(&client, request, auth.Request{Binding: binding, BackendID: backendID, Destination: endpoint, Purpose: auth.Upload}, c.opts.AuthProvider, headers)
 	if err != nil {
-		return nil, errors.New("content upload failed")
+		// Do returns only redacted errors; keep the typed auth error and
+		// cancellation identity for the host.
+		return nil, fmt.Errorf("content upload failed: %w", err)
 	}
 	defer response.Body.Close()
 	media, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))

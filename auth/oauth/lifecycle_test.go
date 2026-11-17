@@ -178,6 +178,28 @@ func TestLifecycleTokenValidity(t *testing.T) {
 			}
 		})
 	}
+	// Responses x/oauth2 rejects before the SDK sees the token still keep the
+	// rotated refresh token.
+	for name, body := range map[string]string{
+		"missing access token": `{"refresh_token":"rotated-refresh","token_type":"Bearer","expires_in":3600}`,
+		"numeric access token": `{"access_token":5,"refresh_token":"rotated-refresh","token_type":"Bearer"}`,
+		"numeric token type":   `{"access_token":"new-access","refresh_token":"rotated-refresh","token_type":5}`,
+		"201 malformed expiry": `201 {"access_token":"new-access","refresh_token":"rotated-refresh","token_type":"Bearer","expires_in":3600.5}`,
+		"overflowing expiry":   `{"access_token":"new-access","refresh_token":"rotated-refresh","token_type":"Bearer","expires_in":1e400}`,
+	} {
+		t.Run("refresh "+name, func(t *testing.T) {
+			f, p, r := setup(t, "authorization_code_pkce")
+			first := finishLogin(t, p, r)
+			expire(t, f, first)
+			f.tokenBody.Store(body)
+			_, err := p.Prepare(budget(t), r)
+			assertCode(t, err, auth.CodeProviderFailed)
+			record, _ := f.store.Load(budget(t), first.Attempt.(attempted).key)
+			if record == nil || record.RefreshToken != "rotated-refresh" || usable(record) {
+				t.Fatal("rotated refresh lost or invalid token stored")
+			}
+		})
+	}
 	t.Run("invalid rotated refresh keeps previous", func(t *testing.T) {
 		f, p, r := setup(t, "authorization_code_pkce")
 		first := finishLogin(t, p, r)
@@ -189,12 +211,17 @@ func TestLifecycleTokenValidity(t *testing.T) {
 			t.Fatal("invalid rotated refresh replaced the previous one")
 		}
 	})
-	for _, raw := range []string{`3600`, `"3600"`} {
+	for _, raw := range []string{`3600`, `"3600"`, `99999999999999999999`, `"99999999999999999999"`, `null`} {
 		t.Run("valid "+raw, func(t *testing.T) {
 			f, p, r := setup(t, "client_credentials")
 			f.tokenBody.Store(`{"access_token":"access-token","token_type":"Bearer","expires_in":` + raw + `}`)
-			if credential, err := p.Credential(budget(t), r); err != nil || credential.Token != "access-token" {
+			credential, err := p.Credential(budget(t), r)
+			if err != nil || credential.Token != "access-token" {
 				t.Fatalf("valid expiry rejected: %v", err)
+			}
+			record, _ := f.store.Load(budget(t), credential.Attempt.(attempted).key)
+			if (raw == `null`) != record.ExpiresAt.IsZero() {
+				t.Fatal("expiry classification mismatch")
 			}
 		})
 	}

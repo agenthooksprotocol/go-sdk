@@ -2,9 +2,9 @@ package oauth
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -21,15 +21,18 @@ type tokenTransport struct {
 	provider           *Provider
 	endpoint, resource string
 	base               http.RoundTripper
+	// refresh captures a 2xx response's refresh_token, so it survives a
+	// response x/oauth2 rejects before the SDK sees it.
+	refresh *string
 }
 
-func (p *Provider) tokenClient(_ context.Context, c ClientConfig, m metadata) *http.Client {
+func (p *Provider) tokenClient(c ClientConfig, m metadata, refresh *string) *http.Client {
 	client := p.client
 	base := client.Transport
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	client.Transport = &tokenTransport{p, m.TokenEndpoint, c.Resource, base}
+	client.Transport = &tokenTransport{p, m.TokenEndpoint, c.Resource, base, refresh}
 	return &client
 }
 func (t *tokenTransport) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -73,8 +76,8 @@ func (t *tokenTransport) RoundTrip(request *http.Request) (*http.Response, error
 		response.Body.Close()
 		return nil, fail(auth.CodeUntrustedDestination)
 	}
-	if response.StatusCode == http.StatusOK {
-		return sanitizeExpiry(response)
+	if response.StatusCode >= 200 && response.StatusCode < 300 {
+		return sanitize(response, t.refresh)
 	}
 	return response, nil
 }
@@ -84,10 +87,11 @@ func (t *tokenTransport) RoundTrip(request *http.Request) (*http.Response, error
 // the response as provider_failed.
 const invalidExpiry = "ahp_invalid_expires_in"
 
-// sanitizeExpiry buffers a JSON token response and swaps a malformed
-// expires_in (anything but a positive integer or ASCII digit string) for the
-// invalidExpiry marker, so the rest of the response still decodes.
-func sanitizeExpiry(response *http.Response) (*http.Response, error) {
+// sanitize buffers a JSON token response, captures its refresh_token and
+// normalizes expires_in: null is absent, a positive integer or digit string is
+// clamped to what x/oauth2 accepts, anything else becomes the invalidExpiry
+// marker so the rest of the response still decodes.
+func sanitize(response *http.Response, refresh *string) (*http.Response, error) {
 	body, err := io.ReadAll(io.LimitReader(response.Body, discoveryLimit+1))
 	response.Body.Close()
 	if err != nil || len(body) > discoveryLimit {
@@ -95,9 +99,18 @@ func sanitizeExpiry(response *http.Response) (*http.Response, error) {
 	}
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(body, &fields) == nil {
-		if raw, ok := fields["expires_in"]; ok && !positiveExpiry(raw) {
-			delete(fields, "expires_in")
-			fields[invalidExpiry] = json.RawMessage("true")
+		if refresh != nil {
+			json.Unmarshal(fields["refresh_token"], refresh)
+		}
+		if raw, ok := fields["expires_in"]; ok {
+			if seconds, valid := positiveExpiry(raw); string(raw) == "null" {
+				delete(fields, "expires_in")
+			} else if valid {
+				fields["expires_in"] = json.RawMessage(strconv.FormatInt(seconds, 10))
+			} else {
+				delete(fields, "expires_in")
+				fields[invalidExpiry] = json.RawMessage("true")
+			}
 			body, _ = json.Marshal(fields)
 		}
 	}
@@ -107,10 +120,20 @@ func sanitizeExpiry(response *http.Response) (*http.Response, error) {
 	return response, nil
 }
 
-func positiveExpiry(raw json.RawMessage) bool {
+// positiveExpiry parses a positive JSON integer or ASCII digit string,
+// clamping very long lifetimes to the largest x/oauth2 represents.
+func positiveExpiry(raw json.RawMessage) (int64, bool) {
 	var digits string
 	if json.Unmarshal(raw, &digits) != nil {
 		digits = string(raw)
 	}
-	return digits != "" && strings.Trim(digits, "0123456789") == "" && strings.Trim(digits, "0") != "" && len(digits) <= 18
+	digits = strings.TrimLeft(digits, "0")
+	if digits == "" || strings.Trim(digits, "0123456789") != "" {
+		return 0, false
+	}
+	if len(digits) > 10 {
+		return math.MaxInt32, true
+	}
+	seconds, _ := strconv.ParseInt(digits, 10, 64)
+	return min(seconds, math.MaxInt32), true
 }

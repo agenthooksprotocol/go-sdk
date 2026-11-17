@@ -521,3 +521,61 @@ func TestChangedIssuerRepairedByDiscovery(t *testing.T) {
 		})
 	}
 }
+
+// Policy that now selects another client for a known binding makes the binding
+// stale: the lookup fails discovery_failed instead of sending anonymously, and
+// prepare reruns discovery.
+func TestUnboundLookupStaleBindingIdentity(t *testing.T) {
+	f, p, r := setup(t, "client_credentials")
+	r.Binding = nil
+	learnUnbound(t, f, p, r)
+	original := p.options.SelectClient
+	p.options.SelectClient = func(ctx context.Context, r auth.Request, issuers []string, resource string) (ClientConfig, error) {
+		c, err := original(ctx, r, issuers, resource)
+		c.ClientID = "rotated-client"
+		return c, err
+	}
+	credential, err := p.PreemptiveCredential(budget(t), r)
+	assertCode(t, err, auth.CodeDiscoveryFailed)
+	if credential != nil || f.eventCalls.Load() != 0 {
+		t.Fatal("stale binding served or sent")
+	}
+	resources := f.resourceCalls.Load()
+	_, _ = p.Prepare(budget(t), r)
+	if f.resourceCalls.Load() == resources {
+		t.Fatal("prepare did not rerun discovery for the stale binding")
+	}
+	stored, _ := f.store.Load(budget(t), p.bindingKey(r))
+	if stored.Binding.Config.ClientID != "rotated-client" {
+		t.Fatal("prepare did not rebuild the binding")
+	}
+}
+
+// A 401 persists the rejection before renewal, so a failed renewal (503)
+// never leaves the revoked token servable.
+func TestRejectedTokenPersistedBeforeFailedRenewal(t *testing.T) {
+	for _, flow := range []string{"client_credentials", "authorization_code_pkce"} {
+		t.Run(flow, func(t *testing.T) {
+			f, p, r := setup(t, flow)
+			var first auth.Credential
+			if flow == "client_credentials" {
+				var err error
+				if first, err = p.Credential(budget(t), r); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				first = finishLogin(t, p, r)
+			}
+			f.mode.Store("temporary")
+			_, err := p.Challenge(budget(t), r, auth.Challenge{StatusCode: http.StatusUnauthorized, Attempt: first.Attempt})
+			assertCode(t, err, auth.CodeProviderFailed)
+			record, _ := f.store.Load(budget(t), first.Attempt.(attempted).key)
+			if record == nil || record.AccessToken == first.Token {
+				t.Fatal("rejected token still stored after failed renewal")
+			}
+			if next, err := p.Credential(budget(t), r); err == nil && next.Token == first.Token {
+				t.Fatal("rejected token resent")
+			}
+		})
+	}
+}
