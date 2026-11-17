@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.12.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.11.0...v0.12.0) (2026-11-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **auth:** add composable providers and managed OAuth ([#49](https://github.com/agenthooksprotocol/go-sdk/issues/49))
+
+### Features
+
+* **auth:** add composable providers and managed OAuth ([#49](https://github.com/agenthooksprotocol/go-sdk/issues/49)) ([96e4762](https://github.com/agenthooksprotocol/go-sdk/commit/96e47622bd7b7b107a1afcdd8c03df14ceb00af2))
+
 ## [0.11.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.10.1...v0.11.0) (2026-11-04)
 
 
