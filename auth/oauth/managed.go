@@ -341,8 +341,10 @@ func (p *Provider) prepare(ctx context.Context, r auth.Request, challenge string
 		}
 		return c, nil
 	}
+	// A stale or policy-refused stored binding is rebuilt by discovery, which
+	// applies current policy to the discovered issuers.
 	config, m, cached, err := p.cachedBinding(ctx, r)
-	if err != nil && err != errStaleBinding {
+	if err != nil && err != errStaleBinding && (ctx.Err() != nil || !errors.As(err, new(refusal))) {
 		return Preparation{}, safe(ctx, err, auth.CodeDiscoveryFailed)
 	}
 	if cached {

@@ -469,21 +469,27 @@ func TestUnboundLookupFailuresAreNotAnonymous(t *testing.T) {
 // challenge handling run full discovery and rebind, whether or not the old
 // issuer still answers.
 func TestChangedIssuerRepairedByDiscovery(t *testing.T) {
-	for _, via := range []string{"prepare", "challenge", "prepare-without-metadata", "challenge-without-metadata", "prepare-old-issuer-up", "challenge-old-issuer-up"} {
+	for _, via := range []string{"prepare", "challenge", "prepare-without-metadata", "challenge-without-metadata", "prepare-old-issuer-up", "challenge-old-issuer-up", "prepare-refused", "challenge-refused"} {
 		t.Run(via, func(t *testing.T) {
 			f, p, r := setup(t, "client_credentials")
 			r.Binding = nil
 			var moved atomic.Bool
+			oldUp := strings.HasSuffix(via, "-old-issuer-up") || strings.HasSuffix(via, "-refused")
+			hintOnly := oldUp && strings.HasPrefix(via, "challenge")
 			serve := f.server.Config.Handler
 			f.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				if moved.Load() {
 					w.Header().Set("Content-Type", "application/json")
 					switch req.URL.Path {
 					case "/custom-resource", "/.well-known/oauth-protected-resource/events":
-						json.NewEncoder(w).Encode(map[string]any{"resource": f.resource, "authorization_servers": []string{f.server.URL + "/new"}})
-						return
+						// Old issuer still up: only the challenge's resource_metadata
+						// hint advertises the move, so ignoring the hint fails.
+						if !hintOnly || req.URL.Path == "/custom-resource" {
+							json.NewEncoder(w).Encode(map[string]any{"resource": f.resource, "authorization_servers": []string{f.server.URL + "/new"}})
+							return
+						}
 					case "/.well-known/oauth-authorization-server", "/token":
-						if !strings.HasSuffix(via, "-old-issuer-up") {
+						if !oldUp {
 							w.WriteHeader(http.StatusNotFound)
 							return
 						}
@@ -498,6 +504,9 @@ func TestChangedIssuerRepairedByDiscovery(t *testing.T) {
 			})
 			original := p.options.SelectClient
 			p.options.SelectClient = func(ctx context.Context, r auth.Request, issuers []string, resource string) (ClientConfig, error) {
+				if strings.HasSuffix(via, "-refused") && moved.Load() && issuers[0] == f.server.URL {
+					return ClientConfig{}, errors.New("stored issuer no longer trusted")
+				}
 				c, err := original(ctx, r, issuers, resource)
 				c.Issuer = issuers[0]
 				return c, err
@@ -514,7 +523,11 @@ func TestChangedIssuerRepairedByDiscovery(t *testing.T) {
 				}
 			}
 			moved.Store(true)
-			if !strings.HasSuffix(via, "-old-issuer-up") {
+			if strings.HasSuffix(via, "-refused") {
+				if credential, err := p.PreemptiveCredential(budget(t), r); err != nil || credential != nil {
+					t.Fatalf("refused binding lookup not anonymous: %v", err)
+				}
+			} else if !oldUp {
 				_, err := p.PreemptiveCredential(budget(t), r)
 				assertCode(t, err, auth.CodeDiscoveryFailed)
 			}
