@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -855,4 +856,42 @@ func TestReplacedClientDropsOldGrant(t *testing.T) {
 			}
 		})
 	}
+}
+
+// countingStore counts registration-key coordination.
+type countingStore struct {
+	*memoryStore
+	locks *atomic.Int32
+}
+
+func (s countingStore) Coordinate(ctx context.Context, key string, work func(context.Context) error) error {
+	if strings.HasPrefix(key, "ahp.oauth.registration:") {
+		s.locks.Add(1)
+	}
+	return s.memoryStore.Coordinate(ctx, key, work)
+}
+
+// Renewal that is not due spawns no work and takes no extra registration lock.
+func TestRenewalNotDueTakesNoLock(t *testing.T) {
+	f := dcrSetup(t, ccFlow)
+	locks := new(atomic.Int32)
+	p, r := f.provider(func(o *Options) { o.Store = countingStore{f.store, locks} }), f.request("backend")
+	credential := prepared(t, p, r).Credential
+	expireGrant(t, f, credential)
+	time.Sleep(50 * time.Millisecond)
+	locks.Store(0)
+	mustToken(t, mustLookup(t, p, r), nil, "access-dcr-1")
+	time.Sleep(100 * time.Millisecond)
+	if got := locks.Load(); got != 1 {
+		t.Fatalf("registration locks = %d; want only the acquisition's", got)
+	}
+}
+
+func mustLookup(t *testing.T, p *Provider, r auth.Request) *auth.Credential {
+	t.Helper()
+	credential, err := lookup(t, p, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return credential
 }

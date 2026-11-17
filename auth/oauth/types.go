@@ -50,6 +50,8 @@ type ClientConfig struct {
 	// source and registered record the selected client source and, for DCR,
 	// the registration generation in use. Hosts never set them.
 	source, registered string
+	// renew marks a client-credentials registration inside its renewal margin.
+	renew bool
 }
 
 // MetadataDocument is a host-published Client ID Metadata Document. URL is the
@@ -202,8 +204,11 @@ type Options struct {
 	RenewalMargin time.Duration
 }
 
-// Provider has no workers, listeners, owned HTTP lifecycle or in-memory login
-// state. Pending logins live in the Store. The host owns the Provider.
+// Provider has no listeners, owned HTTP lifecycle or in-memory login state.
+// Pending logins live in the Store. The host owns the Provider. Its only
+// background work is a proactive client-secret renewal, which may run for up
+// to the commit budget (one minute) after an acquisition, using the host's
+// Store, Secrets and HTTP client.
 type Provider struct {
 	options Options
 	client  http.Client

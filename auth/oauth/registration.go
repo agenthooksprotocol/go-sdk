@@ -172,6 +172,7 @@ func (p *Provider) registered(ctx context.Context, c ClientConfig, m metadata, i
 		if reg := record.Registration; reg != nil && (reg.SecretExpiresAt.IsZero() || time.Now().Before(reg.SecretExpiresAt)) {
 			if secret, ok := p.secret(ctx, c, reg); ok {
 				c = use(c, reg, secret)
+				c.renew = c.Flow != pkceFlow && p.renewalDue(reg)
 				return nil
 			}
 		}
@@ -197,7 +198,7 @@ func (p *Provider) registered(ctx context.Context, c ClientConfig, m metadata, i
 // still the one used and still due, and updates the failed marker on failure,
 // but never affects the operation's result, error or wait.
 func (p *Provider) renew(ctx context.Context, c ClientConfig, m metadata, interactive bool) {
-	if c.source != sourceDCR || c.Flow == pkceFlow {
+	if c.source != sourceDCR || c.Flow == pkceFlow || !c.renew {
 		return
 	}
 	detached, cancel := persisting(ctx)
@@ -220,7 +221,7 @@ func (p *Provider) renew(ctx context.Context, c ClientConfig, m metadata, intera
 }
 
 func use(c ClientConfig, reg *RegistrationRecord, secret string) ClientConfig {
-	c.ClientID, c.ClientSecret, c.TokenAuthMethod, c.registered = reg.ClientID, secret, reg.TokenAuthMethod, reg.Generation
+	c.ClientID, c.ClientSecret, c.TokenAuthMethod, c.registered, c.renew = reg.ClientID, secret, reg.TokenAuthMethod, reg.Generation, false
 	return c
 }
 

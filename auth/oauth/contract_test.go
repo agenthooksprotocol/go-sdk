@@ -302,7 +302,7 @@ var lifecycleCoverage = map[string][]string{
 	"dcr-policy-change-reregisters":                        {"TestRegistrationPolicyChangeReregisters", "TestFailedMarkerBoundsRegistration"},
 	"dcr-replaced-secret-deleted":                          {"TestRegistrationPolicyChangeReregisters", "TestUnusableRegistrationReregisters", "TestRegistersOnceAcrossProcesses", "TestForcedReregistration"},
 	"cc-registration-auto-repairs-after-backoff":           {"TestRegistrationRepairsAfterBackoff"},
-	"cc-proactive-reregistration-before-expiry":            {"TestProactiveRenewal"},
+	"cc-proactive-reregistration-before-expiry":            {"TestProactiveRenewal", "TestRenewalNotDueTakesNoLock"},
 	"marker-blocks-only-registration":                      {"TestMarkerBlocksOnlyRegistration"},
 	"stale-callback-does-not-delete-new-registration":      {"TestStaleCallbackKeepsNewerRegistration", "TestForcedReregistrationSupersedesPendingLogin"},
 	"registration-transient-failure-backs-off":             {"TestFailedMarkerBoundsRegistration"},
