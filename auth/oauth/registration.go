@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -150,13 +151,19 @@ func (p *Provider) registered(ctx context.Context, c ClientConfig, m metadata, i
 		if record == nil {
 			record = &Record{}
 		}
+		if interactive && record.RegistrationFailure != nil {
+			// A host prepare clears the failed marker, restarting the backoff.
+			next := cloneRecord(record)
+			next.RegistrationFailure, next.Generation = nil, randomID()
+			if err := p.save(ctx, key, record.Generation, next); err != nil {
+				return err
+			}
+			record = next
+		}
 		if reg := record.Registration; reg != nil && (force || reg.RequestDigest != digest) {
 			// Policy changed (or the host forces it): compare-and-delete.
 			next := cloneRecord(record)
 			next.Registration, next.Generation = nil, randomID()
-			if force {
-				next.RegistrationFailure = nil
-			}
 			if err := p.replace(ctx, key, record, next); err != nil {
 				return err
 			}
@@ -264,7 +271,8 @@ func (p *Provider) failure(record *Record, digest string, retryAfter time.Durati
 // register sends one RFC 7591 request and persists an accepted registration
 // by compare-and-set; every failed outcome updates the failed marker.
 func (p *Provider) register(ctx context.Context, key string, record *Record, c ClientConfig, m metadata, digest string) (ClientConfig, error) {
-	if m.RegistrationEndpoint == "" {
+	// A recorded DCR selection skips choose, so recheck confidential feasibility.
+	if m.RegistrationEndpoint == "" || (c.Flow != pkceFlow && (p.options.Secrets == nil || secretMethod(m) == "")) {
 		return c, fail(auth.CodeCredentialUnavailable)
 	}
 	if err := p.check(ctx, m.RegistrationEndpoint, Registration); err != nil {
@@ -298,17 +306,23 @@ func (p *Provider) register(ctx context.Context, key string, record *Record, c C
 			request[name] = value
 		}
 	}
-	reg, secret, retryAfter, err := p.send(ctx, m.RegistrationEndpoint, initial, request, c.Flow)
+	// Once written, a registration may have been processed: receive it, store
+	// its secret and persist it detached from caller cancellation, so a cancel
+	// never orphans a client; the caller still sees the cancellation.
+	persist, cancel := sending(ctx)
+	if cancel == nil {
+		return c, ctx.Err()
+	}
+	defer cancel()
+	reg, secret, retryAfter, err := p.send(persist, m.RegistrationEndpoint, initial, request, c.Flow)
 	if err == nil && secret != "" {
 		reg.SecretRef = randomID()
-		if storeErr := p.options.Secrets.Store(ctx, reg.SecretRef, secret); storeErr != nil {
-			err = safe(ctx, storeErr, auth.CodeProviderFailed)
+		if storeErr := p.options.Secrets.Store(persist, reg.SecretRef, secret); storeErr != nil {
+			err = safe(persist, storeErr, auth.CodeProviderFailed)
 		}
 	}
-	persist, cancel := persisting(ctx)
-	defer cancel()
 	if err != nil {
-		if ctx.Err() == nil {
+		if persist.Err() == nil {
 			failed := cloneRecord(record)
 			failed.RegistrationFailure, failed.Generation = p.failure(record, digest, retryAfter), randomID()
 			p.save(persist, key, generation(record), failed)
@@ -329,6 +343,9 @@ func (p *Provider) register(ctx context.Context, key string, record *Record, c C
 			}
 		}
 		return c, err
+	}
+	if ctx.Err() != nil {
+		return c, errors.Join(fail(auth.CodeProviderFailed), ctx.Err())
 	}
 	return use(c, reg, secret), nil
 }

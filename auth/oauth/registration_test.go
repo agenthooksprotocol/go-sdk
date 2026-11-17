@@ -441,11 +441,11 @@ func TestFailedMarkerBoundsRegistration(t *testing.T) {
 			if f.registerCalls.Load() != 1 {
 				t.Fatalf("backoff not honoured: %d", f.registerCalls.Load())
 			}
-			// Host prepare bypasses the marker, and its failure doubles the backoff.
+			// Host prepare clears the marker, so its failure restarts the backoff.
 			_, err = two.Prepare(budget(t), r)
 			assertCode(t, err, tc.code)
 			marker = f.registration(t, f.config).RegistrationFailure
-			if f.registerCalls.Load() != 2 || marker.Attempts != 2 || marker.NextAttempt.Sub(marker.FailedAt) != 2*time.Minute {
+			if f.registerCalls.Load() != 2 || marker.Attempts != 1 || marker.NextAttempt.Sub(marker.FailedAt) != time.Minute {
 				t.Fatalf("prepare attempt: %+v", marker)
 			}
 			// A changed request digest clears it for every path.
@@ -679,14 +679,136 @@ func TestMarkerUpdateAtomicAcrossProcesses(t *testing.T) {
 		}
 		wg.Wait()
 	}
-	// One permitted attempt: exactly one process sends it.
-	run(8, func(p *Provider) { p.PreemptiveCredential(budget(t), r) })
-	if f.registerCalls.Load() != 2 || f.registration(t, f.config).RegistrationFailure.Attempts != 2 {
-		t.Fatalf("permitted attempt: calls=%d", f.registerCalls.Load())
+	// Each permitted attempt is sent by exactly one process, and every
+	// failure increments the attempt count without loss.
+	for round := 2; round <= 4; round++ {
+		run(8, func(p *Provider) { p.PreemptiveCredential(budget(t), r) })
+		marker := f.registration(t, f.config).RegistrationFailure
+		if f.registerCalls.Load() != int32(round) || marker.Attempts != round || marker.NextAttempt.Sub(marker.FailedAt) != time.Minute<<(round-1) {
+			t.Fatalf("round %d: calls=%d marker=%+v", round, f.registerCalls.Load(), marker)
+		}
+		f.editRegistration(t, func(record *Record) { record.RegistrationFailure.NextAttempt = time.Now() })
 	}
-	// Concurrent host prepares each send and none loses an attempt count.
+	// Concurrent host prepares each send, each clearing the marker first.
 	run(6, func(p *Provider) { p.Prepare(budget(t), r) })
-	if f.registerCalls.Load() != 8 || f.registration(t, f.config).RegistrationFailure.Attempts != 8 {
-		t.Fatalf("attempts lost: calls=%d marker=%+v", f.registerCalls.Load(), f.registration(t, f.config).RegistrationFailure)
+	if f.registerCalls.Load() != 10 || f.registration(t, f.config).RegistrationFailure.Attempts != 1 {
+		t.Fatalf("prepare: calls=%d marker=%+v", f.registerCalls.Load(), f.registration(t, f.config).RegistrationFailure)
+	}
+}
+
+// A cancel after the registration request is written still receives,
+// stores and persists the registration, so no client is orphaned.
+func TestRegistrationCompletesPastCancellation(t *testing.T) {
+	f := dcrSetup(t, ccFlow)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	f.set(func(f *dcrFixture) {
+		f.respond = func(w http.ResponseWriter, n int) {
+			cancel()
+			time.Sleep(50 * time.Millisecond)
+			f.mu.Lock()
+			f.issued["dcr-1"] = "secret-issued-1"
+			f.mu.Unlock()
+			w.WriteHeader(201)
+			fmt.Fprint(w, `{"client_id":"dcr-1","client_secret":"secret-issued-1"}`)
+		}
+	})
+	p, r := f.provider(), f.request("backend")
+	if _, err := p.Prepare(ctx, r); err == nil {
+		t.Fatal("cancellation not reported")
+	}
+	record := f.registration(t, f.config)
+	if record == nil || record.Registration == nil || record.Registration.ClientID != "dcr-1" || f.secrets.count() != 1 || record.RegistrationFailure != nil {
+		t.Fatalf("cancelled registration lost: %+v", record)
+	}
+	f.set(func(f *dcrFixture) { f.respond = nil })
+	mustToken(t, prepared(t, p, r).Credential, nil, "access-dcr-1")
+	if f.registerCalls.Load() != 1 {
+		t.Fatalf("registered %d times", f.registerCalls.Load())
+	}
+}
+
+// A recorded DCR selection re-registering without a secret store, or without a
+// confidential method, fails credential_unavailable before any request.
+func TestRecordedConfidentialRegistrationNeedsSecretStore(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(*dcrFixture, *Options)
+	}{
+		{"no-secret-store", func(_ *dcrFixture, o *Options) { o.Secrets = nil }},
+		{"no-secret-method", func(f *dcrFixture, _ *Options) {
+			f.metadata["token_endpoint_auth_methods_supported"] = []string{"private_key_jwt"}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := dcrSetup(t, ccFlow)
+			r := f.request("backend")
+			credential := prepared(t, f.provider(), r).Credential
+			f.editRegistration(t, func(record *Record) { record.Registration.SecretExpiresAt = time.Now().Add(-time.Second) })
+			expireGrant(t, f, credential)
+			p := f.provider(func(o *Options) { f.set(func(f *dcrFixture) { tc.change(f, o) }) })
+			_, err := p.Credential(budget(t), r)
+			assertCode(t, err, auth.CodeCredentialUnavailable)
+			if f.registerCalls.Load() != 1 {
+				t.Fatal("registration sent without a confidential method")
+			}
+		})
+	}
+}
+
+// A login created under an older registration generation is not reused after
+// a forced re-registration, even when the server reissues the same client_id.
+func TestForcedReregistrationSupersedesPendingLogin(t *testing.T) {
+	f := dcrSetup(t, pkceFlow)
+	f.set(func(f *dcrFixture) {
+		f.respond = respondStatus(201, nil, `{"client_id":"dcr-1"}`)
+	})
+	p, r := f.provider(), f.request("backend")
+	first := prepared(t, p, r).Login
+	second := mustLogin(t, p, r, PrepareOptions{ForceRegistration: true})
+	if loginClientID(t, second) != "dcr-1" || second.AuthorizationURL() == first.AuthorizationURL() {
+		t.Fatal("stale-generation login reused")
+	}
+	config, _, _, _ := p.cachedBinding(budget(t), r)
+	stored, _ := f.store.Load(budget(t), p.key(r, config))
+	if pending := stored.Pending; pending.RegistrationGeneration != f.registration(t, f.config).Registration.Generation {
+		t.Fatal("login not bound to the new registration")
+	}
+}
+
+// A replaced client's binding-scoped grant is compare-and-deleted; a shared
+// partition's grant is kept.
+func TestReplacedClientDropsOldGrant(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		partition string
+		replace   func(*testing.T, *dcrFixture, *Provider, auth.Request)
+	}{
+		{"invalid-client", "", func(t *testing.T, f *dcrFixture, p *Provider, r auth.Request) {
+			f.set(func(f *dcrFixture) { f.rejected["dcr-1"] = true })
+			config, _, _, _ := p.cachedBinding(budget(t), r)
+			f.editKey(t, p.key(r, config), func(record *Record) { record.ExpiresAt = time.Now().Add(-time.Hour) })
+			mustToken(t, prepared(t, p, r).Credential, nil, "access-dcr-2")
+		}},
+		{"forced", "", func(t *testing.T, f *dcrFixture, p *Provider, r auth.Request) {
+			result, err := p.PrepareWith(budget(t), r, PrepareOptions{ForceRegistration: true})
+			mustToken(t, result.Credential, err, "access-dcr-2")
+		}},
+		{"shared-partition", "shared", func(t *testing.T, f *dcrFixture, p *Provider, r auth.Request) {
+			result, err := p.PrepareWith(budget(t), r, PrepareOptions{ForceRegistration: true})
+			mustToken(t, result.Credential, err, "access-dcr-2")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := dcrSetup(t, ccFlow)
+			f.set(func(f *dcrFixture) { f.config.GrantPartition = tc.partition })
+			p, r := f.provider(), f.request("backend")
+			old := prepared(t, p, r).Credential.Attempt.(attempted).key
+			tc.replace(t, f, p, r)
+			record, _ := f.store.Load(budget(t), old)
+			if kept := record != nil && record.AccessToken != ""; kept != (tc.partition != "") {
+				t.Fatalf("old grant kept=%v", kept)
+			}
+		})
 	}
 }

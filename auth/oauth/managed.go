@@ -438,7 +438,7 @@ func (p *Provider) prepare(ctx context.Context, r auth.Request, challenge string
 // endpoint failed without processing the request (stale metadata).
 func (p *Provider) obtain(ctx context.Context, r auth.Request, config ClientConfig, m metadata, persist, stepUp, interactive, force bool) (Preparation, error, bool) {
 	for attempt := 0; ; attempt++ {
-		previous, learn := config.ClientID, persist && attempt == 0
+		previous, learn := config, persist && attempt == 0
 		if config.source == sourceDCR {
 			// Learn the binding first, so a later lookup can register a
 			// client-credentials client after a failed registration.
@@ -458,8 +458,15 @@ func (p *Provider) obtain(ctx context.Context, r auth.Request, config ClientConf
 			return Preparation{}, err, false
 		}
 		config.TokenAuthMethod = method
-		if learn || config.ClientID != previous {
+		if learn || config.ClientID != previous.ClientID {
 			if err := p.persistBinding(ctx, r, config, m); err != nil {
+				return Preparation{}, err, false
+			}
+		}
+		// A replaced (invalid_client or forced) client's binding-scoped grant
+		// is compare-and-deleted; a shared partition may still serve others.
+		if (attempt > 0 || force) && previous.ClientID != "" && config.ClientID != previous.ClientID && config.GrantPartition == "" {
+			if err := p.dropGrant(ctx, p.key(r, previous)); err != nil {
 				return Preparation{}, err, false
 			}
 		}
@@ -478,6 +485,20 @@ func (p *Provider) obtain(ctx context.Context, r auth.Request, config ClientConf
 			return Preparation{}, fail(auth.CodeCredentialUnavailable), false
 		}
 	}
+}
+
+// dropGrant compare-and-deletes a grant record under its lock.
+func (p *Provider) dropGrant(ctx context.Context, key string) error {
+	return p.options.Store.Coordinate(ctx, key, func(ctx context.Context) error {
+		record, err := p.options.Store.Load(ctx, key)
+		if err != nil {
+			return safe(ctx, err, auth.CodeProviderFailed)
+		}
+		if record == nil {
+			return nil
+		}
+		return p.save(ctx, key, record.Generation, &Record{Generation: randomID()})
+	})
 }
 
 // acquireOnce runs under the grant lock: it rechecks the stored grant, then

@@ -172,6 +172,9 @@ PKCE needs a new `Prepare`. Every failed registration stores a backoff marker
 at `RegistrationBackoffMax`, default 1 hour). Until it elapses only `Prepare`
 sends a registration request. After the authorization server deletes a PKCE
 client, call `PrepareWith(ctx, request, PrepareOptions{ForceRegistration: true})`.
+A client replaced by `invalid_client` or a forced re-registration has its old
+binding-scoped grant compare-and-deleted; a shared `GrantPartition` grant is
+kept, since another binding may still use it.
 
 ## Discovery, isolation and failure recovery
 
