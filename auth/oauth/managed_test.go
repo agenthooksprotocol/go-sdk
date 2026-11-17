@@ -89,6 +89,7 @@ type fixture struct {
 	refreshCalls  atomic.Int32
 	eventCalls    atomic.Int32
 	metadataCalls atomic.Int32
+	resourceCalls atomic.Int32
 	grantsMu      sync.Mutex
 	grants        []url.Values
 	started       chan struct{}
@@ -130,6 +131,9 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if strings.HasPrefix(r.URL.Path, "/.well-known/") || r.URL.Path == "/custom-resource" {
 		f.metadataCalls.Add(1)
+	}
+	if strings.HasPrefix(r.URL.Path, "/.well-known/oauth-protected-resource") || r.URL.Path == "/custom-resource" {
+		f.resourceCalls.Add(1)
 	}
 	switch r.URL.Path {
 	case "/.well-known/oauth-protected-resource/events", "/.well-known/oauth-protected-resource", "/custom-resource":

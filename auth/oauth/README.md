@@ -58,9 +58,10 @@ The host functions have these contracts:
   under local policy, including cryptographic JWT validation where appropriate.
   An absent expiry remains usable until rejection; an explicit expired lifetime
   does not; `expires_in` must be a positive integer (or digit string). An
-  initial grant records the response scopes within the acquisition ceiling (the
-  pending login's, or the client-credentials caller's); extra scopes are
-  ignored. A refresh records the response within the previous grant, so it
+  acquisition (consent or client credentials) requests any previously granted
+  scopes plus the ceiling-filtered request, and records the response scopes
+  within the previous grant plus the acquisition ceiling (the pending login's,
+  or the client-credentials caller's); extra scopes are ignored. A refresh records the response within the previous grant, so it
   never broadens it, and a narrowed ceiling never shrinks it: each caller's
   ceiling filters the grant only at use; broader requirements need fresh consent or a new
   client-credentials grant. A missing required scope fails the operation with
@@ -115,9 +116,10 @@ creating context. Completion validates state, exact redirect path and the
 optional/advertised issuer response before claiming the login; an invalid
 callback does not consume it. A later `Prepare` reuses an unexpired login when
 the grant and redirect match and its scopes cover the new requested and
-required scopes. Otherwise it supersedes the login with the union of both scope
-sets within the new caller's ceiling. The login stores its creating ceiling,
-which bounds the grant recorded on completion. A login ends once:
+required scopes. Otherwise it supersedes the login, requesting the old login's
+scopes plus the new ceiling-filtered request and storing the union of both
+ceilings, which bounds the grant recorded on completion. Both only grow, so
+alternating callers converge. A login ends once:
 completion (including denial), supersede, `Cancel` or expiry; a callback for an
 ended login fails with `interaction_required`. `Cancel` never erases stored
 credentials.
@@ -131,9 +133,13 @@ completes through `Prepare` without UI and requires explicit issuer grant suppor
 An unknown unbound HTTP endpoint starts anonymously. A previously authorized
 unbound endpoint sends its cached bearer up front, including for notifications
 and uploads, even after provider recreation or during a metadata outage. That
-lookup never discovers or creates a login; with a context deadline it renews an
-expired grant non-interactively using cached issuer metadata. Only a store miss
-or host policy refusal sends anonymously; a failed renewal fails the operation.
+lookup never runs protected-resource discovery or creates a login; with a
+context deadline it refreshes or re-acquires an expired grant using the issuer
+metadata persisted with the binding (fetching only the stored issuer's metadata
+if none is persisted). Only a store miss or host policy refusal sends
+anonymously; a known binding whose grant cannot be renewed, including one that
+needs consent, fails the operation. A 401 marks the rejected token stale even
+before its expiry, so it is renewed rather than resent.
 A challenge on a notification or upload is not replayed but still runs challenge
 handling, so the next operation sends a credential. Local policy still runs before using a stored
 grant. Explicit presets skip protected

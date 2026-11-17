@@ -55,7 +55,9 @@ func TestLifecycleDeliveryNeverCreatesPendingLogin(t *testing.T) {
 	unbound.Binding = nil
 	_, err = p.Challenge(budget(t), unbound, auth.Challenge{StatusCode: 401, Header: http.Header{"Www-Authenticate": {`Bearer resource_metadata="` + f.server.URL + `/custom-resource"`}}})
 	assertCode(t, err, auth.CodeInteractionRequired)
-	if cached, err := p.PreemptiveCredential(budget(t), unbound); err != nil || cached != nil {
+	cached, err := p.PreemptiveCredential(budget(t), unbound)
+	assertCode(t, err, auth.CodeInteractionRequired)
+	if cached != nil {
 		t.Fatal("lookup served a credential without a grant")
 	}
 	if anyPending(f.store) {
@@ -580,5 +582,30 @@ func TestLifecyclePrepareRequiredOutsideCeilingDenied(t *testing.T) {
 	assertCode(t, err, auth.CodeAccessDenied)
 	if anyPending(f.store) || f.tokenCalls.Load() != 0 {
 		t.Fatal("required scope outside the ceiling started acquisition")
+	}
+}
+
+// Step-up consent requests and keeps the previous grant even when the new
+// caller's ceiling no longer covers it.
+func TestLifecycleStepUpKeepsPreviousGrant(t *testing.T) {
+	f, p, r := setup(t, "authorization_code_pkce")
+	first := finishLogin(t, p, r)
+	original := p.options.SelectClient
+	p.options.SelectClient = func(ctx context.Context, r auth.Request, issuers []string, resource string) (ClientConfig, error) {
+		c, err := original(ctx, r, issuers, resource)
+		c.AllowedScopes = []string{"admin"}
+		return c, err
+	}
+	prepared, err := p.Prepare(budget(t), r, "admin")
+	if err != nil || prepared.Login == nil || !slices.Equal(merge(loginScopes(prepared.Login)), []string{"admin", "events"}) {
+		t.Fatalf("step-up consent dropped the previous grant: %v", err)
+	}
+	f.mode.Store("admin-scope")
+	if _, err := p.Complete(budget(t), r, callback(prepared.Login, "step-up")); err != nil {
+		t.Fatal(err)
+	}
+	record, _ := f.store.Load(budget(t), first.Attempt.(attempted).key)
+	if !sameScopes(record.Scopes, []string{"events", "admin"}) {
+		t.Fatalf("step-up lost earlier scopes: %v", record.Scopes)
 	}
 }

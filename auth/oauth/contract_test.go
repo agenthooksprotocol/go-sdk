@@ -121,6 +121,9 @@ func TestCanonicalTokenResponses(t *testing.T) {
 							t.Error("refresh material not used")
 						}
 					}
+					if vector.Exchange == "reacquire" && !slices.Equal(merge(strings.Fields(r.Form.Get("scope"))), merge(vector.PreviousGranted, intersect(merge(vector.Requested, vector.Required...), vector.Allowed)...)) {
+						t.Errorf("re-acquisition requested %q", r.Form.Get("scope"))
+					}
 					if r.Form.Get("resource") != issuer+"/events" || r.Form.Get("grant_type") != expectedGrant {
 						t.Error("unbound token grant")
 					}
@@ -149,6 +152,13 @@ func TestCanonicalTokenResponses(t *testing.T) {
 			}
 			binding, _ := json.Marshal(map[string]any{"type": "oauth", "issuer": issuer, "resource": config.Resource, "clientId": "client", "flow": config.Flow, "scopes": vector.Requested})
 			request := auth.Request{BackendID: "backend", Purpose: auth.Event, Destination: config.Resource, Binding: binding}
+			if vector.Exchange == "reacquire" {
+				// An expired client-credentials grant without refresh material.
+				prior := &Record{AccessToken: "prior-access", Generation: "prior-generation", ExpiresAt: time.Now().Add(-time.Hour), Scopes: vector.PreviousGranted}
+				if ok, err := store.CompareAndSwap(budget(t), p.key(request, config), "", prior); err != nil || !ok {
+					t.Fatalf("seed prior grant: %v", err)
+				}
+			}
 			if vector.Exchange == "refresh" {
 				prior := &Record{AccessToken: "prior-access", RefreshToken: "previous-refresh", Generation: "prior-generation", ExpiresAt: time.Now().Add(-time.Hour), Scopes: vector.PreviousGranted}
 				if ok, err := store.CompareAndSwap(budget(t), p.key(request, config), "", prior); err != nil || !ok {
@@ -255,6 +265,11 @@ var lifecycleCoverage = map[string][]string{
 	"unreplayed-challenge-prepares-next-attempt":       {"TestUnreplayedChallengePreparesNextAttempt"},
 	"up-front-refresh-failure-no-anonymous-fallback":   {"TestUpFrontRefreshFailureNoAnonymousFallback"},
 	"prepare-required-outside-ceiling-denied":          {"TestLifecyclePrepareRequiredOutsideCeilingDenied"},
+	"up-front-client-credentials-reacquire":            {"TestUpFrontClientCredentialsReacquire"},
+	"up-front-lookup-issuer-metadata-only":             {"TestUpFrontLookupIssuerMetadataOnly"},
+	"known-binding-without-token-requires-login":       {"TestKnownBindingWithoutTokenRequiresLogin"},
+	"challenge-renews-rejected-unexpired-token":        {"TestChallengeRenewsRejectedUnexpiredToken", "TestManagedResourceBoundRefreshAndStaleRejection"},
+	"step-up-keeps-previous-grant":                     {"TestLifecycleStepUpKeepsPreviousGrant", "TestCanonicalTokenResponses"},
 	"extra-granted-scope-ignored":                      {"TestLifecycleExtraGrantedScopeIgnored", "TestCanonicalTokenResponses"},
 }
 

@@ -189,3 +189,129 @@ func TestUnreplayedChallengePreparesNextAttempt(t *testing.T) {
 		})
 	}
 }
+
+func learnUnbound(t *testing.T, f *fixture, p *Provider, r auth.Request) {
+	t.Helper()
+	if _, err := p.Challenge(budget(t), r, auth.Challenge{StatusCode: 401, Header: http.Header{"Www-Authenticate": {`Bearer resource_metadata="` + f.server.URL + `/custom-resource"`}}}); err != nil {
+		t.Fatal(err)
+	}
+}
+func doNotification(t *testing.T, f *fixture, p *Provider, r auth.Request) (*http.Response, error) {
+	t.Helper()
+	request, err := http.NewRequestWithContext(budget(t), http.MethodPost, r.Destination, strings.NewReader(`{"jsonrpc":"2.0","method":"hooks/observe"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := auth.Do(f.server.Client(), request, r, auth.Route(auth.Routes{OAuth: p}))
+	if response != nil {
+		response.Body.Close()
+	}
+	return response, err
+}
+
+// An expired client-credentials token without refresh material is re-acquired
+// up front from persisted metadata.
+func TestUpFrontClientCredentialsReacquire(t *testing.T) {
+	f, p, r := setup(t, "client_credentials")
+	r.Binding, r.Purpose = nil, auth.Upload
+	learnUnbound(t, f, p, r)
+	expireStored(t, f, p, r)
+	recreated, err := New(p.options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := f.metadataCalls.Load()
+	response, err := doNotification(t, f, recreated, r)
+	if err != nil || response.StatusCode != http.StatusOK || f.eventCalls.Load() != 1 || f.tokenCalls.Load() != 2 {
+		t.Fatalf("expired machine token not re-acquired before first send: %v", err)
+	}
+	if f.metadataCalls.Load() != metadata {
+		t.Fatal("re-acquisition fetched metadata despite persisted metadata")
+	}
+}
+
+// Without persisted issuer metadata the lookup fetches only the stored issuer's
+// metadata, never protected-resource metadata; a failure is discovery_failed.
+func TestUpFrontLookupIssuerMetadataOnly(t *testing.T) {
+	for _, fails := range []bool{false, true} {
+		t.Run(map[bool]string{false: "fetch", true: "failure"}[fails], func(t *testing.T) {
+			f, p, r := setup(t, "client_credentials")
+			r.Binding = nil
+			learnUnbound(t, f, p, r)
+			expireStored(t, f, p, r)
+			key := p.bindingKey(r)
+			binding, _ := f.store.Load(budget(t), key)
+			stripped := cloneRecord(binding)
+			stripped.Binding.IssuerMetadata, stripped.Generation = metadata{}, randomID()
+			if ok, err := f.store.CompareAndSwap(budget(t), key, binding.Generation, stripped); !ok || err != nil {
+				t.Fatal(err)
+			}
+			if fails {
+				check := p.options.CheckDestination
+				p.options.CheckDestination = func(ctx context.Context, raw string, purpose Purpose) error {
+					if purpose == Metadata {
+						return errors.New("metadata unavailable")
+					}
+					return check(ctx, raw, purpose)
+				}
+			}
+			resources, metadataCalls := f.resourceCalls.Load(), f.metadataCalls.Load()
+			credential, err := p.PreemptiveCredential(budget(t), r)
+			if f.resourceCalls.Load() != resources {
+				t.Fatal("lookup ran protected-resource discovery")
+			}
+			if fails {
+				assertCode(t, err, auth.CodeDiscoveryFailed)
+				return
+			}
+			if err != nil || credential == nil || f.metadataCalls.Load() == metadataCalls {
+				t.Fatalf("lookup did not renew with the issuer's metadata: %v", err)
+			}
+		})
+	}
+}
+
+// A known PKCE binding whose tokens were dropped needs consent: the lookup
+// fails interaction_required instead of sending anonymously.
+func TestKnownBindingWithoutTokenRequiresLogin(t *testing.T) {
+	f, p, r := setup(t, "authorization_code_pkce")
+	r.Binding = nil
+	finishLogin(t, p, r)
+	expireStored(t, f, p, r)
+	f.mode.Store("reject")
+	_, err := p.Prepare(budget(t), r)
+	assertCode(t, err, auth.CodeRefreshRejected)
+	_, err = doNotification(t, f, p, r)
+	assertCode(t, err, auth.CodeInteractionRequired)
+	if f.eventCalls.Load() != 0 {
+		t.Fatal("known binding without token sent anonymously")
+	}
+	f.mode.Store("ok")
+	finishLogin(t, p, r)
+	if response, err := doNotification(t, f, p, r); err != nil || response.StatusCode != http.StatusOK {
+		t.Fatalf("prepare did not restore the binding: %v", err)
+	}
+}
+
+// A 401 for an unexpired or unknown-expiry token marks it stale: challenge
+// handling renews it even for a notification, which is not replayed.
+func TestChallengeRenewsRejectedUnexpiredToken(t *testing.T) {
+	f, p, r := setup(t, "authorization_code_pkce")
+	r.Binding = nil
+	finishLogin(t, p, r)
+	config, _, _, _ := p.cachedBinding(budget(t), r)
+	key := p.key(r, config)
+	record, _ := f.store.Load(budget(t), key)
+	revoked := cloneRecord(record)
+	revoked.AccessToken, revoked.ExpiresAt, revoked.Generation = "revoked-token", time.Time{}, randomID()
+	if ok, err := f.store.CompareAndSwap(budget(t), key, record.Generation, revoked); !ok || err != nil {
+		t.Fatal(err)
+	}
+	response, err := doNotification(t, f, p, r)
+	if err != nil || response.StatusCode != http.StatusUnauthorized || f.eventCalls.Load() != 1 || f.refreshCalls.Load() != 1 {
+		t.Fatalf("rejected token not renewed: %v", err)
+	}
+	if response, err = doNotification(t, f, p, r); err != nil || response.StatusCode != http.StatusOK {
+		t.Fatalf("next operation resent the rejected token: %v", err)
+	}
+}

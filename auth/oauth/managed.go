@@ -513,15 +513,20 @@ func oauthConfig(c ClientConfig, m metadata) *oauth2.Config {
 	return &oauth2.Config{ClientID: c.ClientID, ClientSecret: c.ClientSecret, RedirectURL: c.RedirectURI, Scopes: append([]string(nil), c.Scopes...), Endpoint: oauth2.Endpoint{AuthURL: m.AuthorizationEndpoint, TokenURL: m.TokenEndpoint, AuthStyle: authStyle(c)}}
 }
 
-// machine issues a new client-credentials grant for the requested and required scopes.
+// machine issues a client-credentials grant. Re-acquisition for an existing
+// grant also requests and keeps its previously granted scopes.
 func (p *Provider) machine(ctx context.Context, key string, c ClientConfig, m metadata, previous *Record) (*Record, error) {
-	c.Scopes = requested(c)
+	var granted []string
+	if previous != nil {
+		granted = previous.Scopes
+	}
+	c.Scopes = merge(granted, requested(c)...)
 	conf := clientcredentials.Config{ClientID: c.ClientID, ClientSecret: c.ClientSecret, TokenURL: m.TokenEndpoint, Scopes: c.Scopes, AuthStyle: authStyle(c), EndpointParams: url.Values{"resource": {c.Resource}}}
 	token, err := conf.Token(context.WithValue(ctx, oauth2.HTTPClient, p.tokenClient(ctx, c, m)))
 	if err != nil {
 		return nil, acquisitionError(ctx, err, false)
 	}
-	next, err := p.grant(ctx, c, allowedScopes(c), token, nil)
+	next, err := p.grant(ctx, c, merge(granted, allowedScopes(c)...), token, nil)
 	return p.commit(ctx, key, generation(previous), next, err)
 }
 func acquisitionError(ctx context.Context, err error, interactive bool) error {
@@ -567,20 +572,27 @@ func (p *Provider) refresh(ctx context.Context, key string, c ClientConfig, m me
 	return p.commit(ctx, key, previous.Generation, next, err)
 }
 
-// login reuses an unexpired stored login whose scopes cover the new request,
-// otherwise supersedes it with the union of its scopes and the new request
-// within the current ceiling, so alternating callers converge. The login
-// stores its creating ceiling, which bounds the grant recorded on completion. Its lifetime is fixed here and
+// login reuses an unexpired stored login whose scopes cover the new request.
+// Otherwise it creates one requesting any previously granted scopes, any
+// superseded login's scopes and the new ceiling-filtered request; its stored
+// ceiling (bounding the grant recorded on completion) is the union of both
+// callers' ceilings. Both sets only grow, so alternating callers converge. Its lifetime is fixed here and
 // does not depend on the caller's context.
 func (p *Provider) login(ctx context.Context, key string, record *Record, c ClientConfig, m metadata) (*PendingLogin, error) {
-	c.Scopes = requested(c)
+	wanted := requested(c)
+	ceiling := merge(allowedScopes(c))
+	c.Scopes = wanted
+	if record != nil {
+		c.Scopes = merge(record.Scopes, wanted...)
+	}
 	now := time.Now()
 	if record != nil && record.Pending != nil && record.Pending.ExpiresAt.After(now) {
 		pending := record.Pending
-		if pending.RedirectURI == c.RedirectURI && scopeSubset(c.Scopes, pending.Scopes) {
+		if pending.RedirectURI == c.RedirectURI && scopeSubset(wanted, pending.Scopes) {
 			return &PendingLogin{authorizationURL: pending.AuthorizationURL, deadline: pending.ExpiresAt}, nil
 		}
-		c.Scopes = intersect(merge(c.Scopes, pending.Scopes...), allowedScopes(c))
+		c.Scopes = merge(c.Scopes, pending.Scopes...)
+		ceiling = merge(ceiling, pending.Ceiling...)
 	}
 	verifier := oauth2.GenerateVerifier()
 	state := randomID()
@@ -593,7 +605,7 @@ func (p *Provider) login(ctx context.Context, key string, record *Record, c Clie
 		next = &Record{}
 	}
 	next.Generation = randomID()
-	next.Pending = &PendingRecord{State: state, Verifier: verifier, RedirectURI: c.RedirectURI, AuthorizationURL: loginURL, Scopes: c.Scopes, Ceiling: merge(allowedScopes(c)), ExpiresAt: now.Add(p.options.LoginLifetime)}
+	next.Pending = &PendingRecord{State: state, Verifier: verifier, RedirectURI: c.RedirectURI, AuthorizationURL: loginURL, Scopes: c.Scopes, Ceiling: ceiling, ExpiresAt: now.Add(p.options.LoginLifetime)}
 	if err := p.save(ctx, key, generation(record), next); err != nil {
 		return nil, err
 	}
@@ -687,7 +699,7 @@ func (p *Provider) Complete(ctx context.Context, r auth.Request, callback string
 		if err != nil {
 			return acquisitionError(ctx, err, true)
 		}
-		next, err := p.grant(ctx, exchange, pending.Ceiling, token, nil)
+		next, err := p.grant(ctx, exchange, merge(pending.Ceiling, record.Scopes...), token, nil)
 		if next, err = p.commit(ctx, key, claimed.Generation, next, err); err != nil {
 			return err
 		}
@@ -767,9 +779,11 @@ func (p *Provider) Challenge(ctx context.Context, r auth.Request, c auth.Challen
 
 // PreemptiveCredential is the up-front lookup for a known binding. It serves a
 // usable stored grant, or renews it non-interactively (refresh or client
-// credentials) with cached issuer metadata. It never discovers or creates a
-// login. Only a store miss or host policy refusal yields nil, an anonymous
-// attempt; a failed renewal of a known grant fails the operation.
+// credentials) with persisted issuer metadata, fetching only the stored
+// issuer's metadata when none is persisted. It never runs protected-resource
+// discovery or creates a login. Only a store miss or host policy refusal
+// yields nil, an anonymous attempt; a known binding whose grant cannot be
+// renewed (including one needing consent) fails the operation.
 func (p *Provider) PreemptiveCredential(ctx context.Context, r auth.Request) (*auth.Credential, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -787,16 +801,18 @@ func (p *Provider) PreemptiveCredential(ctx context.Context, r auth.Request) (*a
 	if err != nil {
 		return nil, safe(ctx, err, auth.CodeProviderFailed)
 	}
-	if record == nil {
-		return nil, nil
-	}
 	if satisfies(record, config) {
 		return p.credential(r, key, record), nil
 	}
 	if err := bounded(ctx); err != nil {
 		return nil, err
 	}
-	if config.TokenAuthMethod, err = tokenMethod(config, m); err != nil {
+	if m.TokenEndpoint == "" {
+		// Only the stored issuer's metadata; never protected-resource discovery.
+		if config, m, err = p.resolveMetadata(ctx, config); err != nil {
+			return nil, safe(ctx, err, auth.CodeDiscoveryFailed)
+		}
+	} else if config.TokenAuthMethod, err = tokenMethod(config, m); err != nil {
 		return nil, err
 	}
 	result, err := p.acquire(ctx, r, key, config, m, false, false)
