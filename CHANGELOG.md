@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.13.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.12.0...v0.13.0) (2026-11-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **auth:** add OAuth client registration via CIMD and DCR ([#52](https://github.com/agenthooksprotocol/go-sdk/issues/52))
+
+### Features
+
+* **auth:** add OAuth client registration via CIMD and DCR ([#52](https://github.com/agenthooksprotocol/go-sdk/issues/52)) ([06dffb4](https://github.com/agenthooksprotocol/go-sdk/commit/06dffb4119927b7df149bf557b94f6629feca0ca))
+
 ## [0.12.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.11.0...v0.12.0) (2026-11-17)
 
 
