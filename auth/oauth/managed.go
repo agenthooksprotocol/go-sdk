@@ -424,6 +424,10 @@ func (p *Provider) acquireOnce(ctx context.Context, r auth.Request, key string, 
 	if err != nil {
 		return Preparation{}, safe(ctx, err, auth.CodeProviderFailed), errors.Is(err, errEndpoint)
 	}
+	if ctx.Err() != nil {
+		// The exchange completed detached; the caller still sees cancellation.
+		return Preparation{}, errors.Join(fail(auth.CodeProviderFailed), ctx.Err()), false
+	}
 	return result, nil, false
 }
 func generation(r *Record) string {
@@ -523,13 +527,24 @@ func (p *Provider) grant(ctx context.Context, c ClientConfig, ceiling []string, 
 	return next, nil
 }
 
-// persistBudget bounds persisting a spent exchange's outcome.
-const persistBudget = time.Minute
+// persistBudget bounds receiving and persisting a sent exchange's outcome.
+var persistBudget = time.Minute
 
 // persisting detaches a store write from caller cancellation: once a code or
 // refresh token is spent, losing its outcome would lose the rotated token.
 func persisting(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(ctx), persistBudget)
+}
+
+// sending detaches a token request from caller cancellation once it starts:
+// a sent code or refresh token is spent, so its response is received and
+// committed within persistBudget. A nil cancel means the caller already
+// cancelled and nothing was sent.
+func sending(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx.Err() != nil {
+		return ctx, nil
+	}
+	return persisting(ctx)
 }
 
 // commit persists a spent exchange's outcome, then reports its validation error.
@@ -563,6 +578,11 @@ func (p *Provider) machine(ctx context.Context, key string, c ClientConfig, m me
 		granted = previous.Scopes
 	}
 	c.Scopes = merge(granted, requested(c)...)
+	ctx, cancel := sending(ctx)
+	if cancel == nil {
+		return nil, ctx.Err()
+	}
+	defer cancel()
 	conf := clientcredentials.Config{ClientID: c.ClientID, ClientSecret: c.ClientSecret, TokenURL: m.TokenEndpoint, Scopes: c.Scopes, AuthStyle: authStyle(c), EndpointParams: url.Values{"resource": {c.Resource}}}
 	token, err := conf.Token(context.WithValue(ctx, oauth2.HTTPClient, p.tokenClient(c, m, nil)))
 	if err != nil {
@@ -617,6 +637,11 @@ func acquisitionError(ctx context.Context, err error, interactive bool) error {
 // refresh never broadens the previous grant. Transient failures keep the
 // record untouched; a definitive invalid_grant drops both tokens.
 func (p *Provider) refresh(ctx context.Context, key string, c ClientConfig, m metadata, previous *Record) (*Record, error) {
+	ctx, cancel := sending(ctx)
+	if cancel == nil {
+		return nil, ctx.Err()
+	}
+	defer cancel()
 	conf := oauthConfig(c, m)
 	var rotated string
 	token, err := conf.TokenSource(context.WithValue(ctx, oauth2.HTTPClient, p.tokenClient(c, m, &rotated)), &oauth2.Token{RefreshToken: previous.RefreshToken, Expiry: time.Now().Add(-time.Minute)}).Token()
@@ -779,6 +804,11 @@ func (p *Provider) Complete(ctx context.Context, r auth.Request, callback string
 		}
 		exchange := cloneConfig(config)
 		exchange.Scopes, exchange.RedirectURI = pending.Scopes, pending.RedirectURI
+		ctx, cancel := sending(ctx)
+		if cancel == nil {
+			return ctx.Err()
+		}
+		defer cancel()
 		token, err := oauthConfig(exchange, m).Exchange(context.WithValue(ctx, oauth2.HTTPClient, p.tokenClient(exchange, m, nil)), query.Get("code"), oauth2.VerifierOption(pending.Verifier), oauth2.SetAuthURLParam("resource", exchange.Resource))
 		if err != nil {
 			return acquisitionError(ctx, err, true)
@@ -793,6 +823,10 @@ func (p *Provider) Complete(ctx context.Context, r auth.Request, callback string
 		credential = p.credential(r, key, next)
 		return nil
 	})
+	if err == nil && ctx.Err() != nil {
+		// The exchange completed detached; the caller still sees cancellation.
+		err = ctx.Err()
+	}
 	if err != nil {
 		return auth.Credential{}, safe(ctx, err, auth.CodeProviderFailed)
 	}

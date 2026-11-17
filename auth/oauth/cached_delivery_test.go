@@ -407,10 +407,11 @@ func TestAmbiguousRenewalFailureNoRefetch(t *testing.T) {
 			f.mode.Store(mode)
 			ctx := budget(t)
 			if mode == "cancel" {
-				// A read timeout: the endpoint received the request but never answers.
-				var cancel context.CancelFunc
-				ctx, cancel = context.WithTimeout(ctx, 200*time.Millisecond)
-				defer cancel()
+				// A read timeout: the endpoint received the request but never
+				// answers within the exchange budget.
+				budget := persistBudget
+				persistBudget = 200 * time.Millisecond
+				defer func() { persistBudget = budget }()
 			}
 			metadata := f.metadataCalls.Load()
 			_, err := p.PreemptiveCredential(ctx, r)

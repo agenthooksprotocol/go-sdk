@@ -740,3 +740,43 @@ func TestLifecycleRotationPersistsPastCancellation(t *testing.T) {
 		})
 	}
 }
+
+// Once a refresh request is sent, its response is received and committed even
+// if the caller cancels mid-flight; the caller still sees cancellation.
+func TestLifecycleSentExchangeCompletesDetached(t *testing.T) {
+	f, p, r := setup(t, "authorization_code_pkce")
+	first := finishLogin(t, p, r)
+	expire(t, f, first)
+	sent, resume := make(chan struct{}), make(chan struct{})
+	serve := f.server.Config.Handler
+	f.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/token" {
+			req.ParseForm()
+			if req.PostForm.Get("grant_type") == "refresh_token" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				w.(http.Flusher).Flush()
+				close(sent)
+				<-resume
+				w.Write([]byte(`{"access_token":"new-access","refresh_token":"rotated-refresh","token_type":"Bearer","expires_in":3600}`))
+				return
+			}
+		}
+		serve.ServeHTTP(w, req)
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { _, err := p.Prepare(ctx, r); done <- err }()
+	<-sent
+	cancel()
+	time.Sleep(50 * time.Millisecond)
+	close(resume)
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("caller did not see cancellation: %v", err)
+	}
+	record, _ := f.store.Load(budget(t), first.Attempt.(attempted).key)
+	if record == nil || record.RefreshToken != "rotated-refresh" || record.AccessToken != "new-access" {
+		t.Fatal("sent exchange was abandoned on caller cancellation")
+	}
+}

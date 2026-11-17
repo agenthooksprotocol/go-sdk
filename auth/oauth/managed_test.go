@@ -539,11 +539,12 @@ func TestManagedCancellationLeavesAmbiguityAndReleasesCoordination(t *testing.T)
 	go func() { _, err := p.Prepare(ctx, r); done <- err }()
 	<-f.started
 	cancel()
+	// The sent refresh completes detached; here the endpoint answers nothing.
+	close(f.release)
 	err := <-done
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("lost cancellation: %v", err)
 	}
-	close(f.release)
 	record, _ := f.store.Load(budget(t), first.Attempt.(attempted).key)
 	if record == nil || record.RefreshToken != "refresh-token" || usable(record) {
 		t.Fatal("ambiguous rotation lost refresh material")
