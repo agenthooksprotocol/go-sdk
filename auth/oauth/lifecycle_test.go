@@ -679,3 +679,45 @@ func TestLifecycleInsufficientScopeKeepsToken(t *testing.T) {
 		t.Fatalf("step-up challenge dropped the still-valid token: %v", err)
 	}
 }
+
+type slowSaveStore struct {
+	*memoryStore
+	delay time.Duration
+}
+
+// CompareAndSwap is slow only for the write after the refresh token is spent.
+func (s slowSaveStore) CompareAndSwap(ctx context.Context, key, expected string, value *Record) (bool, error) {
+	if value != nil && value.RefreshToken == "rotated-refresh" {
+		time.Sleep(s.delay)
+	}
+	return s.memoryStore.CompareAndSwap(ctx, key, expected, value)
+}
+
+// Once a refresh token is spent, persisting the rotated one survives a slow
+// store or a caller cancelled right after the token response.
+func TestLifecycleRotationPersistsPastCancellation(t *testing.T) {
+	for _, mode := range []string{"slow-store", "cancel-after-response"} {
+		t.Run(mode, func(t *testing.T) {
+			f, p, r := setup(t, "authorization_code_pkce")
+			first := finishLogin(t, p, r)
+			expire(t, f, first)
+			f.mode.Store("refresh-unknown-expiry")
+			ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+			defer cancel()
+			if mode == "slow-store" {
+				p.options.Store = slowSaveStore{f.store, 500 * time.Millisecond}
+			} else {
+				validate := p.options.ValidateToken
+				p.options.ValidateToken = func(c context.Context, config ClientConfig, token *oauth2.Token) error {
+					cancel()
+					return validate(c, config, token)
+				}
+			}
+			_, _ = p.Prepare(ctx, r)
+			record, _ := f.store.Load(budget(t), first.Attempt.(attempted).key)
+			if record == nil || record.RefreshToken != "rotated-refresh" {
+				t.Fatal("rotated refresh lost to caller cancellation")
+			}
+		})
+	}
+}

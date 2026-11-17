@@ -236,7 +236,7 @@ var lifecycleCoverage = map[string][]string{
 	"unbound-preemptive-unsafe-delivery":               {"TestCachedUnboundUnsafeDeliveryAfterProviderRecreation"},
 	"unbound-lookup-anonymous-fallback":                {"TestUnboundLookupAnonymousFallback", "TestUnboundLookupFailuresAreNotAnonymous", "TestUnboundLookupStaleBindingIdentity"},
 	"unbound-lookup-refreshes-expired-token":           {"TestUnboundLookupRefreshesExpiredToken"},
-	"refresh-unknown-expiry-rotation":                  {"TestLifecycleRefreshUnknownExpiryRotation", "TestCanonicalTokenResponses"},
+	"refresh-unknown-expiry-rotation":                  {"TestLifecycleRefreshUnknownExpiryRotation", "TestCanonicalTokenResponses", "TestLifecycleRotationPersistsPastCancellation"},
 	"transient-refresh-failure":                        {"TestManagedTemporaryRefreshRetainsAndDefinitiveRejectionRepairs", "TestLifecycleNonOAuthRefreshFailureRetainsRetry", "TestManagedCancellationLeavesAmbiguityAndReleasesCoordination"},
 	"refresh-invalid-grant-drops-tokens":               {"TestLifecycleRefreshInvalidGrant"},
 	"refresh-invalid-grant-stale-does-not-wipe":        {"TestLifecycleRefreshInvalidGrant"},

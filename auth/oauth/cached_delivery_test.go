@@ -468,7 +468,7 @@ func TestUnboundLookupFailuresAreNotAnonymous(t *testing.T) {
 // When the resource moves to a new issuer and the old issuer disappears, host
 // prepare and challenge handling run full discovery and repair the binding.
 func TestChangedIssuerRepairedByDiscovery(t *testing.T) {
-	for _, via := range []string{"prepare", "challenge"} {
+	for _, via := range []string{"prepare", "challenge", "prepare-without-metadata", "challenge-without-metadata"} {
 		t.Run(via, func(t *testing.T) {
 			f, p, r := setup(t, "client_credentials")
 			r.Binding = nil
@@ -501,10 +501,19 @@ func TestChangedIssuerRepairedByDiscovery(t *testing.T) {
 			}
 			learnUnbound(t, f, p, r)
 			expireStored(t, f, p, r)
+			if strings.HasSuffix(via, "-without-metadata") {
+				key := p.bindingKey(r)
+				binding, _ := f.store.Load(budget(t), key)
+				stripped := cloneRecord(binding)
+				stripped.Binding.IssuerMetadata, stripped.Generation = metadata{}, randomID()
+				if ok, err := f.store.CompareAndSwap(budget(t), key, binding.Generation, stripped); !ok || err != nil {
+					t.Fatal(err)
+				}
+			}
 			moved.Store(true)
 			_, err := p.PreemptiveCredential(budget(t), r)
 			assertCode(t, err, auth.CodeDiscoveryFailed)
-			if via == "prepare" {
+			if strings.HasPrefix(via, "prepare") {
 				if prepared, err := p.Prepare(budget(t), r); err != nil || prepared.Credential == nil {
 					t.Fatalf("prepare did not repair the binding: %v", err)
 				}

@@ -529,11 +529,22 @@ func (p *Provider) grant(ctx context.Context, c ClientConfig, ceiling []string, 
 	return next, nil
 }
 
+// persistBudget bounds persisting a spent exchange's outcome.
+const persistBudget = time.Minute
+
+// persisting detaches a store write from caller cancellation: once a code or
+// refresh token is spent, losing its outcome would lose the rotated token.
+func persisting(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), persistBudget)
+}
+
 // commit persists a spent exchange's outcome, then reports its validation error.
 func (p *Provider) commit(ctx context.Context, key, expected string, next *Record, err error) (*Record, error) {
 	if next == nil {
 		return nil, err
 	}
+	ctx, cancel := persisting(ctx)
+	defer cancel()
 	if saveErr := p.save(ctx, key, expected, next); saveErr != nil {
 		return nil, saveErr
 	}
@@ -629,7 +640,9 @@ func (p *Provider) refresh(ctx context.Context, key string, c ClientConfig, m me
 			// Compare-and-delete: a newer record (lost CAS) is kept.
 			dropped := cloneRecord(previous)
 			dropped.AccessToken, dropped.RefreshToken, dropped.ExpiresAt, dropped.Generation = "", "", time.Time{}, randomID()
-			if _, saveErr := p.options.Store.CompareAndSwap(ctx, key, previous.Generation, dropped); saveErr != nil {
+			persist, cancel := persisting(ctx)
+			defer cancel()
+			if _, saveErr := p.options.Store.CompareAndSwap(persist, key, previous.Generation, dropped); saveErr != nil {
 				return nil, safe(ctx, saveErr, auth.CodeProviderFailed)
 			}
 			return nil, fail(auth.CodeRefreshRejected)
