@@ -606,3 +606,39 @@ func TestRejectedTokenPersistedBeforeFailedRenewal(t *testing.T) {
 		})
 	}
 }
+
+// A 401 persists the rejection before the challenge's full discovery, so a
+// discovery failure never leaves the revoked token for the up-front lookup.
+func TestRejectedTokenPersistedBeforeFailedDiscovery(t *testing.T) {
+	f, p, r := setup(t, "client_credentials")
+	r.Binding = nil
+	learnUnbound(t, f, p, r)
+	config, _, _, _ := p.cachedBinding(budget(t), r)
+	key := p.key(r, config)
+	record, _ := f.store.Load(budget(t), key)
+	revoked := cloneRecord(record)
+	revoked.AccessToken, revoked.Generation = "revoked-token", randomID()
+	if ok, err := f.store.CompareAndSwap(budget(t), key, record.Generation, revoked); !ok || err != nil {
+		t.Fatal(err)
+	}
+	first, err := p.PreemptiveCredential(budget(t), r)
+	if err != nil || first == nil || first.Token != "revoked-token" {
+		t.Fatalf("seeded token not served: %v", err)
+	}
+	serve := f.server.Config.Handler
+	f.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/custom-resource" || strings.HasPrefix(req.URL.Path, "/.well-known/oauth-protected-resource") {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		serve.ServeHTTP(w, req)
+	})
+	_, err = p.Challenge(budget(t), r, auth.Challenge{StatusCode: http.StatusUnauthorized, Attempt: first.Attempt, Header: http.Header{"Www-Authenticate": {`Bearer resource_metadata="` + f.server.URL + `/custom-resource"`}}})
+	assertCode(t, err, auth.CodeDiscoveryFailed)
+	if stored, _ := f.store.Load(budget(t), key); stored == nil || stored.AccessToken == "revoked-token" {
+		t.Fatal("rejection not persisted before discovery")
+	}
+	if next, _ := p.PreemptiveCredential(budget(t), r); next != nil && next.Token == "revoked-token" {
+		t.Fatal("up-front lookup resent the revoked token")
+	}
+}

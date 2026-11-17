@@ -269,7 +269,7 @@ var lifecycleCoverage = map[string][]string{
 	"up-front-client-credentials-reacquire":            {"TestUpFrontClientCredentialsReacquire"},
 	"up-front-lookup-issuer-metadata-only":             {"TestUpFrontLookupIssuerMetadataOnly", "TestChangedIssuerRepairedByDiscovery"},
 	"known-binding-without-token-requires-login":       {"TestKnownBindingWithoutTokenRequiresLogin"},
-	"challenge-renews-rejected-unexpired-token":        {"TestChallengeRenewsRejectedUnexpiredToken", "TestManagedResourceBoundRefreshAndStaleRejection", "TestRejectedTokenPersistedBeforeFailedRenewal"},
+	"challenge-renews-rejected-unexpired-token":        {"TestChallengeRenewsRejectedUnexpiredToken", "TestManagedResourceBoundRefreshAndStaleRejection", "TestRejectedTokenPersistedBeforeFailedRenewal", "TestRejectedTokenPersistedBeforeFailedDiscovery"},
 	"step-up-keeps-previous-grant":                     {"TestLifecycleStepUpKeepsPreviousGrant", "TestCanonicalTokenResponses"},
 	"stale-metadata-refetch-once":                      {"TestStaleMetadataRefetchOnce"},
 	"ambiguous-renewal-failure-no-refetch":             {"TestAmbiguousRenewalFailureNoRefetch"},
