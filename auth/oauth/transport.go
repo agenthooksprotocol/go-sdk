@@ -88,9 +88,9 @@ func (t *tokenTransport) RoundTrip(request *http.Request) (*http.Response, error
 const invalidExpiry = "ahp_invalid_expires_in"
 
 // sanitize buffers a JSON token response, captures its refresh_token and
-// normalizes expires_in: null is absent, a positive integer or digit string is
-// clamped to what x/oauth2 accepts, anything else becomes the invalidExpiry
-// marker so the rest of the response still decodes.
+// normalizes expires_in: a positive integer or digit string is clamped to what
+// x/oauth2 accepts; any other present value, including null, becomes the
+// invalidExpiry marker so the rest of the response still decodes.
 func sanitize(response *http.Response, refresh *string) (*http.Response, error) {
 	body, err := io.ReadAll(io.LimitReader(response.Body, discoveryLimit+1))
 	response.Body.Close()
@@ -98,14 +98,17 @@ func sanitize(response *http.Response, refresh *string) (*http.Response, error) 
 		return nil, fail(auth.CodeProviderFailed)
 	}
 	var fields map[string]json.RawMessage
-	if json.Unmarshal(body, &fields) == nil {
+	if json.Unmarshal(body, &fields) != nil {
+		// x/oauth2 also accepts form-encoded token responses.
+		if form, err := url.ParseQuery(string(body)); err == nil && refresh != nil {
+			*refresh = form.Get("refresh_token")
+		}
+	} else {
 		if refresh != nil {
 			json.Unmarshal(fields["refresh_token"], refresh)
 		}
 		if raw, ok := fields["expires_in"]; ok {
-			if seconds, valid := positiveExpiry(raw); string(raw) == "null" {
-				delete(fields, "expires_in")
-			} else if valid {
+			if seconds, valid := positiveExpiry(raw); valid {
 				fields["expires_in"] = json.RawMessage(strconv.FormatInt(seconds, 10))
 			} else {
 				delete(fields, "expires_in")

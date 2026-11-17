@@ -146,8 +146,9 @@ needs consent, fails the operation. If the token endpoint provably did not
 process a renewal (DNS, connect or TLS-handshake failure, or HTTP 404/410), the
 lookup refetches the stored issuer's metadata once, persists it if the issuer is
 unchanged and retries once; a changed issuer or failed refetch returns
-`discovery_failed`. `Prepare` and challenge handling repair it, rerunning full
-discovery when the stored issuer's metadata cannot be fetched. Ambiguous failures (timeouts,
+`discovery_failed`. `Prepare` and challenge handling repair it: when they need an
+exchange or login they rerun full discovery (honouring a challenge's
+`resource_metadata`), while a usable cached token is served without network. Ambiguous failures (timeouts,
 resets, 5xx, redirects, non-OAuth bodies) return `provider_failed` with no
 refetch or immediate retry, so a spent refresh token is never replayed. A 401 marks the rejected token stale even
 before its expiry, so it is renewed rather than resent.

@@ -358,22 +358,14 @@ func (p *Provider) prepare(ctx context.Context, r auth.Request, challenge string
 		if satisfies(current, config) {
 			return Preparation{Credential: p.credential(r, key, current)}, nil
 		}
-		// Renewal refreshes the stored issuer's capabilities; if that fails
-		// (e.g. the issuer changed), full discovery repairs the binding.
-		if config, m, err = p.resolveMetadata(ctx, config); err != nil {
-			if ctx.Err() != nil {
-				return Preparation{}, safe(ctx, err, auth.CodeDiscoveryFailed)
-			}
-			cached = false
-		}
 	}
-	if !cached {
-		if config, m, err = p.resolve(ctx, r, challenge); err != nil {
-			return Preparation{}, safe(ctx, err, auth.CodeDiscoveryFailed)
-		}
-		if config, err = require(config); err != nil {
-			return Preparation{}, err
-		}
+	// An exchange or login needs current metadata: full discovery, honouring a
+	// challenge's resource_metadata hint, rebuilds the binding.
+	if config, m, err = p.resolve(ctx, r, challenge); err != nil {
+		return Preparation{}, safe(ctx, err, auth.CodeDiscoveryFailed)
+	}
+	if config, err = require(config); err != nil {
+		return Preparation{}, err
 	}
 	if err = p.persistBinding(ctx, r, config, m); err != nil {
 		return Preparation{}, err
@@ -627,7 +619,7 @@ func (p *Provider) refresh(ctx context.Context, key string, c ClientConfig, m me
 	var rotated string
 	token, err := conf.TokenSource(context.WithValue(ctx, oauth2.HTTPClient, p.tokenClient(c, m, &rotated)), &oauth2.Token{RefreshToken: previous.RefreshToken, Expiry: time.Now().Add(-time.Minute)}).Token()
 	var rejected *oauth2.RetrieveError
-	if err != nil && ctx.Err() == nil && !errors.As(err, &rejected) && validRefresh(rotated) {
+	if err != nil && !errors.As(err, &rejected) && validRefresh(rotated) {
 		// x/oauth2 rejected a 2xx response it could not decode: keep its
 		// rotated refresh token and report the invalid response.
 		kept := cloneRecord(previous)

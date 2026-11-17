@@ -465,10 +465,11 @@ func TestUnboundLookupFailuresAreNotAnonymous(t *testing.T) {
 	}
 }
 
-// When the resource moves to a new issuer and the old issuer disappears, host
-// prepare and challenge handling run full discovery and repair the binding.
+// When the resource moves to a new issuer, exchange-needing host prepare and
+// challenge handling run full discovery and rebind, whether or not the old
+// issuer still answers.
 func TestChangedIssuerRepairedByDiscovery(t *testing.T) {
-	for _, via := range []string{"prepare", "challenge", "prepare-without-metadata", "challenge-without-metadata"} {
+	for _, via := range []string{"prepare", "challenge", "prepare-without-metadata", "challenge-without-metadata", "prepare-old-issuer-up", "challenge-old-issuer-up"} {
 		t.Run(via, func(t *testing.T) {
 			f, p, r := setup(t, "client_credentials")
 			r.Binding = nil
@@ -482,8 +483,10 @@ func TestChangedIssuerRepairedByDiscovery(t *testing.T) {
 						json.NewEncoder(w).Encode(map[string]any{"resource": f.resource, "authorization_servers": []string{f.server.URL + "/new"}})
 						return
 					case "/.well-known/oauth-authorization-server", "/token":
-						w.WriteHeader(http.StatusNotFound)
-						return
+						if !strings.HasSuffix(via, "-old-issuer-up") {
+							w.WriteHeader(http.StatusNotFound)
+							return
+						}
 					case "/.well-known/oauth-authorization-server/new":
 						json.NewEncoder(w).Encode(map[string]any{"issuer": f.server.URL + "/new", "token_endpoint": f.server.URL + "/new-token", "grant_types_supported": []string{"client_credentials"}, "token_endpoint_auth_methods_supported": []string{"client_secret_post"}})
 						return
@@ -511,8 +514,10 @@ func TestChangedIssuerRepairedByDiscovery(t *testing.T) {
 				}
 			}
 			moved.Store(true)
-			_, err := p.PreemptiveCredential(budget(t), r)
-			assertCode(t, err, auth.CodeDiscoveryFailed)
+			if !strings.HasSuffix(via, "-old-issuer-up") {
+				_, err := p.PreemptiveCredential(budget(t), r)
+				assertCode(t, err, auth.CodeDiscoveryFailed)
+			}
 			if strings.HasPrefix(via, "prepare") {
 				if prepared, err := p.Prepare(budget(t), r); err != nil || prepared.Credential == nil {
 					t.Fatalf("prepare did not repair the binding: %v", err)

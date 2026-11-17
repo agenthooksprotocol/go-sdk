@@ -176,6 +176,10 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		mode := f.mode.Load().(string)
 		if body, _ := f.tokenBody.Load().(string); body != "" {
+			if rest, ok := strings.CutPrefix(body, "form "); ok {
+				w.Header().Set("Content-Type", "application/x-www-form-urlencoded")
+				body = rest
+			}
 			if status, rest, ok := strings.Cut(body, " "); ok && len(status) == 3 && strings.Trim(status, "0123456789") == "" {
 				code, _ := strconv.Atoi(status)
 				w.WriteHeader(code)

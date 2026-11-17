@@ -153,7 +153,7 @@ func TestLifecycleStepUpRequirementOperationScoped(t *testing.T) {
 // never dispatched, an initial response persists nothing, and a refresh keeps
 // only a valid rotated refresh token.
 func TestLifecycleTokenValidity(t *testing.T) {
-	invalid := []string{`0`, `-1`, `3600.5`, `"0"`, `"-1"`, `"3600.5"`, `"1e3"`, `"abc"`, `true`, `{}`}
+	invalid := []string{`null`, `0`, `-1`, `3600.5`, `"0"`, `"-1"`, `"3600.5"`, `"1e3"`, `"abc"`, `true`, `{}`}
 	for _, raw := range invalid {
 		t.Run("refresh "+raw, func(t *testing.T) {
 			f, p, r := setup(t, "authorization_code_pkce")
@@ -181,11 +181,12 @@ func TestLifecycleTokenValidity(t *testing.T) {
 	// Responses x/oauth2 rejects before the SDK sees the token still keep the
 	// rotated refresh token.
 	for name, body := range map[string]string{
-		"missing access token": `{"refresh_token":"rotated-refresh","token_type":"Bearer","expires_in":3600}`,
-		"numeric access token": `{"access_token":5,"refresh_token":"rotated-refresh","token_type":"Bearer"}`,
-		"numeric token type":   `{"access_token":"new-access","refresh_token":"rotated-refresh","token_type":5}`,
-		"201 malformed expiry": `201 {"access_token":"new-access","refresh_token":"rotated-refresh","token_type":"Bearer","expires_in":3600.5}`,
-		"overflowing expiry":   `{"access_token":"new-access","refresh_token":"rotated-refresh","token_type":"Bearer","expires_in":1e400}`,
+		"missing access token":      `{"refresh_token":"rotated-refresh","token_type":"Bearer","expires_in":3600}`,
+		"numeric access token":      `{"access_token":5,"refresh_token":"rotated-refresh","token_type":"Bearer"}`,
+		"numeric token type":        `{"access_token":"new-access","refresh_token":"rotated-refresh","token_type":5}`,
+		"201 malformed expiry":      `201 {"access_token":"new-access","refresh_token":"rotated-refresh","token_type":"Bearer","expires_in":3600.5}`,
+		"overflowing expiry":        `{"access_token":"new-access","refresh_token":"rotated-refresh","token_type":"Bearer","expires_in":1e400}`,
+		"form missing access token": `form refresh_token=rotated-refresh&token_type=Bearer`,
 	} {
 		t.Run("refresh "+name, func(t *testing.T) {
 			f, p, r := setup(t, "authorization_code_pkce")
@@ -211,7 +212,7 @@ func TestLifecycleTokenValidity(t *testing.T) {
 			t.Fatal("invalid rotated refresh replaced the previous one")
 		}
 	})
-	for _, raw := range []string{`3600`, `"3600"`, `99999999999999999999`, `"99999999999999999999"`, `null`} {
+	for _, raw := range []string{`3600`, `"3600"`, `99999999999999999999`, `"99999999999999999999"`} {
 		t.Run("valid "+raw, func(t *testing.T) {
 			f, p, r := setup(t, "client_credentials")
 			f.tokenBody.Store(`{"access_token":"access-token","token_type":"Bearer","expires_in":` + raw + `}`)
@@ -220,7 +221,7 @@ func TestLifecycleTokenValidity(t *testing.T) {
 				t.Fatalf("valid expiry rejected: %v", err)
 			}
 			record, _ := f.store.Load(budget(t), credential.Attempt.(attempted).key)
-			if (raw == `null`) != record.ExpiresAt.IsZero() {
+			if record.ExpiresAt.IsZero() {
 				t.Fatal("expiry classification mismatch")
 			}
 		})
@@ -680,6 +681,20 @@ func TestLifecycleInsufficientScopeKeepsToken(t *testing.T) {
 	}
 }
 
+// cancelAfterToken cancels the caller right after the token response arrives.
+type cancelAfterToken struct {
+	base   http.RoundTripper
+	cancel func()
+}
+
+func (c cancelAfterToken) RoundTrip(r *http.Request) (*http.Response, error) {
+	response, err := c.base.RoundTrip(r)
+	if err == nil && r.URL.Path == "/token" {
+		c.cancel()
+	}
+	return response, err
+}
+
 type slowSaveStore struct {
 	*memoryStore
 	delay time.Duration
@@ -696,7 +711,7 @@ func (s slowSaveStore) CompareAndSwap(ctx context.Context, key, expected string,
 // Once a refresh token is spent, persisting the rotated one survives a slow
 // store or a caller cancelled right after the token response.
 func TestLifecycleRotationPersistsPastCancellation(t *testing.T) {
-	for _, mode := range []string{"slow-store", "cancel-after-response"} {
+	for _, mode := range []string{"slow-store", "cancel-after-response", "cancel-after-undecodable"} {
 		t.Run(mode, func(t *testing.T) {
 			f, p, r := setup(t, "authorization_code_pkce")
 			first := finishLogin(t, p, r)
@@ -704,9 +719,13 @@ func TestLifecycleRotationPersistsPastCancellation(t *testing.T) {
 			f.mode.Store("refresh-unknown-expiry")
 			ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 			defer cancel()
-			if mode == "slow-store" {
+			switch mode {
+			case "slow-store":
 				p.options.Store = slowSaveStore{f.store, 500 * time.Millisecond}
-			} else {
+			case "cancel-after-undecodable":
+				f.tokenBody.Store(`{"refresh_token":"rotated-refresh","token_type":"Bearer"}`)
+				p.client.Transport = cancelAfterToken{p.client.Transport, cancel}
+			default:
 				validate := p.options.ValidateToken
 				p.options.ValidateToken = func(c context.Context, config ClientConfig, token *oauth2.Token) error {
 					cancel()
