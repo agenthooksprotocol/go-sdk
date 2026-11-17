@@ -87,6 +87,8 @@ type registeredBackend struct {
 }
 
 // DeliveryError is local audit information, not an explicit backend denial.
+// Auth, when non-nil, is the redacted typed auth failure (code and validated
+// required scopes), for example interaction_required: run login for BackendID.
 type DeliveryError struct {
 	BackendID    string
 	Subscription int
@@ -94,6 +96,7 @@ type DeliveryError struct {
 	Code         diagnostic.Code
 	Err          error
 	FailClosed   bool
+	Auth         *auth.Error
 }
 
 func (e DeliveryError) Error() string {

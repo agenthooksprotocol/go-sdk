@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/auth"
 	eventtype "github.com/agenthooksprotocol/go-sdk/event"
 	"github.com/agenthooksprotocol/go-sdk/internal/canonical"
 	"github.com/agenthooksprotocol/go-sdk/internal/inputsources"
@@ -338,7 +339,7 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 			}
 			if deliveryErr != nil {
 				closed := sub["failurePolicy"] == "fail-closed"
-				result.errors = append(result.errors, DeliveryError{BackendID: backend.id, Subscription: i, Stage: stage, Code: deliveryCode(stage, deliveryErr), Err: deliveryErr, FailClosed: closed})
+				result.errors = append(result.errors, DeliveryError{BackendID: backend.id, Subscription: i, Stage: stage, Code: deliveryCode(stage, deliveryErr), Err: deliveryErr, FailClosed: closed, Auth: auth.Classify(deliveryErr)})
 				if closed {
 					state["permission"] = "deny"
 					settled = true

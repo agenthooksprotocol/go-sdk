@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	ahp "github.com/agenthooksprotocol/go-sdk"
+	"github.com/agenthooksprotocol/go-sdk/auth"
 	"github.com/agenthooksprotocol/go-sdk/diagnostic"
 	"github.com/agenthooksprotocol/go-sdk/internal/canonical"
 	"sync"
@@ -68,7 +69,7 @@ func (c *Hooks) scheduleObservations(parent context.Context, event map[string]an
 			}
 			if err != nil {
 				mu.Lock()
-				failures = append(failures, DeliveryError{BackendID: d.backend.id, Subscription: d.index, Stage: stage, Code: deliveryCode(stage, err), Err: err})
+				failures = append(failures, DeliveryError{BackendID: d.backend.id, Subscription: d.index, Stage: stage, Code: deliveryCode(stage, err), Err: err, Auth: auth.Classify(err)})
 				mu.Unlock()
 			}
 		}(delivery)

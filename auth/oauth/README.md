@@ -72,7 +72,7 @@ The host functions have these contracts:
   release coordination on errors or panics. Do not reenter the same provider/key
   from a store callback. Secure persistence and durable schema migrations belong
   to the host; no filesystem format or default store is installed. Persist the
-  complete `Record`, including its optional `Binding` and `Pending` fields, and
+  complete `Record`, including its optional `Binding`, `Pending`, `Registration` and `RegistrationFailure` fields, and
   preserve zero `ExpiresAt` as unknown expiry. Binding records contain no client
   secret. Coordination prevents refresh storms across processes; the generation
   compare-and-swap fences a writer whose coordination lease lapsed.
@@ -131,6 +131,53 @@ A dispatch that needs consent returns `interaction_required`; it never launches
 interactive UI, waits for a human or creates a login. Client credentials
 completes through `Prepare` without UI and requires explicit issuer grant support.
 
+## Select or register a client
+
+`SelectClient` returning a `ClientID` selects a pre-registered client; it always
+wins. With an empty `ClientID` the adapter selects, per exact issuer and flow:
+
+1. `ClientIDMetadataDocument` (PKCE only) when the issuer metadata has
+   `client_id_metadata_document_supported: true`. Its `URL` (https, with a
+   path, no userinfo, fragment or dot segments) is the `client_id`, and the
+   PKCE `RedirectURI` must be one of its `RedirectURIs`; otherwise
+   `invalid_configuration`. The adapter never fetches the document. A CIMD
+   client is public; its `invalid_client` is `invalid_configuration`.
+2. `Registration` (RFC 7591) at `Issuer` when the metadata advertises
+   `registration_endpoint`. `CheckDestination` sees it with purpose
+   `Registration`; redirects are never followed. Client credentials also need
+   `Options.Secrets` and `client_secret_basic` or `client_secret_post` support.
+3. Otherwise `credential_unavailable`.
+
+A recorded CIMD or DCR client stays in use while host policy still permits it,
+whatever the metadata later advertises; a new pre-registered client, or a
+removed or changed CIMD URL or DCR permission, selects a new client and grant.
+
+Registrations are stored at their own `Store` key (namespace, issuer, flow and
+PKCE redirect), shared by every grant with that key, and registered once across
+processes under `Coordinate`. Use stable redirects. A confidential client's
+secret goes only to `Options.Secrets` (`Store`, `Resolve`, `Delete` by
+reference); records hold its reference. Replaced or deleted registrations have
+their reference deleted. `InitialAccessTokenRef` is resolved through
+`Options.Secrets`, sent only to that issuer's registration endpoint and never
+stored. Changing `RegistrationPolicy` makes the stored registration stale.
+
+Only an explicit `Prepare` registers a PKCE client; delivery paths return
+`interaction_required`. Client credentials also register during challenge
+handling and the up-front lookup, and renew proactively when the secret expires
+within `min(10% of its lifetime, Options.RenewalMargin)`. Renewal runs as
+detached best-effort work after an acquisition with the current registration;
+it never affects that operation, and a failed renewal keeps the current
+registration. A token-endpoint `invalid_client` deletes that
+registration generation: client credentials re-register and re-acquire once,
+PKCE needs a new `Prepare`. Every failed registration stores a backoff marker
+(`RegistrationBackoff`, default 1 minute doubling, and any `Retry-After`, capped
+at `RegistrationBackoffMax`, default 1 hour). Until it elapses only `Prepare`
+sends a registration request. After the authorization server deletes a PKCE
+client, call `PrepareWith(ctx, request, PrepareOptions{ForceRegistration: true})`.
+A client replaced by `invalid_client` or a forced re-registration has its old
+binding-scoped grant compare-and-deleted; a shared `GrantPartition` grant is
+kept, since another binding may still use it.
+
 ## Discovery, isolation and failure recovery
 
 An unknown unbound HTTP endpoint starts anonymously. A previously authorized
@@ -160,8 +207,7 @@ adapter honors the Bearer challenge's `resource_metadata`, otherwise tries the
 endpoint-path and origin-root RFC 9728 locations in order. It validates the exact RFC 9728 retrieval-source resource identifier in addition
 to resource coverage, and discovers the exact selected issuer using OAuth/OIDC well-known
 locations. Server-required scopes must already be permitted locally;
-`scopes_supported` never grants consent. No dynamic client registration is
-performed: the host selects an already registered client.
+`scopes_supported` never grants consent.
 
 Tokens and refresh requests carry the validated RFC 8707 resource. Default grant
 partitions isolate every namespace, backend, exact destination and event/upload

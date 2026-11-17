@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,6 +22,16 @@ type metadata struct {
 	ChallengeMethods      []string `json:"code_challenge_methods_supported"`
 	TokenAuthMethods      []string `json:"token_endpoint_auth_methods_supported"`
 	ResponseIssuer        bool     `json:"authorization_response_iss_parameter_supported"`
+	RegistrationEndpoint  string   `json:"registration_endpoint"`
+	CIMDSupported         jsonTrue `json:"client_id_metadata_document_supported"`
+}
+
+// jsonTrue is set only by the JSON literal true; any other value is false.
+type jsonTrue bool
+
+func (t *jsonTrue) UnmarshalJSON(raw []byte) error {
+	*t = jsonTrue(string(bytes.TrimSpace(raw)) == "true")
+	return nil
 }
 
 type protectedResource struct {
@@ -138,11 +149,14 @@ func (p *Provider) resolveMetadata(ctx context.Context, config ClientConfig) (Cl
 		if config.Flow == "client_credentials" && !contains(m.GrantTypes, "client_credentials") {
 			return ClientConfig{}, metadata{}, fail(auth.CodeUnsupportedBinding)
 		}
-		method, err := tokenMethod(config, m)
-		if err != nil {
-			return ClientConfig{}, metadata{}, err
+		// A client still to be selected (CIMD or DCR) gets its method then.
+		if config.ClientID != "" {
+			method, err := tokenMethod(config, m)
+			if err != nil {
+				return ClientConfig{}, metadata{}, err
+			}
+			config.TokenAuthMethod = method
 		}
-		config.TokenAuthMethod = method
 		if err := p.check(ctx, m.TokenEndpoint, TokenEndpoint); err != nil {
 			return ClientConfig{}, metadata{}, err
 		}
