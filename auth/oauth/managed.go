@@ -619,13 +619,21 @@ func (p *Provider) grant(ctx context.Context, c ClientConfig, ceiling []string, 
 		response = previous.Scopes
 	}
 	valid := strings.EqualFold(token.TokenType, "Bearer") && authutil.ValidBearer(token.AccessToken) && validExpiry(token)
-	if extra := token.Extra("scope"); extra != nil {
-		value, ok := extra.(string)
-		if !ok || (value != "" && !authutil.ValidScopeList(value)) {
+	// An absent, null or blank scope is omitted and inherits. Any other string
+	// must be a strict RFC 6749 list; any other JSON type is malformed.
+	switch value := token.Extra("scope").(type) {
+	case nil:
+	case string:
+		if strings.Trim(value, " \t\r\n") == "" {
+			break
+		}
+		if !authutil.ValidScopeList(value) {
 			valid = false
 		} else {
-			response = strings.Fields(value)
+			response = strings.Split(value, " ")
 		}
+	default:
+		valid = false
 	}
 	var err error
 	if !valid {

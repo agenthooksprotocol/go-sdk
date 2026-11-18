@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"math"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -87,7 +88,7 @@ func (t *tokenTransport) RoundTrip(request *http.Request) (*http.Response, error
 // the response as provider_failed.
 const invalidExpiry = "ahp_invalid_expires_in"
 
-// sanitize buffers a JSON token response, captures its refresh_token and
+// sanitize buffers a JSON (or re-encoded form) token response, captures its refresh_token and
 // normalizes expires_in: a positive integer or digit string is clamped to what
 // x/oauth2 accepts; any other present value, including null, becomes the
 // invalidExpiry marker so the rest of the response still decodes.
@@ -98,8 +99,20 @@ func sanitize(response *http.Response, refresh *string) (*http.Response, error) 
 		return nil, fail(auth.CodeProviderFailed)
 	}
 	var fields map[string]json.RawMessage
+	// x/oauth2 also accepts form-encoded token responses, but its form token
+	// reports an absent field as "" and parses numeric-looking values, so a
+	// form body is re-encoded as the equivalent JSON object of strings: an
+	// absent field stays absent and a present one keeps its exact text.
+	media, _, _ := mime.ParseMediaType(response.Header.Get("Content-Type"))
+	if form, err := url.ParseQuery(string(body)); err == nil && (media == "application/x-www-form-urlencoded" || media == "text/plain") {
+		fields = make(map[string]json.RawMessage, len(form))
+		for key, values := range form {
+			fields[key], _ = json.Marshal(values[0])
+		}
+		body, _ = json.Marshal(fields)
+		response.Header.Set("Content-Type", "application/json")
+	}
 	if json.Unmarshal(body, &fields) != nil {
-		// x/oauth2 also accepts form-encoded token responses.
 		if form, err := url.ParseQuery(string(body)); err == nil && refresh != nil {
 			*refresh = form.Get("refresh_token")
 		}
