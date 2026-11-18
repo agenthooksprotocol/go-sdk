@@ -7,11 +7,20 @@ import (
 
 // ProviderFuncs adapts host callbacks to Provider. A missing CredentialFunc is
 // unsupported. Missing ChallengeFunc and PreemptiveCredentialFunc callbacks
-// decline recovery and cached credentials, respectively.
+// decline recovery and cached credentials, respectively. A missing
+// PreparationsFunc reports no host prepares (see PreparationTracker).
 type ProviderFuncs struct {
 	CredentialFunc           func(context.Context, Request) (Credential, error)
 	PreemptiveCredentialFunc func(context.Context, Request) (*Credential, error)
 	ChallengeFunc            func(context.Context, Request, Challenge) (*Credential, error)
+	PreparationsFunc         func(Request) uint64
+}
+
+func (p ProviderFuncs) Preparations(r Request) uint64 {
+	if p.PreparationsFunc == nil {
+		return 0
+	}
+	return p.PreparationsFunc(copyRequest(r))
 }
 
 func (p ProviderFuncs) Credential(ctx context.Context, r Request) (Credential, error) {
@@ -108,6 +117,20 @@ func (p *router) selectProvider(r Request) (Provider, error) {
 	}
 	return p.routes.OAuth, nil
 }
+
+// Preparations forwards PreparationTracker to the provider Credential would
+// select for r; a provider that does not track prepares reports zero.
+func (p *router) Preparations(r Request) uint64 {
+	provider, err := p.selectProvider(r)
+	if err != nil {
+		return 0
+	}
+	if tracker, ok := provider.(PreparationTracker); ok {
+		return tracker.Preparations(copyRequest(r))
+	}
+	return 0
+}
+
 func (p *router) wrap(provider Provider, r Request, c Credential) Credential {
 	c.Attempt = &routedAttempt{owner: p, provider: provider, attempt: c.Attempt, request: copyRequest(r)}
 	return c

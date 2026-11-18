@@ -189,21 +189,53 @@ func (c *Hooks) routes() []registeredBackend {
 	return c.backends
 }
 
-// admit is the single shared admission for an event. It re-attempts every
-// skipped backend that a host prepare or an elapsed backoff made eligible, then
-// installs all newly discovered routes at once. A caller arriving while another
-// re-attempt runs uses the previous routes rather than waiting. The returned
-// snapshot is the event's complete, immutable route set, so an event admitted
-// before a retry succeeds is never delivered to the retried backend.
-func (c *Hooks) admit(ctx context.Context) []registeredBackend {
+// admit is the single shared admission for an event. It returns the routes
+// this event uses: the complete, immutable set installed before it, so an event
+// admitted before a retry succeeds is never delivered to the retried backend.
+// When a host prepare or an elapsed backoff made a skipped backend eligible, it
+// starts one re-attempt in the background, bounded by ConfigurationTimeout and
+// the client's lifetime rather than the event's context; the triggering event
+// and concurrent ones use the previous routes and never wait for it.
+func (c *Hooks) admit() []registeredBackend {
+	routes := c.routes()
 	if !c.retry.TryLock() {
-		return c.routes()
+		return routes
 	}
-	defer c.retry.Unlock()
+	due := false
+	for _, s := range c.skipped {
+		if c.eligible(s) {
+			due = true
+			break
+		}
+	}
+	c.mu.Lock()
+	if !due || c.closed {
+		c.mu.Unlock()
+		c.retry.Unlock()
+		return routes
+	}
+	c.active.Add(1)
+	c.mu.Unlock()
+	go func() {
+		defer c.active.Done()
+		defer c.retry.Unlock()
+		c.reattemptAll()
+	}()
+	return routes
+}
+
+// eligible reports whether a host prepare or elapsed backoff made s due.
+func (c *Hooks) eligible(s *skippedBackend) bool {
+	return c.preparations(s) != s.prepared || (!s.retryAt.IsZero() && !c.now().Before(s.retryAt))
+}
+
+// reattemptAll re-attempts every eligible skipped backend, then installs all
+// newly discovered routes at once in registration order. The caller holds retry.
+func (c *Hooks) reattemptAll() {
 	var admitted []registeredBackend
 	remaining := c.skipped[:0]
 	for _, s := range c.skipped {
-		if b, keep := c.reattempt(ctx, s); b != nil {
+		if b, keep := c.reattempt(s); b != nil {
 			admitted = append(admitted, *b)
 		} else if keep {
 			remaining = append(remaining, s)
@@ -212,7 +244,7 @@ func (c *Hooks) admit(ctx context.Context) []registeredBackend {
 	clear(c.skipped[len(remaining):])
 	c.skipped = remaining
 	if len(admitted) == 0 {
-		return c.routes()
+		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -220,7 +252,7 @@ func (c *Hooks) admit(ctx context.Context) []registeredBackend {
 		for _, b := range admitted {
 			_ = b.transport.Close()
 		}
-		return c.backends
+		return
 	}
 	next := make([]registeredBackend, 0, len(c.backends)+len(admitted))
 	next = append(next, c.backends...)
@@ -235,13 +267,12 @@ func (c *Hooks) admit(ctx context.Context) []registeredBackend {
 		next = append(next[:at], append([]registeredBackend{b}, next[at:]...)...)
 	}
 	c.backends = next
-	return next
 }
 
 // reattempt runs discovery for s if it is eligible. It returns the admitted
-// backend on success, else whether s stays skipped. Cancellation of the event
-// leaves s unchanged and emits no diagnostic; its deadline counts as a timeout.
-func (c *Hooks) reattempt(ctx context.Context, s *skippedBackend) (*registeredBackend, bool) {
+// backend on success, else whether s stays skipped. Close leaves s unchanged
+// and emits no diagnostic.
+func (c *Hooks) reattempt(s *skippedBackend) (*registeredBackend, bool) {
 	prepared := c.preparations(s)
 	delay := s.delay
 	if prepared != s.prepared {
@@ -250,7 +281,7 @@ func (c *Hooks) reattempt(ctx context.Context, s *skippedBackend) (*registeredBa
 	} else if s.retryAt.IsZero() || c.now().Before(s.retryAt) {
 		return nil, true
 	}
-	if ctx.Err() != nil {
+	if c.life.Err() != nil {
 		return nil, true
 	}
 	tr, err := c.openTransport(s.id, s.backend)
@@ -258,18 +289,13 @@ func (c *Hooks) reattempt(ctx context.Context, s *skippedBackend) (*registeredBa
 		c.configurationSkipped(s.id, &ConfigurationSkipError{Code: ConfigurationInvalid})
 		return nil, false
 	}
-	subscriptions, err := c.discoverConfiguration(ctx, tr)
-	if errors.Is(ctx.Err(), context.Canceled) {
+	subscriptions, err := c.discoverConfiguration(c.life, tr)
+	if c.life.Err() != nil {
 		_ = tr.Close()
 		return nil, true
 	}
 	if err != nil {
 		_ = tr.Close()
-		if ctx.Err() != nil {
-			// The event's deadline bounded this attempt like a discovery
-			// timeout; it backs off rather than repeating at every admission.
-			err = skipped(ConfigurationUnavailable)
-		}
 		s.prepared, s.delay = prepared, delay
 		return nil, c.skip(s, err)
 	}

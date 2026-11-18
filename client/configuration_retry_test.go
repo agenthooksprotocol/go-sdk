@@ -103,6 +103,8 @@ func newRetryServer(t *testing.T, mode string) *retryServer {
 		case "500":
 			w.WriteHeader(http.StatusInternalServerError)
 			return
+		case "slow":
+			time.Sleep(300 * time.Millisecond)
 		case "rpc-error":
 			result = map[string]any{"jsonrpc": "2.0", "id": req["id"], "error": map[string]any{"code": -32000, "message": "busy"}}
 		case "method-not-found":
@@ -177,13 +179,21 @@ func (r *retryHarness) last(t *testing.T) ConfigurationSkipError {
 	return *r.diagnostics[len(r.diagnostics)-1]
 }
 
+// dispatchTool delivers one event, then waits for any re-attempt it started.
 func dispatchTool(t *testing.T, h *Hooks) *Result {
 	t.Helper()
 	result, err := h.intercept(context.Background(), "tool.before", testInput())
 	if err != nil {
 		t.Fatal(err)
 	}
+	waitRetry(h)
 	return result
+}
+
+// waitRetry waits for a background re-attempt, which holds the retry lock.
+func waitRetry(h *Hooks) {
+	h.retry.Lock()
+	h.retry.Unlock()
 }
 
 func newRetryHooks(t *testing.T, r *retryHarness, reg ahp.Registration, opts Options) *Hooks {
@@ -249,71 +259,51 @@ func TestConfigurationUnauthorizedDiagnosticCarriesAuthCode(t *testing.T) {
 			t.Fatalf("cancelled initialization: err=%v diagnostics=%d", err, r.count())
 		}
 	})
-	t.Run("event deadline during re-attempt is a timeout", func(t *testing.T) {
+	t.Run("close during re-attempt emits no diagnostic", func(t *testing.T) {
 		s := newRetryServer(t, "500")
 		r := &retryHarness{}
 		h := newRetryHooks(t, r, retryRegistration(t, retryBackend(s.URL)), r.options(nil))
 		r.advance(time.Minute)
 		g := s.holdDiscovery()
-		go func() { <-g.entered; time.Sleep(100 * time.Millisecond); close(g.release) }()
-		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-		defer cancel()
-		_, _ = h.intercept(ctx, "tool.before", testInput())
-		s.gate.Store(nil)
-		if r.count() != 2 || r.last(t).Code != ConfigurationUnavailable {
-			t.Fatalf("deadline not diagnosed as unavailable: %d", r.count())
+		t.Cleanup(func() { close(g.release) })
+		if _, err := h.intercept(context.Background(), "tool.before", testInput()); err != nil {
+			t.Fatal(err)
 		}
-		dispatchTool(t, h)
-		if s.discoveries.Load() != 2 {
-			t.Fatal("deadline-bounded attempt did not back off")
-		}
-	})
-	t.Run("re-attempt cancellation emits no diagnostic", func(t *testing.T) {
-		s := newRetryServer(t, "500")
-		r := &retryHarness{}
-		h := newRetryHooks(t, r, retryRegistration(t, retryBackend(s.URL)), r.options(nil))
-		r.advance(time.Minute)
-		g := s.holdDiscovery()
-		ctx, cancel := context.WithCancel(context.Background())
-		done := make(chan error, 1)
-		go func() {
-			_, err := h.intercept(ctx, "tool.before", testInput())
-			done <- err
-		}()
 		<-g.entered
-		cancel()
-		close(g.release)
-		<-done
-		if r.count() != 1 || s.discoveries.Load() != 2 {
-			t.Fatalf("diagnostics=%d discoveries=%d", r.count(), s.discoveries.Load())
+		if err := h.Close(); err != nil {
+			t.Fatal(err)
 		}
-		// Cancellation did not consume eligibility: the next admission re-attempts.
-		s.gate.Store(nil)
-		s.mode.Store("ok")
-		dispatchTool(t, h)
-		if s.discoveries.Load() != 3 || s.deliveries.Load() != 1 {
-			t.Fatalf("discoveries=%d deliveries=%d", s.discoveries.Load(), s.deliveries.Load())
+		if r.count() != 1 || len(h.routes()) != 0 {
+			t.Fatalf("close diagnosed or installed: diagnostics=%d", r.count())
 		}
 	})
 }
 
 func TestConfigurationUnavailableRetriedAfterPrepare(t *testing.T) {
-	s := newRetryServer(t, "401")
-	r := &retryHarness{}
-	provider := &retryProvider{code: auth.CodeInteractionRequired}
-	h := newRetryHooks(t, r, retryRegistration(t, retryBackend(s.URL)), r.options(provider))
-	dispatchTool(t, h)
-	if s.discoveries.Load() != 1 || s.deliveries.Load() != 0 || h.Subscribes(event.ToolBefore) {
-		t.Fatal("skipped backend contacted before prepare")
-	}
-	provider.prepare()
-	result := dispatchTool(t, h)
-	if s.discoveries.Load() != 2 || s.deliveries.Load() != 1 || len(result.AcceptedResponses) != 1 || !h.Subscribes(event.ToolBefore) {
-		t.Fatalf("prepare did not re-attempt at the next admission: discoveries=%d deliveries=%d", s.discoveries.Load(), s.deliveries.Load())
-	}
-	dispatchTool(t, h)
-	if s.discoveries.Load() != 2 || s.deliveries.Load() != 2 {
-		t.Fatal("admitted backend rediscovered")
+	for _, routed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "direct", true: "auth.Route"}[routed], func(t *testing.T) {
+			s := newRetryServer(t, "401")
+			r := &retryHarness{}
+			provider := &retryProvider{code: auth.CodeInteractionRequired}
+			var host auth.Provider = provider
+			if routed {
+				host = auth.Route(auth.Routes{OAuth: provider})
+			}
+			h := newRetryHooks(t, r, retryRegistration(t, retryBackend(s.URL)), r.options(host))
+			dispatchTool(t, h)
+			if s.discoveries.Load() != 1 || s.deliveries.Load() != 0 || h.Subscribes(event.ToolBefore) {
+				t.Fatal("skipped backend contacted before prepare")
+			}
+			provider.prepare()
+			// The triggering event uses the previous routes; the re-attempt runs
+			// beside it and installs the backend for the next event.
+			if result := dispatchTool(t, h); len(result.AcceptedResponses) != 0 || s.discoveries.Load() != 2 || !h.Subscribes(event.ToolBefore) {
+				t.Fatalf("prepare did not re-attempt at the next admission: discoveries=%d", s.discoveries.Load())
+			}
+			if result := dispatchTool(t, h); len(result.AcceptedResponses) != 1 || s.deliveries.Load() != 1 || s.discoveries.Load() != 2 {
+				t.Fatalf("installed backend: deliveries=%d discoveries=%d", s.deliveries.Load(), s.discoveries.Load())
+			}
+		})
 	}
 }
 
@@ -359,6 +349,7 @@ func TestConfigurationUnavailableBackoff(t *testing.T) {
 					t.Fatalf("step %d: failed re-attempt not diagnosed", i)
 				}
 			}
+			dispatchTool(t, h)
 			if s.deliveries.Load() != 1 || !h.Subscribes(event.ToolBefore) {
 				t.Fatal("successful re-attempt did not admit routes")
 			}
@@ -401,6 +392,7 @@ func TestConfigurationAuthFailureNotRetriedOnBackoff(t *testing.T) {
 				t.Fatalf("recovery %s re-attempted on backoff", r.last(t).Recovery)
 			}
 			provider.prepare()
+			dispatchTool(t, h)
 			dispatchTool(t, h)
 			if s.discoveries.Load() != 2 || s.deliveries.Load() != 1 {
 				t.Fatal("prepare did not make the backend eligible")
@@ -476,44 +468,122 @@ func TestConfigurationRetryAtomicRoutes(t *testing.T) {
 		first <- result
 	}()
 	<-holding
-	// Backoff elapses; the next admission re-attempts while its discovery is
-	// held, and a concurrent caller neither waits nor sees a partial set.
+	// Backoff elapses; the next admission starts a re-attempt whose discovery
+	// is held. Neither it nor a concurrent caller waits or sees a partial set.
 	r.advance(time.Minute)
 	s.mode.Store("ok")
 	g := s.holdDiscovery()
-	second := make(chan *Result, 1)
-	go func() {
-		result, _ := h.intercept(context.Background(), "tool.before", testInput())
-		second <- result
-	}()
-	<-g.entered
-	// The concurrent caller must not wait for the held re-attempt.
-	observed := make(chan *Result, 1)
-	go func() {
-		result, _ := h.intercept(context.Background(), "tool.before", testInput())
-		observed <- result
-	}()
-	var concurrent *Result
-	select {
-	case concurrent = <-observed:
-	case <-time.After(3 * time.Second):
-		close(g.release)
-		t.Fatal("concurrent caller waited for the re-attempt")
-	}
-	if concurrent == nil || len(concurrent.AcceptedResponses) != 1 || h.Subscribes(event.ToolAfter) || len(h.routes()) != 1 {
-		t.Fatal("concurrent caller observed a partial or new route set")
+	t.Cleanup(func() { s.gate.Store(nil) })
+	for i := range 2 {
+		observed := make(chan *Result, 1)
+		go func() {
+			result, _ := h.intercept(context.Background(), "tool.before", testInput())
+			observed <- result
+		}()
+		select {
+		case result := <-observed:
+			if result == nil || len(result.AcceptedResponses) != 1 || h.Subscribes(event.ToolAfter) || len(h.routes()) != 1 {
+				t.Fatalf("caller %d observed a partial or new route set", i)
+			}
+		case <-time.After(3 * time.Second):
+			close(g.release)
+			t.Fatalf("caller %d waited for the re-attempt", i)
+		}
+		if i == 0 {
+			<-g.entered
+		}
 	}
 	close(g.release)
-	if result := <-second; result == nil || len(result.AcceptedResponses) != 2 {
-		t.Fatal("retrying admission did not deliver to the installed backend")
-	}
+	waitRetry(h)
 	routes := h.routes()
 	if len(routes) != 2 || routes[0].id != "com.example.explicit" || routes[1].id != retryBackendID || len(routes[1].subscriptions) != 2 || !h.Subscribes(event.ToolAfter) {
 		t.Fatalf("routes not installed whole in registration order: %+v", routes)
 	}
+	if result := dispatchTool(t, h); len(result.AcceptedResponses) != 2 {
+		t.Fatal("next admission did not deliver to the installed backend")
+	}
 	unhold()
 	if result := <-first; result == nil || len(result.AcceptedResponses) != 1 || s.deliveries.Load() != 1 {
 		t.Fatalf("event admitted before the retry succeeded was replayed: %d deliveries", s.deliveries.Load())
+	}
+}
+
+// A retried backend that precedes explicit ones is inserted at its
+// registration position, not appended.
+func TestConfigurationRetryKeepsRegistrationOrder(t *testing.T) {
+	explicit := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{"protocolVersion": "draft", "effects": []any{}}})
+	}))
+	t.Cleanup(explicit.Close)
+	s := newRetryServer(t, "500")
+	r := &retryHarness{}
+	sub := map[string]any{"events": []any{"tool.before"}, "mode": "intercept", "timeoutMs": 5000, "failurePolicy": "fail-open", "content": map[string]any{"default": "metadata"}}
+	explicitBackend := func(id string) map[string]any {
+		return map[string]any{"id": id, "transport": map[string]any{"type": "http", "url": explicit.URL}, "subscriptions": []any{sub}}
+	}
+	h := newRetryHooks(t, r, retryRegistration(t, explicitBackend("com.example.a"), retryBackend(s.URL), explicitBackend("com.example.z")), r.options(nil))
+	r.advance(time.Minute)
+	s.mode.Store("ok")
+	dispatchTool(t, h)
+	var ids []string
+	for _, b := range h.routes() {
+		ids = append(ids, b.id)
+	}
+	if strings.Join(ids, ",") != "com.example.a,"+retryBackendID+",com.example.z" {
+		t.Fatalf("routes out of registration order: %v", ids)
+	}
+}
+
+// A re-attempt never consumes an event's deadline: an event whose admission
+// starts a hung discovery still reaches a fail-closed backend in time.
+func TestConfigurationRetryDoesNotConsumeEventDeadline(t *testing.T) {
+	explicit := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{"protocolVersion": "draft", "effects": []any{}}})
+	}))
+	t.Cleanup(explicit.Close)
+	s := newRetryServer(t, "500")
+	r := &retryHarness{}
+	sub := map[string]any{"events": []any{"tool.before"}, "mode": "intercept", "timeoutMs": 5000, "failurePolicy": "fail-closed", "content": map[string]any{"default": "metadata"}}
+	h := newRetryHooks(t, r, retryRegistration(t, map[string]any{"id": "com.example.enforcer", "transport": map[string]any{"type": "http", "url": explicit.URL}, "subscriptions": []any{sub}}, retryBackend(s.URL)), r.options(nil))
+	r.advance(time.Minute)
+	g := s.holdDiscovery()
+	t.Cleanup(func() { s.gate.Store(nil); close(g.release) })
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	result, err := h.intercept(ctx, "tool.before", testInput())
+	if err != nil || result.Interrupted || len(result.AcceptedResponses) != 1 || len(result.Diagnostics) != 0 {
+		t.Fatalf("fail-closed backend not reached within the event deadline: %v %+v", err, result)
+	}
+	<-g.entered
+}
+
+// Short event deadlines never starve a slow backend: its re-attempt runs on
+// the client's own budget and is admitted although every event gives up early.
+func TestConfigurationShortEventDeadlinesDoNotStarveRetry(t *testing.T) {
+	s := newRetryServer(t, "500")
+	r := &retryHarness{}
+	h := newRetryHooks(t, r, retryRegistration(t, retryBackend(s.URL)), r.options(nil))
+	r.advance(time.Minute)
+	s.mode.Store("slow")
+	for range 3 {
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		_, _ = h.intercept(ctx, "tool.before", testInput())
+		cancel()
+	}
+	waitRetry(h)
+	if s.discoveries.Load() != 2 || r.count() != 1 || !h.Subscribes(event.ToolBefore) {
+		t.Fatalf("slow backend starved: discoveries=%d diagnostics=%d", s.discoveries.Load(), r.count())
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if result, err := h.intercept(ctx, "tool.before", testInput()); err != nil || len(result.AcceptedResponses) != 1 {
+		t.Fatalf("slow backend not delivered: %v", err)
 	}
 }
 
@@ -547,6 +617,7 @@ func TestConfigurationPrepareDuringAttemptNotLost(t *testing.T) {
 			before := s.discoveries.Load()
 			provider.prepare()
 			provider.prepares.Add(^uint64(0)) // authorize without a further prepare signal
+			dispatchTool(t, h)
 			dispatchTool(t, h)
 			if s.discoveries.Load() != before+1 || s.deliveries.Load() != 1 {
 				t.Fatalf("prepare during the attempt was lost: discoveries %d->%d deliveries=%d", before, s.discoveries.Load(), s.deliveries.Load())

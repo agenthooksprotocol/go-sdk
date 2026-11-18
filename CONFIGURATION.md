@@ -120,7 +120,8 @@ admission (`Dispatch` and the named methods) once it is eligible:
 
 - At once after a successful host prepare for its event endpoint, which also
   resets backoff. The client learns of it from an `AuthProvider` implementing
-  `auth.PreparationTracker`, as `oauth.Provider` does (a `Prepare` that returns
+  `auth.PreparationTracker`, as `oauth.Provider`, `auth.Route` (forwarding to
+  the selected provider) and `auth.ProviderFuncs` (`PreparationsFunc`) do (a `Prepare` that returns
   a credential, or a successful `Complete`). Prepare with the same backend ID
   and endpoint URL as the registration; URLs are compared normalized. A
   prepare that completes while an attempt is in flight still makes the
@@ -131,11 +132,12 @@ admission (`Dispatch` and the named methods) once it is eligible:
   With recovery `login`, `configure` or `none`, only a prepare or a new client
   re-attempts it.
 
-A re-attempt is bounded by `ConfigurationTimeout` and the event's context, and
-cancellation emits no diagnostic. It is part of a single shared admission:
-another event arriving meanwhile is delivered with the previous routes rather
-than waiting, and a successful attempt installs all of the backend's routes at
-once, in registration order. Events admitted earlier are never replayed to it.
+A re-attempt is started by the admission but runs in the background, bounded
+by `ConfigurationTimeout` and the client's lifetime, never the event's
+deadline; `Close` cancels it without a diagnostic. It is part of a single
+shared admission: the triggering event and any arriving meanwhile are delivered
+with the previous routes rather than waiting, and a successful attempt installs
+all of the backend's routes at once, in registration order, for later events. Events admitted earlier are never replayed to it.
 Concurrent admissions run at most one discovery per backend, and a discovery
 that succeeds after `Close` is closed rather than installed.
 Other codes are not re-attempted. There is no periodic refresh or effect

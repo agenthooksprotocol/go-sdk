@@ -259,3 +259,23 @@ func TestNormalizeTargetCopiesAndValidates(t *testing.T) {
 		}
 	}
 }
+
+// Route forwards PreparationTracker to the provider Credential would select.
+func TestRoutePreparations(t *testing.T) {
+	oauth := ProviderFuncs{PreparationsFunc: func(r Request) uint64 { return 7 }}
+	bearer := ProviderFuncs{PreparationsFunc: func(r Request) uint64 { return 3 }}
+	tracker, ok := Route(Routes{Bearer: bearer, OAuth: oauth}).(PreparationTracker)
+	if !ok {
+		t.Fatal("Route does not forward PreparationTracker")
+	}
+	_, unbound := routeRequest("https://hooks.example.test/events", "", Event)
+	_, bound := routeRequest("https://hooks.example.test/events", `{"type":"oauth","issuer":"https://issuer.example.test","resource":"https://hooks.example.test/events","clientId":"c","flow":"client_credentials"}`, Event)
+	_, bearerBound := routeRequest("https://hooks.example.test/events", `{"type":"bearer","tokenEnv":"X"}`, Event)
+	if tracker.Preparations(unbound) != 7 || tracker.Preparations(bound) != 7 || tracker.Preparations(bearerBound) != 3 {
+		t.Fatal("preparations not routed like Credential")
+	}
+	untracked := Route(Routes{}).(PreparationTracker)
+	if untracked.Preparations(unbound) != 0 || untracked.Preparations(bearerBound) != 0 || (ProviderFuncs{}).Preparations(unbound) != 0 {
+		t.Fatal("untracked provider reported prepares")
+	}
+}

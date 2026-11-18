@@ -223,7 +223,7 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 	}
 	ctx = context.WithValue(ctx, preparedContextKey{}, prepared)
 	// Admission fixes this event's routes; a later retry never adds to them.
-	routes := c.admit(ctx)
+	routes := c.admit()
 	uploads := c.planUploads(ctx, event, prepared, routes)
 	ctx = context.WithValue(ctx, uploadPlanContextKey{}, uploads)
 	result := &Result{AcceptedResponses: []ahp.ContextualResponse{}, response: ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: ahp.Some([]*ahp.Effect{})}}
