@@ -316,7 +316,7 @@ var lifecycleCoverage = map[string][]string{
 	"configuration-unavailable-backoff":                 {"TestConfigurationUnavailableBackoff", "TestConfigurationShortEventDeadlinesDoNotStarveRetry"},
 	"configuration-auth-failure-not-retried-on-backoff": {"TestConfigurationAuthFailureNotRetriedOnBackoff"},
 	"configuration-invalid-not-retried":                 {"TestConfigurationInvalidNotRetried"},
-	"configuration-retry-atomic-routes":                 {"TestConfigurationRetryAtomicRoutes", "TestConfigurationConcurrentAdmissionsDiscoverOnce", "TestConfigurationCloseDuringRetryClosesTransports", "TestConfigurationRetryKeepsRegistrationOrder", "TestConfigurationRetryDoesNotConsumeEventDeadline"},
+	"configuration-retry-atomic-routes":                 {"TestConfigurationRetryAtomicRoutes", "TestConfigurationConcurrentAdmissionsDiscoverOnce", "TestConfigurationCloseDuringRetryClosesTransports", "TestConfigurationRetryKeepsRegistrationOrder", "TestConfigurationRetryDoesNotConsumeEventDeadline", "TestConfigurationCloseDuringBackgroundRetry"},
 }
 
 func TestLifecycleCoverageManifest(t *testing.T) {

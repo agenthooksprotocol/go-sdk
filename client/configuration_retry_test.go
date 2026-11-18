@@ -651,3 +651,47 @@ func TestConfigurationConcurrentAdmissionsDiscoverOnce(t *testing.T) {
 		t.Fatalf("concurrent admissions ran %d discoveries; want 1 re-attempt", s.discoveries.Load()-1)
 	}
 }
+
+// Close during a held background re-attempt cancels it and returns only after
+// the retry goroutine has finished: none outlives the client.
+func TestConfigurationCloseDuringBackgroundRetry(t *testing.T) {
+	first, second := newRetryServer(t, "500"), newRetryServer(t, "500")
+	r := &retryHarness{}
+	var closing, finished atomic.Bool
+	provider := auth.ProviderFuncs{PreparationsFunc: func(req auth.Request) uint64 {
+		// The second backend's eligibility check runs after Close cancelled
+		// the first discovery; it finishes well after Close started.
+		if closing.Load() && req.BackendID == "com.example.retry2" {
+			time.Sleep(200 * time.Millisecond)
+			finished.Store(true)
+		}
+		return 0
+	}}
+	second2 := map[string]any{"id": "com.example.retry2", "transport": map[string]any{"type": "http", "url": second.URL}}
+	h := newRetryHooks(t, r, retryRegistration(t, retryBackend(first.URL), second2), r.options(provider))
+	r.advance(time.Minute)
+	g := first.holdDiscovery()
+	t.Cleanup(func() { first.gate.Store(nil); close(g.release) })
+	if _, err := h.intercept(context.Background(), "tool.before", testInput()); err != nil {
+		t.Fatal(err)
+	}
+	<-g.entered
+	closing.Store(true)
+	closed := make(chan error, 1)
+	go func() { closed <- h.Close() }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Close blocked on the held re-attempt")
+	}
+	if !finished.Load() || !h.retry.TryLock() {
+		t.Fatal("re-attempt goroutine outlived Close")
+	}
+	h.retry.Unlock()
+	if len(h.routes()) != 0 || r.count() != 2 {
+		t.Fatalf("close installed or diagnosed: diagnostics=%d", r.count())
+	}
+}
