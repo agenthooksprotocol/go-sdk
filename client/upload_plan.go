@@ -84,7 +84,7 @@ type plannedTransfer struct {
 
 // planUploads settles all authorized immutable transfers before serial policy
 // calls. Failures are retained per subscription, never applied at this barrier.
-func (c *Hooks) planUploads(ctx context.Context, event map[string]any, p *preparedBoundary) *uploadPlan {
+func (c *Hooks) planUploads(ctx context.Context, event map[string]any, p *preparedBoundary, routes []registeredBackend) *uploadPlan {
 	plan := &uploadPlan{receivers: map[uploadReceiver]*receiverUploads{}}
 	paths := make([]string, 0, len(p.sources))
 	for path := range p.sources {
@@ -92,7 +92,7 @@ func (c *Hooks) planUploads(ctx context.Context, event map[string]any, p *prepar
 	}
 	sort.Strings(paths)
 	tasks := []plannedTransfer{}
-	for _, backend := range c.backends {
+	for _, backend := range routes {
 		for index, sub := range backend.subscriptions {
 			if !subscriptionMatches(sub, compositionString(event["type"])) {
 				continue

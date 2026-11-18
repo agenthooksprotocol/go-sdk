@@ -58,17 +58,33 @@ type Options struct {
 	InheritEnvironment bool
 	// TransportDiagnostic, when non-nil, receives transport conditions that do
 	// not fail a delivery, such as ErrUnsolicitedFrame for stdio output that
-	// matched no pending request. It may run on a background goroutine, must be
-	// safe for concurrent use, and must not block. Errors never carry payloads.
+	// matched no pending request, and a *ConfigurationSkipError for every
+	// backend that server-driven configuration skips. It may run on a
+	// background goroutine, must be safe for concurrent use, and must not block.
+	// Errors never carry payloads.
 	TransportDiagnostic func(backendID string, err error)
+	// ConfigurationRetryDelay is the first backoff before a backend skipped
+	// with ConfigurationUnavailable is re-attempted at event admission; zero
+	// uses 30 seconds. It doubles after each failed attempt, up to
+	// ConfigurationRetryMaxDelay; zero uses one hour. A skip caused by an auth
+	// error whose recovery is not retry is not re-attempted on backoff.
+	ConfigurationRetryDelay    time.Duration
+	ConfigurationRetryMaxDelay time.Duration
 }
 
 // Hooks is the registration-driven host for AHP boundary delivery.
 // It composes protocol decisions, but never executes native operations.
 type Hooks struct {
-	opts         Options
-	manifest     map[string]any
-	backends     []registeredBackend
+	opts     Options
+	manifest map[string]any
+	// backends are the admitted routes in registration order. A retry replaces
+	// the slice under mu, never an element, so an admitted event's snapshot
+	// never changes.
+	backends []registeredBackend
+	// retry is the single shared admission retry; it owns skipped.
+	retry        sync.Mutex
+	skipped      []*skippedBackend
+	now          func() time.Time
 	mu           sync.Mutex
 	closed       bool
 	closeDone    chan struct{}
@@ -82,6 +98,7 @@ type Hooks struct {
 
 type registeredBackend struct {
 	id            string
+	order         int
 	subscriptions []map[string]any
 	transport     backendTransport
 }
@@ -153,9 +170,16 @@ func New(reg ahp.Registration, opts Options) (*Hooks, error) {
 }
 
 func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
-	if opts.ConfigurationTimeout < 0 {
-		return nil, errors.New("negative configuration timeout")
+	if opts.ConfigurationTimeout < 0 || opts.ConfigurationRetryDelay < 0 || opts.ConfigurationRetryMaxDelay < 0 {
+		return nil, errors.New("negative configuration timeout or retry delay")
 	}
+	if opts.ConfigurationRetryMaxDelay == 0 {
+		opts.ConfigurationRetryMaxDelay = time.Hour
+	}
+	if opts.ConfigurationRetryDelay == 0 {
+		opts.ConfigurationRetryDelay = 30 * time.Second
+	}
+	opts.ConfigurationRetryDelay = min(opts.ConfigurationRetryDelay, opts.ConfigurationRetryMaxDelay)
 	if opts.ConfigurationTimeout == 0 {
 		opts.ConfigurationTimeout = 5 * time.Second
 	}
@@ -214,10 +238,10 @@ func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
 	// Retain only the detached normalized advertisement, not the caller's map.
 	opts.Events = capability.Host{}
 	opts.Metadata = nil
-	c := &Hooks{opts: opts, manifest: manifest, observations: make(chan struct{}, opts.MaxPendingObservations), closeDone: make(chan struct{}), uploads: make(chan struct{}, opts.MaxConcurrentUploads)}
+	c := &Hooks{opts: opts, manifest: manifest, now: time.Now, observations: make(chan struct{}, opts.MaxPendingObservations), closeDone: make(chan struct{}), uploads: make(chan struct{}, opts.MaxConcurrentUploads)}
 	c.life, c.cancel = context.WithCancel(context.Background())
 	ids := map[string]bool{}
-	for _, backend := range parsed.Value.Hooks {
+	for order, backend := range parsed.Value.Hooks {
 		bm, _ := sdkMap(backend)
 		id, _ := bm["id"].(string)
 		if ids[id] {
@@ -234,7 +258,7 @@ func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
 			c.Close()
 			return nil, errors.New("authentication is not advertised")
 		}
-		b := registeredBackend{id: id}
+		b := registeredBackend{id: id, order: order}
 		_, explicit := bm["subscriptions"]
 		for _, v := range sdkArray(bm["subscriptions"]) {
 			sub := sdkObj(v)
@@ -244,29 +268,21 @@ func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
 			}
 			b.subscriptions = append(b.subscriptions, sub)
 		}
-		tr, err := newAuthenticatedBackendTransport(backend, opts.EventClient, opts.AuthProvider)
+		tr, err := c.openTransport(id, backend)
 		if err != nil {
 			if !explicit {
-				c.configurationSkipped(id, ErrConfigurationSkipped)
+				// A transport this client cannot open is never retried.
+				c.configurationSkipped(id, &ConfigurationSkipError{Code: ConfigurationInvalid})
 				continue
 			}
 			c.Close()
 			return nil, err
 		}
-		if httpTransport, ok := tr.(*httpBackend); ok {
-			httpTransport.headerResolver = opts.HeaderResolver
-			httpTransport.backendID = id
-		}
-		if stdio, ok := tr.(*stdioBackend); ok {
-			stdio.inheritEnvironment = opts.InheritEnvironment
-			if opts.TransportDiagnostic != nil {
-				backendID, report := id, opts.TransportDiagnostic
-				stdio.diagnostic = func(err error) { report(backendID, err) }
-			}
-		}
 		b.transport = tr
 		if !explicit {
-			subscriptions, err := c.discoverConfiguration(tr)
+			skip := &skippedBackend{order: order, id: id, backend: backend, endpoint: endpointRequest(tr), delay: opts.ConfigurationRetryDelay}
+			skip.prepared = c.preparations(skip)
+			subscriptions, err := c.discoverConfiguration(opts.InitializationContext, tr)
 			if opts.InitializationContext.Err() != nil {
 				_ = tr.Close()
 				_ = c.Close()
@@ -274,7 +290,9 @@ func newClient(reg ahp.Registration, opts Options) (*Hooks, error) {
 			}
 			if err != nil {
 				_ = tr.Close()
-				c.configurationSkipped(id, err)
+				if c.skip(skip, err) {
+					c.skipped = append(c.skipped, skip)
+				}
 				continue
 			}
 			b.subscriptions = subscriptions
@@ -296,9 +314,10 @@ func (c *Hooks) Close() error {
 	}
 	c.closed = true
 	c.cancel()
+	backends := c.backends
 	c.mu.Unlock()
 	var errs []error
-	for _, b := range c.backends {
+	for _, b := range backends {
 		if err := b.transport.Close(); err != nil {
 			errs = append(errs, err)
 		}

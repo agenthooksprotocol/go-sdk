@@ -22,7 +22,7 @@ func (h *Hooks) Subscribes(eventType event.Type) bool {
 		if !sdkHas(entry["modes"], "intercept") && !sdkHas(entry["modes"], "observe") {
 			return false
 		}
-		for _, backend := range h.backends {
+		for _, backend := range h.routes() {
 			for _, sub := range backend.subscriptions {
 				// Dispatch can downgrade intercept subscriptions to observations after
 				// settlement. Do not exclude such interest using the subscription mode.
@@ -51,7 +51,7 @@ func (h *Hooks) Intercepts(eventType event.Type) bool {
 		if !sdkHas(entry["modes"], "intercept") {
 			return false
 		}
-		for _, backend := range h.backends {
+		for _, backend := range h.routes() {
 			for _, sub := range backend.subscriptions {
 				if sub["mode"] == "intercept" && subscriptionMatches(sub, name) {
 					return true

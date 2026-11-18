@@ -814,3 +814,104 @@ func TestLifecycleCancelBeforeSendReturnsPromptly(t *testing.T) {
 		t.Fatal("unsent refresh changed the stored grant")
 	}
 }
+
+// A form-encoded token response follows the JSON scope rules: an absent field
+// is absent rather than "", a present empty field is blank, both inherit, and
+// a present value keeps its exact text even when it looks numeric.
+func TestLifecycleFormEncodedScope(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		granted    []string
+		expiry     bool
+		malformed  bool
+	}{
+		{name: "absent", body: "access_token=new-access&token_type=Bearer", granted: []string{"events"}},
+		{name: "blank", body: "access_token=new-access&token_type=Bearer&scope=", granted: []string{"events"}},
+		{name: "whitespace", body: "access_token=new-access&token_type=Bearer&scope=%20%09%0D%0A", granted: []string{"events"}},
+		{name: "numeric", body: "access_token=new-access&token_type=Bearer&scope=123", granted: []string{"123"}},
+		{name: "list", body: "access_token=new-access&token_type=Bearer&scope=events+123&expires_in=3600", granted: []string{"123", "events"}, expiry: true},
+		{name: "repeated separator", body: "access_token=new-access&token_type=Bearer&scope=events++123", malformed: true},
+		{name: "tab separator", body: "access_token=new-access&token_type=Bearer&scope=events%09123", malformed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, p, r := setup(t, "client_credentials")
+			selectClient := p.options.SelectClient
+			p.options.SelectClient = func(ctx context.Context, r auth.Request, issuers []string, resource string) (ClientConfig, error) {
+				c, err := selectClient(ctx, r, issuers, resource)
+				c.AllowedScopes = []string{"events", "123"}
+				return c, err
+			}
+			f.tokenBody.Store("form " + tc.body)
+			credential, err := p.Credential(budget(t), r)
+			if tc.malformed {
+				assertCode(t, err, auth.CodeProviderFailed)
+				return
+			}
+			if err != nil {
+				t.Fatalf("form response rejected: %v", err)
+			}
+			record, _ := f.store.Load(budget(t), credential.Attempt.(attempted).key)
+			if !slices.Equal(merge(record.Scopes), merge(tc.granted)) {
+				t.Fatalf("granted %v; want %v", record.Scopes, tc.granted)
+			}
+			if record.ExpiresAt.IsZero() == tc.expiry {
+				t.Fatal("expiry classification mismatch")
+			}
+		})
+	}
+	t.Run("refresh absent inherits previous grant", func(t *testing.T) {
+		f, p, r := setup(t, "authorization_code_pkce")
+		first := finishLogin(t, p, r)
+		expire(t, f, first)
+		f.tokenBody.Store("form access_token=new-access&token_type=Bearer&refresh_token=rotated-refresh")
+		prepared, err := p.Prepare(budget(t), r)
+		if err != nil || prepared.Credential == nil {
+			t.Fatalf("form refresh rejected: %v", err)
+		}
+		record, _ := f.store.Load(budget(t), first.Attempt.(attempted).key)
+		if record.RefreshToken != "rotated-refresh" || !slices.Equal(record.Scopes, []string{"events"}) {
+			t.Fatalf("refresh record = %v %v", record.RefreshToken != "", record.Scopes)
+		}
+	})
+}
+
+// Preparations counts only successful host prepares for one endpoint: a login
+// that has not completed does not count; its completion and a prepare that
+// returns a credential do.
+func TestProviderPreparations(t *testing.T) {
+	f, p, r := setup(t, "authorization_code_pkce")
+	var tracker auth.PreparationTracker = p
+	other := r
+	other.Destination = f.server.URL + "/other"
+	state, err := p.Prepare(budget(t), r)
+	if err != nil || state.Login == nil || tracker.Preparations(r) != 0 {
+		t.Fatalf("pending login counted: %v %d", err, tracker.Preparations(r))
+	}
+	if _, err := p.Complete(budget(t), r, callback(state.Login, "test-code")); err != nil || tracker.Preparations(r) != 1 {
+		t.Fatalf("completed login not counted: %v", err)
+	}
+	if prepared, err := p.Prepare(budget(t), r); err != nil || prepared.Credential == nil || tracker.Preparations(r) != 2 {
+		t.Fatalf("credential prepare not counted: %v", err)
+	}
+	unbound := r
+	unbound.Binding = nil
+	normalized := unbound
+	normalized.Destination = strings.Replace(r.Destination, "https://", "HTTPS://", 1)
+	if tracker.Preparations(unbound) != 2 || tracker.Preparations(normalized) != 2 || tracker.Preparations(other) != 0 {
+		t.Fatal("preparations keyed by binding or shared across destinations")
+	}
+	f.mode.Store("non-oauth")
+	expire(t, f, auth.Credential{Attempt: attempted{key: p.key(r, mustConfig(t, p, r))}})
+	if _, err := p.Prepare(budget(t), r); err == nil || tracker.Preparations(r) != 2 {
+		t.Fatalf("failed prepare counted: %v", err)
+	}
+}
+
+func mustConfig(t *testing.T, p *Provider, r auth.Request) ClientConfig {
+	t.Helper()
+	config, _, _, err := p.cachedBinding(budget(t), r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return config
+}

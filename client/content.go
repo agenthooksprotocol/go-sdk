@@ -500,7 +500,7 @@ func (c *Hooks) uploadContent(ctx context.Context, config map[string]any, raw []
 		}
 	}
 	var sources map[string]headerSource
-	for _, backend := range c.backends {
+	for _, backend := range c.routes() {
 		if backend.id == backendID {
 			if transport, ok := backend.transport.(*httpBackend); ok {
 				sources = transport.headers

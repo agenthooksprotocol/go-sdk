@@ -137,7 +137,14 @@ func TestConfigurationDiscoveryFailuresSkip(t *testing.T) {
 			opts := discoveryOptions()
 			opts.ConfigurationTimeout = 25 * time.Millisecond
 			var diagnosed bool
-			opts.TransportDiagnostic = func(id string, err error) { diagnosed = errors.Is(err, ErrConfigurationSkipped) }
+			want := map[string]ConfigurationSkipCode{"unavailable": ConfigurationUnavailable, "timeout": ConfigurationUnavailable, "malformed": ConfigurationInvalid, "correlation": ConfigurationInvalid, "version": ConfigurationInvalid, "invalid-setting": ConfigurationInvalid, "empty": ConfigurationInvalid, "unmatched": ConfigurationNoApplicableSubscriptions}[kind]
+			opts.TransportDiagnostic = func(id string, err error) {
+				var skip *ConfigurationSkipError
+				diagnosed = errors.Is(err, ErrConfigurationSkipped) && errors.As(err, &skip) && skip.Code == want && skip.BackendID == id && skip.AuthError == ""
+				if !diagnosed {
+					t.Errorf("diagnostic %v; want %s", err, want)
+				}
+			}
 			h, err := New(discoveryRegistration(t, s.URL, nil), opts)
 			if err != nil {
 				t.Fatal(err)

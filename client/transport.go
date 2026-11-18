@@ -137,6 +137,9 @@ type httpBackend struct {
 	cancel         context.CancelFunc
 }
 
+// errMalformedResponse marks a successful HTTP status whose body is not JSON.
+var errMalformedResponse = errors.New("invalid backend HTTP response")
+
 func (t *httpBackend) Close() error { t.cancel(); t.gate <- struct{}{}; <-t.gate; return nil }
 func (t *httpBackend) Exchange(ctx context.Context, body []byte, notification bool) ([]byte, error) {
 	select {
@@ -208,9 +211,11 @@ func (t *httpBackend) Exchange(ctx context.Context, body []byte, notification bo
 		}
 		return nil, nil
 	}
-	media, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	if resp.StatusCode != http.StatusOK || err != nil || media != "application/json" {
+	if resp.StatusCode != http.StatusOK {
 		return nil, errors.New("invalid backend HTTP response")
+	}
+	if media, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type")); err != nil || media != "application/json" {
+		return nil, errMalformedResponse
 	}
 	return data, nil
 }

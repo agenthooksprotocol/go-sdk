@@ -34,6 +34,34 @@ func ValidURL(raw string, allowLocalHTTP bool) bool {
 	return allowLocalHTTP && u.Scheme == "http" && (u.Hostname() == "localhost" || (ip != nil && ip.IsLoopback()))
 }
 
+// NormalizeEndpoint returns a comparison key for an endpoint URL: scheme and
+// host are lowercased, a default port is dropped and an empty path becomes
+// "/". Path and query are compared exactly. An unparsable URL is returned as is.
+func NormalizeEndpoint(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return raw
+	}
+	scheme, host, port := strings.ToLower(u.Scheme), strings.ToLower(u.Hostname()), u.Port()
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		port = ""
+	}
+	if port != "" {
+		host = net.JoinHostPort(host, port)
+	} else if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	path := u.EscapedPath()
+	if path == "" {
+		path = "/"
+	}
+	key := scheme + "://" + host + path
+	if u.RawQuery != "" || u.ForceQuery {
+		key += "?" + u.RawQuery
+	}
+	return key
+}
+
 // KnownCode reports whether code is one of the nine safe auth error codes.
 func KnownCode(code string) bool {
 	switch code {
