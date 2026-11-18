@@ -64,7 +64,7 @@ type retryServer struct {
 type retryGate struct{ entered, release chan struct{} }
 
 func (s *retryServer) holdDiscovery() *retryGate {
-	g := &retryGate{make(chan struct{}), make(chan struct{})}
+	g := &retryGate{make(chan struct{}, 16), make(chan struct{})}
 	s.gate.Store(g)
 	return g
 }
@@ -514,5 +514,69 @@ func TestConfigurationRetryAtomicRoutes(t *testing.T) {
 	unhold()
 	if result := <-first; result == nil || len(result.AcceptedResponses) != 1 || s.deliveries.Load() != 1 {
 		t.Fatalf("event admitted before the retry succeeded was replayed: %d deliveries", s.deliveries.Load())
+	}
+}
+
+// A host prepare that arrives while discovery is in flight is not lost: the
+// prepare count is read before each attempt and compared after it fails.
+func TestConfigurationPrepareDuringAttemptNotLost(t *testing.T) {
+	for _, phase := range []string{"initial", "re-attempt"} {
+		t.Run(phase, func(t *testing.T) {
+			s := newRetryServer(t, "401")
+			r := &retryHarness{}
+			provider := &retryProvider{code: auth.CodeInteractionRequired}
+			reg := retryRegistration(t, retryBackend(s.URL))
+			var h *Hooks
+			hold := func(attempt func()) {
+				g := s.holdDiscovery()
+				done := make(chan struct{})
+				go func() { attempt(); close(done) }()
+				<-g.entered
+				provider.prepares.Add(1) // prepare completes; the in-flight attempt still fails
+				s.gate.Store(nil)
+				close(g.release)
+				<-done
+			}
+			if phase == "initial" {
+				hold(func() { h = newRetryHooks(t, r, reg, r.options(provider)) })
+			} else {
+				h = newRetryHooks(t, r, reg, r.options(provider))
+				provider.prepares.Add(1)
+				hold(func() { dispatchTool(t, h) })
+			}
+			before := s.discoveries.Load()
+			provider.prepare()
+			provider.prepares.Add(^uint64(0)) // authorize without a further prepare signal
+			dispatchTool(t, h)
+			if s.discoveries.Load() != before+1 || s.deliveries.Load() != 1 {
+				t.Fatalf("prepare during the attempt was lost: discoveries %d->%d deliveries=%d", before, s.discoveries.Load(), s.deliveries.Load())
+			}
+		})
+	}
+}
+
+// Concurrent admissions share one re-attempt: exactly one discovery runs.
+func TestConfigurationConcurrentAdmissionsDiscoverOnce(t *testing.T) {
+	s := newRetryServer(t, "500")
+	r := &retryHarness{}
+	h := newRetryHooks(t, r, retryRegistration(t, retryBackend(s.URL)), r.options(nil))
+	r.advance(time.Minute)
+	s.mode.Store("ok")
+	g := s.holdDiscovery()
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = h.intercept(context.Background(), "tool.before", testInput())
+		}()
+	}
+	<-g.entered
+	s.gate.Store(nil)
+	close(g.release)
+	wg.Wait()
+	dispatchTool(t, h)
+	if s.discoveries.Load() != 2 {
+		t.Fatalf("concurrent admissions ran %d discoveries; want 1 re-attempt", s.discoveries.Load()-1)
 	}
 }

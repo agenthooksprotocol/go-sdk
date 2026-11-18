@@ -122,7 +122,9 @@ admission (`Dispatch` and the named methods) once it is eligible:
   resets backoff. The client learns of it from an `AuthProvider` implementing
   `auth.PreparationTracker`, as `oauth.Provider` does (a `Prepare` that returns
   a credential, or a successful `Complete`). Prepare with the same backend ID
-  and endpoint URL as the registration.
+  and endpoint URL as the registration; URLs are compared normalized. A
+  prepare that completes while an attempt is in flight still makes the
+  backend eligible at the next admission.
 - After backoff, only when there is no `AuthError` or its recovery is `retry`.
   `Options.ConfigurationRetryDelay` (default 30 seconds) doubles after each
   failed attempt up to `Options.ConfigurationRetryMaxDelay` (default one hour).
@@ -134,6 +136,8 @@ cancellation emits no diagnostic. It is part of a single shared admission:
 another event arriving meanwhile is delivered with the previous routes rather
 than waiting, and a successful attempt installs all of the backend's routes at
 once, in registration order. Events admitted earlier are never replayed to it.
+Concurrent admissions run at most one discovery per backend, and a discovery
+that succeeds after `Close` is closed rather than installed.
 Other codes are not re-attempted. There is no periodic refresh or effect
 guarantee; per-request capability grants remain authoritative.
 

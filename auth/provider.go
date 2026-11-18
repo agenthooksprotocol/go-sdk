@@ -76,6 +76,8 @@ type PreemptiveProvider interface {
 type PreparationTracker interface {
 	// Preparations returns a process-local count of successful host prepares
 	// for request's backend, purpose and destination; the binding is ignored.
+	// Destinations should be compared by normalized URL (case-insensitive scheme
+	// and host, default port and empty path ignored), not raw string.
 	// It must be cheap, must not block on I/O, and must be safe for concurrent use.
 	Preparations(Request) uint64
 }

@@ -397,7 +397,7 @@ func (p *Provider) markPrepared(r auth.Request) {
 }
 
 func preparedKey(r auth.Request) string {
-	encoded, _ := json.Marshal([]any{r.BackendID, r.Purpose, r.Destination})
+	encoded, _ := json.Marshal([]any{r.BackendID, r.Purpose, authutil.NormalizeEndpoint(r.Destination)})
 	return string(encoded)
 }
 

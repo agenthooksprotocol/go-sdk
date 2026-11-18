@@ -312,11 +312,11 @@ var lifecycleCoverage = map[string][]string{
 	"proactive-renewal-failure-keeps-current-registration": {"TestProactiveRenewalFailureKeepsRegistration", "TestSlowFailedRenewalDoesNotAffectLookup"},
 	// Skipped-backend configuration retry lives in the client package.
 	"configuration-401-diagnostic-carries-auth-code":    {"TestConfigurationUnauthorizedDiagnosticCarriesAuthCode", "TestConfigurationSkipDiagnosticCodes"},
-	"configuration-unavailable-retried-after-prepare":   {"TestConfigurationUnavailableRetriedAfterPrepare", "TestProviderPreparations"},
+	"configuration-unavailable-retried-after-prepare":   {"TestConfigurationUnavailableRetriedAfterPrepare", "TestConfigurationPrepareDuringAttemptNotLost", "TestProviderPreparations"},
 	"configuration-unavailable-backoff":                 {"TestConfigurationUnavailableBackoff"},
 	"configuration-auth-failure-not-retried-on-backoff": {"TestConfigurationAuthFailureNotRetriedOnBackoff"},
 	"configuration-invalid-not-retried":                 {"TestConfigurationInvalidNotRetried"},
-	"configuration-retry-atomic-routes":                 {"TestConfigurationRetryAtomicRoutes"},
+	"configuration-retry-atomic-routes":                 {"TestConfigurationRetryAtomicRoutes", "TestConfigurationConcurrentAdmissionsDiscoverOnce", "TestConfigurationCloseDuringRetryClosesTransports"},
 }
 
 func TestLifecycleCoverageManifest(t *testing.T) {

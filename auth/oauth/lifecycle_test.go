@@ -895,7 +895,9 @@ func TestProviderPreparations(t *testing.T) {
 	}
 	unbound := r
 	unbound.Binding = nil
-	if tracker.Preparations(unbound) != 2 || tracker.Preparations(other) != 0 {
+	normalized := unbound
+	normalized.Destination = strings.Replace(r.Destination, "https://", "HTTPS://", 1)
+	if tracker.Preparations(unbound) != 2 || tracker.Preparations(normalized) != 2 || tracker.Preparations(other) != 0 {
 		t.Fatal("preparations keyed by binding or shared across destinations")
 	}
 	f.mode.Store("non-oauth")
