@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/agenthooksprotocol/go-sdk/compare/v0.13.0...v0.13.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* **auth:** treat blank token scopes as omitted and retry skipped configuration backends ([#54](https://github.com/agenthooksprotocol/go-sdk/issues/54)) ([5559a48](https://github.com/agenthooksprotocol/go-sdk/commit/5559a48610cdc1891e7262c8f73297d0f692bf33))
+
 ## [0.13.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.12.0...v0.13.0) (2026-11-17)
 
 
