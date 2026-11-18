@@ -310,6 +310,13 @@ var lifecycleCoverage = map[string][]string{
 	"marker-update-atomic-across-processes":                {"TestMarkerUpdateAtomicAcrossProcesses"},
 	"proactive-reregistration-once-across-processes":       {"TestProactiveRenewalOnceAcrossProcesses"},
 	"proactive-renewal-failure-keeps-current-registration": {"TestProactiveRenewalFailureKeepsRegistration", "TestSlowFailedRenewalDoesNotAffectLookup"},
+	// Skipped-backend configuration retry lives in the client package.
+	"configuration-401-diagnostic-carries-auth-code":    {"TestConfigurationUnauthorizedDiagnosticCarriesAuthCode", "TestConfigurationSkipDiagnosticCodes"},
+	"configuration-unavailable-retried-after-prepare":   {"TestConfigurationUnavailableRetriedAfterPrepare", "TestProviderPreparations"},
+	"configuration-unavailable-backoff":                 {"TestConfigurationUnavailableBackoff"},
+	"configuration-auth-failure-not-retried-on-backoff": {"TestConfigurationAuthFailureNotRetriedOnBackoff"},
+	"configuration-invalid-not-retried":                 {"TestConfigurationInvalidNotRetried"},
+	"configuration-retry-atomic-routes":                 {"TestConfigurationRetryAtomicRoutes"},
 }
 
 func TestLifecycleCoverageManifest(t *testing.T) {
@@ -326,7 +333,7 @@ func TestLifecycleCoverageManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	tests := map[string]bool{}
-	for _, dir := range []string{".", ".."} {
+	for _, dir := range []string{".", "..", filepath.Join("..", "..", "client")} {
 		files, _ := filepath.Glob(filepath.Join(dir, "*_test.go"))
 		for _, file := range files {
 			parsed, err := parser.ParseFile(token.NewFileSet(), file, nil, parser.SkipObjectResolution)

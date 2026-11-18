@@ -3,6 +3,7 @@ package oauth
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/agenthooksprotocol/go-sdk/auth"
@@ -212,6 +213,8 @@ type Options struct {
 type Provider struct {
 	options Options
 	client  http.Client
+	// prepared counts successful host prepares per endpoint (*atomic.Uint64).
+	prepared sync.Map
 }
 
 // PendingLogin describes a stored login. Only the explicit AuthorizationURL

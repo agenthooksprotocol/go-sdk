@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/agenthooksprotocol/go-sdk/auth"
@@ -370,7 +371,34 @@ func (p *Provider) PrepareWith(ctx context.Context, r auth.Request, options Prep
 			return Preparation{}, fail(auth.CodeInvalidConfiguration)
 		}
 	}
-	return p.prepare(ctx, cloneRequest(r), "", options.RequiredScopes, false, true, options.ForceRegistration)
+	preparation, err := p.prepare(ctx, cloneRequest(r), "", options.RequiredScopes, false, true, options.ForceRegistration)
+	if err == nil && preparation.Credential != nil {
+		p.markPrepared(r)
+	}
+	return preparation, err
+}
+
+var _ auth.PreparationTracker = (*Provider)(nil)
+
+// Preparations implements auth.PreparationTracker: it counts this Provider's
+// Prepare or PrepareWith calls that returned a credential and Complete calls
+// that succeeded, for r's backend, purpose and destination. A Prepare that
+// only creates a login is not counted until the login completes.
+func (p *Provider) Preparations(r auth.Request) uint64 {
+	if counter, ok := p.prepared.Load(preparedKey(r)); ok {
+		return counter.(*atomic.Uint64).Load()
+	}
+	return 0
+}
+
+func (p *Provider) markPrepared(r auth.Request) {
+	counter, _ := p.prepared.LoadOrStore(preparedKey(r), new(atomic.Uint64))
+	counter.(*atomic.Uint64).Add(1)
+}
+
+func preparedKey(r auth.Request) string {
+	encoded, _ := json.Marshal([]any{r.BackendID, r.Purpose, r.Destination})
+	return string(encoded)
 }
 
 // prepare serves a cached grant, refreshes or reissues it, or (only when
@@ -1002,6 +1030,7 @@ func (p *Provider) Complete(ctx context.Context, r auth.Request, callback string
 	if err != nil {
 		return auth.Credential{}, safe(ctx, err, auth.CodeProviderFailed)
 	}
+	p.markPrepared(r)
 	return *credential, nil
 }
 

@@ -61,7 +61,11 @@ The host functions have these contracts:
   acquisition (consent or client credentials) requests any previously granted
   scopes plus the ceiling-filtered request, and records the response scopes
   within the previous grant plus the acquisition ceiling (the pending login's,
-  or the client-credentials caller's); extra scopes are ignored. A refresh records the response within the previous grant, so it
+  or the client-credentials caller's); extra scopes are ignored. A response
+  `scope` that is absent, `null` or blank (only SP, HTAB, CR, LF; including a
+  form-encoded `scope=`) is omitted and inherits the requested set, or the
+  previous grant on refresh. Any other value must be a strict RFC 6749 list
+  (single-SP separators) or the response fails as `provider_failed`. A refresh records the response within the previous grant, so it
   never broadens it, and a narrowed ceiling never shrinks it: each caller's
   ceiling filters the grant only at use; broader requirements need fresh consent or a new
   client-credentials grant. A missing required scope fails the operation with

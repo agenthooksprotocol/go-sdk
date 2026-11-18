@@ -68,6 +68,18 @@ type PreemptiveProvider interface {
 	PreemptiveCredential(context.Context, Request) (*Credential, error)
 }
 
+// PreparationTracker is optionally implemented by a Provider whose host can
+// explicitly prepare an endpoint, such as oauth.Provider. client.Hooks uses it
+// to re-attempt server-driven configuration for a backend skipped while its
+// event endpoint was unavailable as soon as the host has prepared it, instead
+// of waiting for backoff. Wrapping providers should forward it.
+type PreparationTracker interface {
+	// Preparations returns a process-local count of successful host prepares
+	// for request's backend, purpose and destination; the binding is ignored.
+	// It must be cheap, must not block on I/O, and must be safe for concurrent use.
+	Preparations(Request) uint64
+}
+
 // EnvironmentProvider is the non-interactive default for bearer + tokenEnv.
 // References and OAuth require an explicit host provider.
 type EnvironmentProvider struct{}

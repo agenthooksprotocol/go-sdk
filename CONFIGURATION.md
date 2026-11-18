@@ -93,14 +93,54 @@ five seconds. `Options.InitializationContext` supports caller cancellation and a
 shared initialization deadline. A discovery timeout skips that backend, while
 cancellation of the initialization context returns an error. Both HTTP and stdio
 use the existing transport, authentication, configured headers, and ownership
-rules. Persistent processes remain client-owned; skipped transports are closed.
+rules. Persistent processes remain client-owned; skipped transports are closed,
+and a re-attempt opens a fresh one.
 
 The client resolves advertised selectors against its supported event modes.
 Unsupported matches are dropped; other settings are not rewritten. Failed,
 malformed, or inapplicable advertisements skip the backend.
-`Options.TransportDiagnostic` receives `client.ErrConfigurationSkipped` without
-response bodies or credentials. There is no periodic refresh or effect guarantee;
-per-request capability grants remain authoritative.
+`Options.TransportDiagnostic` receives a `*client.ConfigurationSkipError`
+`{BackendID, Code, AuthError, Recovery}` (JSON `{backendId, code, authError?,
+recovery?}`), which matches `client.ErrConfigurationSkipped` with `errors.Is`,
+without response bodies or credentials. `Code` is one of:
+
+| Code | Cause | Re-attempted |
+| --- | --- | --- |
+| `configuration_unavailable` | Transport failure, timeout, non-success HTTP status, JSON-RPC error other than method-not-found, endpoint authentication failure | Yes |
+| `configuration_invalid` | Method-not-found; uncorrelated, malformed or version-incompatible response; an unsupported discovered setting | No |
+| `no_applicable_subscriptions` | No advertised subscription matches this client | No |
+| `configuration_local_secret` | A discovered upload names a local secret reference | No |
+
+`AuthError` and `Recovery` are the safe `auth.Code` and its `auth.Recovery`,
+set only when an authentication error caused the skip; `errors.As` also finds
+the redacted `*auth.Error`.
+
+A `configuration_unavailable` backend is re-attempted inside the next event
+admission (`Dispatch` and the named methods) once it is eligible:
+
+- At once after a successful host prepare for its event endpoint, which also
+  resets backoff. The client learns of it from an `AuthProvider` implementing
+  `auth.PreparationTracker`, as `oauth.Provider` does (a `Prepare` that returns
+  a credential, or a successful `Complete`). Prepare with the same backend ID
+  and endpoint URL as the registration.
+- After backoff, only when there is no `AuthError` or its recovery is `retry`.
+  `Options.ConfigurationRetryDelay` (default 30 seconds) doubles after each
+  failed attempt up to `Options.ConfigurationRetryMaxDelay` (default one hour).
+  With recovery `login`, `configure` or `none`, only a prepare or a new client
+  re-attempts it.
+
+A re-attempt is bounded by `ConfigurationTimeout` and the event's context, and
+cancellation emits no diagnostic. It is part of a single shared admission:
+another event arriving meanwhile is delivered with the previous routes rather
+than waiting, and a successful attempt installs all of the backend's routes at
+once, in registration order. Events admitted earlier are never replayed to it.
+Other codes are not re-attempted. There is no periodic refresh or effect
+guarantee; per-request capability grants remain authoritative.
+
+A backend with omitted subscriptions is advisory while its configuration is
+unavailable: no failure policy is inferred and events are delivered without it.
+Enforcement while a backend is unreachable or unauthenticated requires explicit
+subscriptions with `failurePolicy` `fail-closed`.
 
 ## Discovered uploads
 
@@ -113,8 +153,8 @@ Server configuration is untrusted and cannot authorize access to local credentia
 If any advertised subscription's upload `auth` names `tokenEnv`, `tokenRef`, or
 `clientSecretRef`, the entire backend is skipped without resolving the reference;
 the reference is not removed to admit the remainder. `Options.TransportDiagnostic`
-receives `client.ErrConfigurationLocalSecretReference`, which wraps
-`client.ErrConfigurationSkipped`.
+receives a `configuration_local_secret` skip, which matches
+`client.ErrConfigurationLocalSecretReference` and `client.ErrConfigurationSkipped`.
 
 Existing per-item content authorization and independent upload authentication
 still apply after admission. Explicit client subscriptions retain their existing

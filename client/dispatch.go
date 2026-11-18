@@ -222,12 +222,14 @@ func (c *Hooks) dispatch(ctx context.Context, name string, input any, options ..
 		}
 	}
 	ctx = context.WithValue(ctx, preparedContextKey{}, prepared)
-	uploads := c.planUploads(ctx, event, prepared)
+	// Admission fixes this event's routes; a later retry never adds to them.
+	routes := c.admit(ctx)
+	uploads := c.planUploads(ctx, event, prepared, routes)
 	ctx = context.WithValue(ctx, uploadPlanContextKey{}, uploads)
 	result := &Result{AcceptedResponses: []ahp.ContextualResponse{}, response: ahp.InterceptResponseResult{ProtocolVersion: &version, Effects: ahp.Some([]*ahp.Effect{})}}
 	settled := state["permission"] == "deny" || state["flow"] == "stop"
 	pending := []observationDelivery{}
-	for _, backend := range c.backends {
+	for _, backend := range routes {
 		for i, sub := range backend.subscriptions {
 			if !subscriptionMatches(sub, name) {
 				continue
