@@ -87,6 +87,8 @@ type dcrFixture struct {
 	issued        map[string]string // client_id -> secret
 	rejected      map[string]bool   // client_ids rejected with invalid_client
 	expiresAt     int64
+	// onToken, when set, runs before the token endpoint answers.
+	onToken func(form url.Values)
 
 	registerCalls, tokenCalls, metadataCalls, documentCalls atomic.Int32
 }
@@ -205,7 +207,11 @@ func (f *dcrFixture) serve(w http.ResponseWriter, r *http.Request) {
 		f.tokenClients = append(f.tokenClients, client)
 		expected, known := f.issued[client]
 		rejected := f.rejected[client]
+		onToken := f.onToken
 		f.mu.Unlock()
+		if onToken != nil {
+			onToken(r.PostForm)
+		}
 		if rejected || (known && expected != secret) || (!known && client != "client" && !strings.HasSuffix(client, "/client.json")) {
 			w.WriteHeader(401)
 			fmt.Fprint(w, `{"error":"invalid_client"}`)
@@ -302,5 +308,5 @@ func loginClientID(t *testing.T, login *PendingLogin) string {
 func (f *dcrFixture) complete(t *testing.T, p *Provider, r auth.Request, login *PendingLogin) (auth.Credential, error) {
 	t.Helper()
 	u, _ := url.Parse(login.AuthorizationURL())
-	return p.Complete(budget(t), r, f.config.RedirectURI+"?"+url.Values{"state": {u.Query().Get("state")}, "code": {"code"}, "iss": {f.server.URL}}.Encode())
+	return p.Complete(budget(t), r, u.Query().Get("redirect_uri")+"?"+url.Values{"state": {u.Query().Get("state")}, "code": {"code"}, "iss": {f.server.URL}}.Encode())
 }

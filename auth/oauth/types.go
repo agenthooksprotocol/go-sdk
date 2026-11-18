@@ -32,6 +32,8 @@ const (
 // empty ClientID the SDK selects ClientIDMetadataDocument (PKCE only, when the
 // issuer advertises support), then Registration (RFC 7591 at Issuer, when the
 // issuer advertises a registration endpoint), else credential_unavailable.
+// The grant is keyed by that configured source, never by an issued client_id:
+// a PKCE client is registered inside each login and stored with its tokens.
 type ClientConfig struct {
 	Issuer, Resource, ClientID, Flow string
 	Scopes                           []string
@@ -48,16 +50,15 @@ type ClientConfig struct {
 	// Registration permits dynamic client registration at Issuer when ClientID is empty.
 	Registration *RegistrationPolicy
 
-	// source and registered record the selected client source and, for DCR,
-	// the registration generation in use. Hosts never set them.
+	// source records the selected client source and registered the
+	// client-credentials registration generation in use. Hosts never set them.
 	source, registered string
-	// renew marks a client-credentials registration inside its renewal margin.
-	renew bool
 }
 
 // MetadataDocument is a host-published Client ID Metadata Document. URL is the
 // client_id verbatim; the SDK never fetches it. RedirectURIs are the
-// document's redirect_uris: the PKCE RedirectURI must be one of them.
+// document's redirect_uris: a login's redirect must match one of them, where a
+// loopback http redirect is compared without its port (RFC 8252 section 7.3).
 type MetadataDocument struct {
 	URL          string
 	RedirectURIs []string
@@ -67,8 +68,8 @@ type MetadataDocument struct {
 // ClientConfig.Issuer and the request metadata to send. ClientName is required.
 // Scopes, when set, is the registration scope. InitialAccessTokenRef, when set,
 // is resolved through Options.Secrets and sent as a Bearer credential only to
-// that issuer's registration endpoint; it is never persisted. Changing any
-// field makes a stored registration stale.
+// that issuer's registration endpoint; it is never persisted. A host Prepare
+// replaces a client-credentials registration made under different settings.
 type RegistrationPolicy struct {
 	ClientName, SoftwareID, SoftwareVersion string
 	Scopes                                  []string
@@ -85,21 +86,26 @@ type SecretStore interface {
 }
 
 // PrepareOptions configures an explicit host Prepare. RequiredScopes are
-// explicit operation requirements. ForceRegistration discards the current
-// dynamic registration (for example after the authorization server deleted a
-// PKCE client), clears any failed-registration backoff and registers anew.
+// explicit operation requirements. RedirectURI, when set, replaces the
+// selected client's redirect for a login this Prepare creates, for example a
+// loopback listener bound on a fresh port for each login.
 type PrepareOptions struct {
-	RequiredScopes    []string
-	ForceRegistration bool
+	RequiredScopes []string
+	RedirectURI    string
 }
 
 func (ClientConfig) String() string   { return "oauth.ClientConfig{redacted}" }
 func (ClientConfig) GoString() string { return "oauth.ClientConfig{redacted}" }
 
 // Record is an opaque-to-the-SDK host-persisted credential generation. Hosts
-// must return detached values and atomically persist complete copies.
+// must return detached values and atomically persist complete copies. A grant
+// record holds tokens and the client they were issued to; binding, pending and
+// registration records live at their own keys.
 type Record struct {
 	AccessToken, RefreshToken, Generation string
+	// ClientID is the client the tokens were issued to. For a dynamically
+	// registered PKCE client it is the only copy: refresh uses it.
+	ClientID string
 	// Zero ExpiresAt means unknown expiry, not an expired credential.
 	ExpiresAt time.Time
 	// Scopes is the recorded grant: response scopes within the acquisition
@@ -107,52 +113,52 @@ type Record struct {
 	// ceiling filters it at use.
 	Scopes  []string
 	Binding *BindingMetadata
-	// Pending is the explicit host login awaiting its callback, if any.
-	Pending *PendingRecord
-	// Registration and RegistrationFailure live at a registration key, apart
-	// from bindings and grants. Neither contains a client secret.
+	// Pending holds a grant's pending logins when Options.PersistLogins is set.
+	Pending []PendingRecord
+	// Registration and RegistrationFailure live at a client-credentials
+	// registration key. Neither contains a client secret.
 	Registration        *RegistrationRecord
 	RegistrationFailure *RegistrationFailure
 }
 
-// RegistrationRecord is one stored dynamic client registration. SecretRef is
-// the host SecretStore reference of a confidential client's secret. A zero
-// SecretExpiresAt means no known expiry. Generation identifies this
-// registration, independently of the enclosing Record generation.
+// RegistrationRecord is one stored client-credentials registration. SecretRef
+// is the host SecretStore reference of its secret. A zero SecretExpiresAt means
+// no known expiry. RequestDigest identifies the RegistrationPolicy it was made
+// with. Generation identifies this registration, independently of the
+// enclosing Record generation.
 type RegistrationRecord struct {
 	ClientID, SecretRef, TokenAuthMethod string
-	RedirectURIs, GrantTypes             []string
-	SecretExpiresAt, RegisteredAt        time.Time
+	SecretExpiresAt                      time.Time
 	RequestDigest, Generation            string
 }
 
-// RegistrationFailure is the persisted failed-registration backoff marker.
-// Until NextAttempt only an explicit host Prepare sends a registration request.
+// RegistrationFailure is the client-credentials registration backoff. Until
+// NextAttempt only a host Prepare sends a registration request; others fail
+// with Code, the last failure's code.
 type RegistrationFailure struct {
-	RequestDigest         string
-	FailedAt, NextAttempt time.Time
-	Attempts              int
+	Code        auth.Code
+	Attempts    int
+	NextAttempt time.Time
 }
 
 // BindingMetadata is secret-free principal and discovery state at a binding key.
-// Source is the selected client source ("preregistered", "cimd" or "dcr");
-// RegistrationKey is set for "dcr".
+// Source is the selected client source: "preregistered", "cimd" or "dcr".
 type BindingMetadata struct {
-	Config                  ClientConfig
-	IssuerMetadata          metadata
-	Source, RegistrationKey string
+	Config         ClientConfig
+	IssuerMetadata metadata
+	Source         string
 }
 
-// PendingRecord is a stored login. Its lifetime is fixed at creation, so any
-// process sharing the Store can complete it before ExpiresAt.
+// PendingRecord is one login awaiting its callback, found by State. Its
+// lifetime is fixed at creation. Verifier is the PKCE secret.
 type PendingRecord struct {
-	State, Verifier, RedirectURI, AuthorizationURL string
+	State, Verifier, RedirectURI string
 	// Scopes are requested; Ceiling bounds the grant recorded on completion.
 	Scopes, Ceiling []string
 	ExpiresAt       time.Time
-	// ClientID is the client the login completes with; RegistrationGeneration
-	// is the dynamic registration it was created under, if any.
-	ClientID, RegistrationGeneration string
+	// ClientID is the client the login completes with, for DCR the client
+	// registered for this login.
+	ClientID string
 }
 
 func (Record) String() string               { return "oauth.Record{redacted}" }
@@ -193,31 +199,35 @@ type Options struct {
 	// LoginLifetime fixes how long a pending login stays completable. Zero means
 	// the default and maximum of 10 minutes.
 	LoginLifetime time.Duration
+	// PersistLogins stores pending logins in Store, so another process sharing
+	// it can complete one by state (for example from a pasted callback URL).
+	// By default a pending login lives in the Provider that created it.
+	PersistLogins bool
+	// MaxPendingLogins caps concurrent pending logins per grant (per Provider,
+	// or per Store when persisted); the oldest is cancelled. Zero means 5.
+	MaxPendingLogins int
 	// Secrets stores dynamically registered client secrets. Without it
 	// client-credentials registration is unavailable; PKCE registration is not.
 	Secrets SecretStore
-	// RegistrationBackoff is the first failed-registration backoff, doubling per
-	// attempt; zero means 1 minute. RegistrationBackoffMax caps it and any
-	// Retry-After; zero means 1 hour.
+	// RegistrationBackoff is the first client-credentials registration backoff,
+	// doubling per failure; zero means 1 minute. RegistrationBackoffMax caps it
+	// and any Retry-After; zero means 1 hour.
 	RegistrationBackoff, RegistrationBackoffMax time.Duration
-	// RenewalMargin caps the proactive client-secret renewal margin,
-	// min(10% of the secret lifetime, RenewalMargin); zero means 1 hour.
-	RenewalMargin time.Duration
 }
 
-// Provider has no listeners, owned HTTP lifecycle or in-memory login state.
-// Pending logins live in the Store. The host owns the Provider. Its only
-// background work is a proactive client-secret renewal, which may run for up
-// to the commit budget (one minute) after an acquisition, using the host's
-// Store, Secrets and HTTP client.
+// Provider has no listeners, owned HTTP lifecycle or background work. The host
+// owns the Provider. Its pending logins live in memory unless
+// Options.PersistLogins stores them.
 type Provider struct {
 	options Options
 	client  http.Client
+	// logins holds pending logins: Options.Store when persisted.
+	logins Store
 	// prepared counts successful host prepares per endpoint (*atomic.Uint64).
 	prepared sync.Map
 }
 
-// PendingLogin describes a stored login. Only the explicit AuthorizationURL
+// PendingLogin describes a pending login. Only the explicit AuthorizationURL
 // accessor reveals the URL; formatting never reveals it.
 type PendingLogin struct {
 	authorizationURL string
@@ -235,7 +245,7 @@ func (p *PendingLogin) AuthorizationURL() string {
 	return p.authorizationURL
 }
 
-// Deadline is the fixed expiry of the stored login.
+// Deadline is the fixed expiry of the pending login.
 func (p *PendingLogin) Deadline() time.Time {
 	if p == nil {
 		return time.Time{}

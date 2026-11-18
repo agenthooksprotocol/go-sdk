@@ -76,7 +76,7 @@ The host functions have these contracts:
   release coordination on errors or panics. Do not reenter the same provider/key
   from a store callback. Secure persistence and durable schema migrations belong
   to the host; no filesystem format or default store is installed. Persist the
-  complete `Record`, including its optional `Binding`, `Pending`, `Registration` and `RegistrationFailure` fields, and
+  complete `Record`, including its optional `ClientID`, `Binding`, `Pending`, `Registration` and `RegistrationFailure` fields, and
   preserve zero `ExpiresAt` as unknown expiry. Binding records contain no client
   secret. Coordination prevents refresh storms across processes; the generation
   compare-and-swap fences a writer whose coordination lease lapsed.
@@ -103,7 +103,8 @@ if err != nil {
 }
 if prepared.Login != nil {
     presentAuthorizationURL(prepared.Login.AuthorizationURL())
-    // Any process sharing the Store may receive the callback and complete it.
+    // This Provider completes it; with Options.PersistLogins, any Provider
+    // sharing the Store may complete it (for example from a pasted URL).
     callbackURL, err := receiveCallback(callbackCtx)
     if err != nil {
         return managed.Cancel(ctx, request)
@@ -114,22 +115,31 @@ if prepared.Login != nil {
 // prepared.Credential is ready; normal delivery acquires through auth.Provider.
 ```
 
-A pending login is a stored record with a lifetime fixed at creation
-(`Options.LoginLifetime`, default and maximum ten minutes), independent of the
-creating context. Completion validates state, exact redirect path and the
-optional/advertised issuer response before claiming the login; an invalid
-callback does not consume it. A later `Prepare` reuses an unexpired login when
-the grant and redirect match and its scopes cover the new requested and
-required scopes. Otherwise it supersedes the login. With the same redirect it
-requests the old login's scopes plus the new ceiling-filtered request and stores
-the union of both ceilings; a different redirect or grant starts from the new
-caller alone. The stored ceiling bounds the grant recorded on completion; the
-merged sets only grow, so alternating callers converge. Reuse needs the exact redirect, so hosts sharing a store must keep the redirect
-stable per grant key (or give per-process loopback redirects distinct grant
-partitions). A login ends once:
-completion (including denial), supersede, `Cancel` or expiry; a callback for an
-ended login fails with `interaction_required`. `Cancel` never erases stored
-credentials.
+A pending login has a lifetime fixed at creation (`Options.LoginLifetime`,
+default and maximum ten minutes), independent of the creating context. As in
+MCP clients, it belongs to the Provider that created it, which receives its
+callback and completes it by `state`. Set `Options.PersistLogins` to keep
+pending logins in the `Store` instead, so another process sharing it can
+complete one; the PKCE verifier then lives only in that pending record.
+
+Each `Prepare` that needs consent creates a new login, requesting any
+previously granted scopes plus its ceiling-filtered request; its ceiling bounds
+the grant recorded on completion. Several logins may be pending for one grant,
+up to `Options.MaxPendingLogins` (default 5, per Provider or per Store when
+persisted); a new one beyond the cap cancels the oldest, and expired logins are
+deleted. Completion validates state, the login's exact redirect (including a
+loopback port) and the optional/advertised issuer response before claiming the
+login; an invalid callback does not consume it. Each completion replaces the
+grant's client and tokens, so the newest completed login wins. A login ends
+once: completion (including denial), `Cancel` (which ends every pending login
+for the request), the cap or expiry; a callback for an ended login fails with
+`interaction_required`. `Cancel` never erases stored credentials.
+
+To bind a new loopback port for each login, as MCP clients do, pass it with
+`PrepareWith(ctx, request, oauth.PrepareOptions{RedirectURI: redirect})`.
+Redirects are HTTPS or HTTP to a literal loopback IP (`127.0.0.1`, `[::1]`);
+`localhost` is `invalid_configuration` (RFC 8252 section 8.3), checked before
+client selection, registration or any login.
 
 A dispatch that needs consent returns `interaction_required`; it never launches
 interactive UI, waits for a human or creates a login. Client credentials
@@ -143,44 +153,50 @@ wins. With an empty `ClientID` the adapter selects, per exact issuer and flow:
 1. `ClientIDMetadataDocument` (PKCE only) when the issuer metadata has
    `client_id_metadata_document_supported: true`. Its `URL` (https, with a
    path, no userinfo, fragment or dot segments) is the `client_id`, and the
-   PKCE `RedirectURI` must be one of its `RedirectURIs`; otherwise
-   `invalid_configuration`. The adapter never fetches the document. A CIMD
-   client is public; its `invalid_client` is `invalid_configuration`.
+   login's redirect must match one of its `RedirectURIs`, where a loopback
+   `http` redirect is compared without its port (RFC 8252 section 7.3);
+   otherwise `invalid_configuration`. The adapter never fetches the document.
+   A CIMD client is public; its `invalid_client` is `invalid_configuration`.
 2. `Registration` (RFC 7591) at `Issuer` when the metadata advertises
    `registration_endpoint`. `CheckDestination` sees it with purpose
    `Registration`; redirects are never followed. Client credentials also need
    `Options.Secrets` and `client_secret_basic` or `client_secret_post` support.
 3. Otherwise `credential_unavailable`.
 
-A recorded CIMD or DCR client stays in use while host policy still permits it,
-whatever the metadata later advertises; a new pre-registered client, or a
-removed or changed CIMD URL or DCR permission, selects a new client and grant.
+The grant is keyed by this configured client source (`preregistered:<id>`,
+`cimd:<url>` or `dcr`), never by an issued `client_id`. A recorded CIMD or DCR
+selection stays in use while host policy still permits it, whatever the
+metadata later advertises; a new pre-registered client, or a removed or changed
+CIMD URL or DCR permission, selects a new client and grant.
 
-Registrations are stored at their own `Store` key (namespace, issuer, flow and
-PKCE redirect), shared by every grant with that key, and registered once across
-processes under `Coordinate`. Use stable redirects. A confidential client's
-secret goes only to `Options.Secrets` (`Store`, `Resolve`, `Delete` by
-reference); records hold its reference. Replaced or deleted registrations have
-their reference deleted. `InitialAccessTokenRef` is resolved through
-`Options.Secrets`, sent only to that issuer's registration endpoint and never
-stored. Changing `RegistrationPolicy` makes the stored registration stale.
+**PKCE registration is part of the login**, as in MCP clients. Only an explicit
+`Prepare` registers, inside the `Prepare` that creates a login, with that
+login's exact redirect and `application_type: "native"` for a loopback
+redirect; delivery paths return `interaction_required`. There is no
+registration record: the login holds the issued `client_id`, and completion
+stores it with the tokens in the grant record, which refresh then uses. Any
+`client_secret` in the response is ignored. An `invalid_client` at completion
+ends only that login (`interaction_required`; the stored grant is kept). At
+refresh it returns `interaction_required` and deletes the grant only if it
+still holds the presented client and refresh token; the next `Prepare`
+registers again.
 
-Only an explicit `Prepare` registers a PKCE client; delivery paths return
-`interaction_required`. Client credentials also register during challenge
-handling and the up-front lookup, and renew proactively when the secret expires
-within `min(10% of its lifetime, Options.RenewalMargin)`. Renewal runs as
-detached best-effort work after an acquisition with the current registration;
-it never affects that operation, and a failed renewal keeps the current
-registration. A token-endpoint `invalid_client` deletes that
-registration generation: client credentials re-register and re-acquire once,
-PKCE needs a new `Prepare`. Every failed registration stores a backoff marker
+**Client-credentials registrations** are stored at their own `Store` key
+(namespace and issuer), shared by every client-credentials grant with that
+key, and registered once across processes under `Coordinate`. The secret goes
+only to `Options.Secrets` (`Store`, `Resolve`, `Delete` by reference); records
+hold its reference, and replaced or deleted registrations have their reference
+deleted. A registration is re-registered when its secret expired or cannot be
+resolved, and after a token-endpoint `invalid_client` (at most once per
+operation; a repeated `invalid_client` is `credential_unavailable`). A host
+`Prepare` also replaces one made under a different `RegistrationPolicy`. After
+a failed registration, no registration request is sent until a backoff passes
 (`RegistrationBackoff`, default 1 minute doubling, and any `Retry-After`, capped
-at `RegistrationBackoffMax`, default 1 hour). Until it elapses only `Prepare`
-sends a registration request. After the authorization server deletes a PKCE
-client, call `PrepareWith(ctx, request, PrepareOptions{ForceRegistration: true})`.
-A client replaced by `invalid_client` or a forced re-registration has its old
-binding-scoped grant compare-and-deleted; a shared `GrantPartition` grant is
-kept, since another binding may still use it.
+at `RegistrationBackoffMax`, default 1 hour), shared through the `Store`;
+meanwhile operations return the last failure's code, so a retryable failure is
+`provider_failed`. `Prepare` bypasses the backoff. `InitialAccessTokenRef` is
+resolved through `Options.Secrets`, sent only to that issuer's registration
+endpoint and never stored.
 
 ## Discovery, isolation and failure recovery
 
