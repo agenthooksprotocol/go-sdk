@@ -41,7 +41,9 @@ type ClientConfig struct {
 	AllowedScopes, RequiredScopes []string
 	// GrantPartition opts independently approved bindings into shared consent.
 	// Empty keeps each destination/backend/purpose binding isolated.
-	GrantPartition            string
+	GrantPartition string
+	// RedirectURI is the PKCE redirect for logins; PrepareOptions.RedirectURI
+	// may supply it per login instead. Only creating a login requires one.
 	ClientSecret, RedirectURI string
 	// TokenAuthMethod is optional: discovery selects a supported method when empty.
 	TokenAuthMethod string
@@ -51,8 +53,10 @@ type ClientConfig struct {
 	Registration *RegistrationPolicy
 
 	// source records the selected client source and registered the
-	// client-credentials registration generation in use. Hosts never set them.
+	// client-credentials registration generation in use; failing marks a
+	// registration used while a failure count is recorded. Hosts never set them.
 	source, registered string
+	failing            bool
 }
 
 // MetadataDocument is a host-published Client ID Metadata Document. URL is the
@@ -134,7 +138,9 @@ type RegistrationRecord struct {
 
 // RegistrationFailure is the client-credentials registration backoff. Until
 // NextAttempt only a host Prepare sends a registration request; others fail
-// with Code, the last failure's code.
+// with Code, the last failure's code. Attempts counts failed registrations and
+// invalid_client rejections; it survives a new registration and is cleared
+// only when a token request with a registered client succeeds.
 type RegistrationFailure struct {
 	Code        auth.Code
 	Attempts    int
@@ -230,8 +236,8 @@ type Provider struct {
 // PendingLogin describes a pending login. Only the explicit AuthorizationURL
 // accessor reveals the URL; formatting never reveals it.
 type PendingLogin struct {
-	authorizationURL string
-	deadline         time.Time
+	authorizationURL, state string
+	deadline                time.Time
 }
 
 func (PendingLogin) String() string   { return "oauth.PendingLogin{redacted}" }

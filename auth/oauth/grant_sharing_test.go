@@ -44,7 +44,7 @@ func TestGrantSharingRequiresPartitionAndIndependentApproval(t *testing.T) {
 				if result.Login == nil || result.Credential != nil {
 					t.Fatal("default partition leaked event consent into upload")
 				}
-				if err := p.Cancel(budget(t), upload); err != nil {
+				if err := p.Cancel(budget(t), upload, result.Login); err != nil {
 					t.Fatal(err)
 				}
 			}

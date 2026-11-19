@@ -283,30 +283,54 @@ func TestInvalidClientReregistersOnce(t *testing.T) {
 	if f.registerCalls.Load() != 2 || f.metadataCalls.Load() != metadata || credential.Attempt.(attempted).key != old.Attempt.(attempted).key {
 		t.Fatal("invalid_client did not re-register once under the same grant key")
 	}
-	credential, err = lookup(t, p, r)
-	mustToken(t, credential, err, "access-dcr-2")
-	// A rejected replacement is credential_unavailable after one re-registration.
-	f.set(func(f *dcrFixture) { f.rejected["dcr-2"], f.rejected["dcr-3"] = true, true })
-	expireGrant(t, f, credential)
-	_, err = p.Credential(budget(t), r)
-	assertCode(t, err, auth.CodeCredentialUnavailable)
-	record := f.registration(t, f.config)
-	if f.registerCalls.Load() != 3 || record.Registration != nil || record.RegistrationFailure == nil || record.RegistrationFailure.Attempts != 1 || record.RegistrationFailure.Code != auth.CodeCredentialUnavailable {
-		t.Fatalf("repeated invalid_client: calls=%d record=%+v", f.registerCalls.Load(), record)
+	// The replacement's successful token request cleared the count.
+	if record := f.registration(t, f.config); record.RegistrationFailure != nil {
+		t.Fatalf("successful client kept the failure count: %+v", record.RegistrationFailure)
 	}
-	// It counts as a failed registration: no re-registration on every
-	// operation until the backoff passes; host Prepare bypasses it.
-	for range 3 {
-		_, err = p.Credential(budget(t), r)
+}
+
+// A server that accepts registrations but rejects their clients: each
+// invalid_client counts as a failed registration, the count survives the new
+// registration, so the backoff doubles round after round and only a
+// successful token request clears it.
+func TestInvalidClientBackoffDoubles(t *testing.T) {
+	f := dcrSetup(t, ccFlow)
+	f.set(func(f *dcrFixture) { f.rejectAll = true })
+	p, r := f.provider(), f.request("backend")
+	for round := 1; round <= 3; round++ {
+		before := time.Now()
+		var err error
+		if round == 1 {
+			// Host prepare learns the binding; later rounds are unattended lookups.
+			_, err = p.Prepare(budget(t), r)
+		} else {
+			_, err = lookup(t, p, r)
+		}
 		assertCode(t, err, auth.CodeCredentialUnavailable)
+		marker := f.registration(t, f.config).RegistrationFailure
+		if got := f.registerCalls.Load(); got != int32(2*round) {
+			t.Fatalf("round %d: registrations = %d; want 2 per round", round, got)
+		}
+		// Two rejections per round: attempts 2r, backoff 2^(2r-1) minutes.
+		want := time.Minute << (2*round - 1)
+		if marker == nil || marker.Attempts != 2*round || marker.Code != auth.CodeCredentialUnavailable || marker.NextAttempt.Before(before.Add(want)) || marker.NextAttempt.After(time.Now().Add(want)) {
+			t.Fatalf("round %d: marker = %+v; want backoff %v", round, marker, want)
+		}
+		// Every operation during the backoff sends nothing.
+		for range 3 {
+			_, err = p.Credential(budget(t), r)
+			assertCode(t, err, auth.CodeCredentialUnavailable)
+		}
+		if got := f.registerCalls.Load(); got != int32(2*round) {
+			t.Fatalf("round %d: re-registered during the backoff: %d", round, got)
+		}
+		f.editRegistration(t, func(record *Record) { record.RegistrationFailure.NextAttempt = time.Now() })
 	}
-	if f.registerCalls.Load() != 3 {
-		t.Fatalf("re-registered during the backoff: %d", f.registerCalls.Load())
-	}
-	f.set(func(f *dcrFixture) { f.rejected["dcr-4"] = false })
-	mustToken(t, prepared(t, p, r).Credential, nil, "access-dcr-4")
-	if record := f.registration(t, f.config); f.registerCalls.Load() != 4 || record.RegistrationFailure != nil {
-		t.Fatalf("prepare did not repair: %+v", record)
+	// A client that works clears the count.
+	f.set(func(f *dcrFixture) { f.rejectAll = false })
+	mustToken(t, mustLookup(t, p, r), nil, "access-dcr-7")
+	if record := f.registration(t, f.config); record.RegistrationFailure != nil || record.Registration.ClientID != "dcr-7" {
+		t.Fatalf("success did not clear the count: %+v", record.RegistrationFailure)
 	}
 }
 
@@ -827,4 +851,61 @@ func TestCIMDPortlessLoopbackRedirect(t *testing.T) {
 			t.Errorf("redirectMatches(%q, %q) != %v", c.declared, c.redirect, c.match)
 		}
 	}
+}
+
+// A redirect passed only through PrepareWith is enough: SelectClient need not
+// return one, and lookup, refresh and Complete work without it.
+func TestRedirectOnlyThroughPrepareWith(t *testing.T) {
+	for _, source := range []string{sourcePreregistered, sourceCIMD, sourceDCR} {
+		t.Run(source, func(t *testing.T) {
+			f := dcrSetup(t, pkceFlow)
+			f.set(func(f *dcrFixture) {
+				f.config.RedirectURI = ""
+				switch source {
+				case sourcePreregistered:
+					f.config.ClientID = "client"
+				case sourceCIMD:
+					f.metadata["client_id_metadata_document_supported"] = true
+					f.config.ClientIDMetadataDocument = &MetadataDocument{URL: f.server.URL + "/client.json", RedirectURIs: []string{"http://127.0.0.1/callback"}}
+				}
+			})
+			p, r := f.provider(), f.request("backend")
+			_, err := p.Prepare(budget(t), r)
+			assertCode(t, err, auth.CodeInvalidConfiguration)
+			if f.registerCalls.Load() != 0 || anyPending(p) {
+				t.Fatal("login without a redirect registered or was created")
+			}
+			redirect := "http://127.0.0.1:53001/callback"
+			credential, err := f.complete(t, p, r, mustLogin(t, p, r, PrepareOptions{RedirectURI: redirect}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if form := f.tokens[len(f.tokens)-1]; form.Get("redirect_uri") != redirect {
+				t.Fatalf("exchange redirect %q", form.Get("redirect_uri"))
+			}
+			mustLookup(t, p, r)
+			expireGrant(t, f, &credential)
+			if c := mustLookup(t, p, r); c == nil || f.tokens[len(f.tokens)-1].Get("grant_type") != "refresh_token" {
+				t.Fatal("refresh without a configured redirect")
+			}
+			if _, err := p.Credential(budget(t), r); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// A recorded CIMD selection still checks each new login's redirect against
+// the declared redirect URIs.
+func TestRecordedCIMDChecksNewRedirect(t *testing.T) {
+	f := dcrSetup(t, pkceFlow)
+	f.set(func(f *dcrFixture) {
+		f.metadata["client_id_metadata_document_supported"] = true
+		f.config.ClientIDMetadataDocument = &MetadataDocument{URL: f.server.URL + "/client.json", RedirectURIs: []string{"http://127.0.0.1/callback"}}
+	})
+	p, r := f.provider(), f.request("backend")
+	mustLogin(t, p, r, PrepareOptions{RedirectURI: "http://127.0.0.1:53001/callback"})
+	_, err := p.PrepareWith(budget(t), r, PrepareOptions{RedirectURI: "http://127.0.0.1:53002/other"})
+	assertCode(t, err, auth.CodeInvalidConfiguration)
+	mustLogin(t, p, r, PrepareOptions{RedirectURI: "http://127.0.0.1:53003/callback"})
 }

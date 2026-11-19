@@ -141,7 +141,8 @@ func (p *Provider) choose(ctx context.Context, r auth.Request, c ClientConfig, m
 	}
 	document := c.ClientIDMetadataDocument
 	if c.Flow == pkceFlow && document != nil && bool(m.CIMDSupported) {
-		if !documentAccepts(document, c.RedirectURI) {
+		// Without a redirect yet, login checks it.
+		if !validDocumentURL(document.URL) || (c.RedirectURI != "" && !documentAccepts(document, c.RedirectURI)) {
 			return c, fail(auth.CodeInvalidConfiguration)
 		}
 		c.ClientID, c.ClientSecret, c.TokenAuthMethod, c.source = document.URL, "", "none", sourceCIMD
@@ -179,9 +180,10 @@ func secretMethod(m metadata) string {
 
 // registered resolves the client-credentials registration under the
 // registration-key lock: it reuses a usable record, or registers once. Only a
-// host Prepare (interactive) bypasses the backoff or replaces a usable record
-// made under other registration settings.
-func (p *Provider) registered(ctx context.Context, c ClientConfig, m metadata, interactive bool) (ClientConfig, error) {
+// host Prepare (interactive) replaces a usable record made under other
+// registration settings; it and the one re-registration after invalid_client
+// (bypass) ignore the backoff.
+func (p *Provider) registered(ctx context.Context, c ClientConfig, m metadata, interactive, bypass bool) (ClientConfig, error) {
 	key, digest := p.registrationKey(c), requestDigest(c.Registration)
 	err := p.options.Store.Coordinate(ctx, key, func(ctx context.Context) error {
 		record, err := p.options.Store.Load(ctx, key)
@@ -194,13 +196,15 @@ func (p *Provider) registered(ctx context.Context, c ClientConfig, m metadata, i
 		if reg := record.Registration; reg != nil && (reg.SecretExpiresAt.IsZero() || time.Now().Before(reg.SecretExpiresAt)) && (!interactive || reg.RequestDigest == digest) {
 			if secret, ok := p.secret(ctx, reg); ok {
 				c = use(c, reg, secret)
+				c.failing = record.RegistrationFailure != nil
 				return nil
 			}
 		}
-		if failure := record.RegistrationFailure; !interactive && failure != nil && time.Now().Before(failure.NextAttempt) {
+		if failure := record.RegistrationFailure; !interactive && !bypass && failure != nil && time.Now().Before(failure.NextAttempt) {
 			return fail(failure.Code)
 		}
 		c, err = p.register(ctx, key, record, c, m, digest)
+		c.failing = c.registered != "" && record.RegistrationFailure != nil
 		return err
 	})
 	if err != nil {
@@ -236,9 +240,9 @@ func (p *Provider) replace(ctx context.Context, key string, old, next *Record) e
 }
 
 // drop compare-and-deletes the client-credentials registration generation a
-// token endpoint rejected with invalid_client. A repeated rejection (failed)
-// also counts as a failed registration for the backoff.
-func (p *Provider) drop(ctx context.Context, c ClientConfig, failed bool) error {
+// token endpoint rejected with invalid_client, which counts as a failed
+// registration for the backoff.
+func (p *Provider) drop(ctx context.Context, c ClientConfig) error {
 	key := p.registrationKey(c)
 	return p.options.Store.Coordinate(ctx, key, func(ctx context.Context) error {
 		record, err := p.options.Store.Load(ctx, key)
@@ -248,19 +252,30 @@ func (p *Provider) drop(ctx context.Context, c ClientConfig, failed bool) error 
 		if record == nil {
 			record = &Record{}
 		}
-		current := record.Registration != nil && record.Registration.Generation == c.registered
-		if !current && !failed {
+		next := cloneRecord(record)
+		if reg := record.Registration; reg != nil && reg.Generation == c.registered {
+			next.Registration = nil
+		}
+		next.RegistrationFailure, next.Generation = p.failure(record, auth.CodeCredentialUnavailable, 0), randomID()
+		return p.replace(ctx, key, record, next)
+	})
+}
+
+// recovered clears the failure count after a token request with registration
+// generation c.registered succeeded.
+func (p *Provider) recovered(ctx context.Context, c ClientConfig) error {
+	key := p.registrationKey(c)
+	return p.options.Store.Coordinate(ctx, key, func(ctx context.Context) error {
+		record, err := p.options.Store.Load(ctx, key)
+		if err != nil {
+			return safe(ctx, err, auth.CodeProviderFailed)
+		}
+		if record == nil || record.RegistrationFailure == nil || record.Registration == nil || record.Registration.Generation != c.registered {
 			return nil
 		}
 		next := cloneRecord(record)
-		if current {
-			next.Registration = nil
-		}
-		if failed {
-			next.RegistrationFailure = p.failure(record, auth.CodeCredentialUnavailable, 0)
-		}
-		next.Generation = randomID()
-		return p.replace(ctx, key, record, next)
+		next.RegistrationFailure, next.Generation = nil, randomID()
+		return p.save(ctx, key, record.Generation, next)
 	})
 }
 
@@ -374,7 +389,8 @@ func (p *Provider) register(ctx context.Context, key string, record *Record, c C
 	}
 	reg.RequestDigest, reg.Generation = digest, randomID()
 	next := cloneRecord(record)
-	next.Registration, next.RegistrationFailure, next.Generation = reg, nil, randomID()
+	// The failure count survives until a token request with this client succeeds.
+	next.Registration, next.Generation = reg, randomID()
 	if err := p.replace(persist, key, record, next); err != nil {
 		// Lost the compare-and-set: delete our fresh secret and use the winner's.
 		p.options.Secrets.Delete(persist, reg.SecretRef)

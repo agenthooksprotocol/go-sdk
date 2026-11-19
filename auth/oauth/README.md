@@ -107,7 +107,7 @@ if prepared.Login != nil {
     // sharing the Store may complete it (for example from a pasted URL).
     callbackURL, err := receiveCallback(callbackCtx)
     if err != nil {
-        return managed.Cancel(ctx, request)
+        return managed.Cancel(ctx, request, prepared.Login)
     }
     _, err = managed.Complete(ctx, request, callbackURL)
     return err
@@ -131,12 +131,16 @@ deleted. Completion validates state, the login's exact redirect (including a
 loopback port) and the optional/advertised issuer response before claiming the
 login; an invalid callback does not consume it. Each completion replaces the
 grant's client and tokens, so the newest completed login wins. A login ends
-once: completion (including denial), `Cancel` (which ends every pending login
-for the request), the cap or expiry; a callback for an ended login fails with
-`interaction_required`. `Cancel` never erases stored credentials.
+once: completion (including denial), `Cancel` (which ends exactly that login,
+matched by its state, never another caller's login on a shared grant), the cap
+or expiry; a callback for an ended login fails with `interaction_required`.
+`Cancel` never erases stored credentials. With `PersistLogins`, a host
+`Prepare` also deletes the grant's expired pending logins and their verifiers.
 
 To bind a new loopback port for each login, as MCP clients do, pass it with
-`PrepareWith(ctx, request, oauth.PrepareOptions{RedirectURI: redirect})`.
+`PrepareWith(ctx, request, oauth.PrepareOptions{RedirectURI: redirect})`;
+`SelectClient` then need not return a `RedirectURI`. A redirect is required
+only when a login is created; lookup, refresh and `Complete` never need one.
 Redirects are HTTPS or HTTP to a literal loopback IP (`127.0.0.1`, `[::1]`);
 `localhost` is `invalid_configuration` (RFC 8252 section 8.3), checked before
 client selection, registration or any login.
@@ -188,8 +192,11 @@ only to `Options.Secrets` (`Store`, `Resolve`, `Delete` by reference); records
 hold its reference, and replaced or deleted registrations have their reference
 deleted. A registration is re-registered when its secret expired or cannot be
 resolved, and after a token-endpoint `invalid_client` (at most once per
-operation; a repeated `invalid_client` is `credential_unavailable` and counts as
-a failed registration for the backoff). A host
+operation; a repeated `invalid_client` is `credential_unavailable`). Each
+`invalid_client` counts as a failed registration for the backoff, and the
+count survives a new registration until a token request with a registered
+client succeeds, so a server that rejects every registered client is retried
+ever more rarely. A host
 `Prepare` also replaces one made under a different `RegistrationPolicy`. After
 a failed registration, no registration request is sent until a backoff passes
 (`RegistrationBackoff`, default 1 minute doubling, and any `Retry-After`, capped

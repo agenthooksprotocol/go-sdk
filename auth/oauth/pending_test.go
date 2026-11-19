@@ -70,9 +70,19 @@ func TestPendingLoginEndStates(t *testing.T) {
 				_, err := p.Complete(budget(t), r, "https://client.example/callback?"+q.Encode())
 				assertCode(t, err, auth.CodeAccessDenied)
 			case "cancel":
-				if err := p.Cancel(budget(t), r); err != nil {
+				// Another login for the grant stays pending.
+				other, err := p.Prepare(budget(t), r)
+				if err != nil {
 					t.Fatal(err)
 				}
+				if err := p.Cancel(budget(t), r, prepared.Login); err != nil {
+					t.Fatal(err)
+				}
+				defer func() {
+					if _, err := p.Complete(budget(t), r, callback(other.Login, "other")); err != nil {
+						t.Fatalf("cancel ended another login: %v", err)
+					}
+				}()
 			case "expiry":
 				time.Sleep(100 * time.Millisecond)
 			case "cap":
@@ -93,10 +103,14 @@ func TestPendingLoginEndStates(t *testing.T) {
 	f, p, r := setup(t, "authorization_code_pkce")
 	allowAdmin(p)
 	first := finishLogin(t, p, r)
-	if prepared, err := p.Prepare(budget(t), r, "admin"); err != nil || prepared.Login == nil {
+	prepared, err := p.Prepare(budget(t), r, "admin")
+	if err != nil || prepared.Login == nil {
 		t.Fatal(err)
 	}
-	if err := p.Cancel(budget(t), r); err != nil {
+	if err := p.Cancel(budget(t), r, prepared.Login); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Cancel(budget(t), r, nil); err != nil {
 		t.Fatal(err)
 	}
 	record, _ := f.store.Load(budget(t), first.Attempt.(attempted).key)
@@ -351,5 +365,30 @@ func TestPendingLoginEphemeralRedirect(t *testing.T) {
 	for _, invalid := range []string{"http://localhost:50003/callback", "http://192.0.2.1:50003/callback"} {
 		_, err := p.PrepareWith(budget(t), r, PrepareOptions{RedirectURI: invalid})
 		assertCode(t, err, auth.CodeInvalidConfiguration)
+	}
+}
+
+// With PersistLogins, a host Prepare sweeps the grant's expired logins and
+// their verifiers, even when it serves a cached credential.
+func TestPersistedExpiredLoginsSweptOnPrepare(t *testing.T) {
+	f, p, r := setup(t, "authorization_code_pkce")
+	allowAdmin(p)
+	p.options.PersistLogins, p.logins = true, f.store
+	finishLogin(t, p, r)
+	p.options.LoginLifetime = 50 * time.Millisecond
+	stepUp, err := p.Prepare(budget(t), r, "admin")
+	if err != nil || stepUp.Login == nil {
+		t.Fatal(err)
+	}
+	verifier := pendingRecord(t, p, r).Verifier
+	time.Sleep(100 * time.Millisecond)
+	cached, err := p.Prepare(budget(t), r)
+	if err != nil || cached.Credential == nil {
+		t.Fatal(err)
+	}
+	for key, record := range f.dumpStore(t, "") {
+		if strings.Contains(record, verifier) {
+			t.Fatalf("expired verifier kept at %q", key)
+		}
 	}
 }

@@ -86,6 +86,7 @@ type dcrFixture struct {
 	tokenClients  []string
 	issued        map[string]string // client_id -> secret
 	rejected      map[string]bool   // client_ids rejected with invalid_client
+	rejectAll     bool              // rejects every client with invalid_client
 	expiresAt     int64
 	// onToken, when set, runs before the token endpoint answers.
 	onToken func(form url.Values)
@@ -206,7 +207,7 @@ func (f *dcrFixture) serve(w http.ResponseWriter, r *http.Request) {
 		f.tokens = append(f.tokens, r.PostForm)
 		f.tokenClients = append(f.tokenClients, client)
 		expected, known := f.issued[client]
-		rejected := f.rejected[client]
+		rejected := f.rejected[client] || f.rejectAll
 		onToken := f.onToken
 		f.mu.Unlock()
 		if onToken != nil {

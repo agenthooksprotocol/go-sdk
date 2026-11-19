@@ -159,7 +159,9 @@ func validConfig(c ClientConfig) bool {
 		// An empty ClientID selects a dynamically registered client.
 		return (c.ClientSecret != "") == (c.ClientID != "")
 	}
-	return validRedirect(c.RedirectURI)
+	// A redirect is required only when a login is created; one given is
+	// checked here, before client selection.
+	return c.RedirectURI == "" || validRedirect(c.RedirectURI)
 }
 func cloneRequest(r auth.Request) auth.Request {
 	r.Binding = append(json.RawMessage(nil), r.Binding...)
@@ -442,6 +444,9 @@ func (p *Provider) prepare(ctx context.Context, r auth.Request, challenge string
 			return Preparation{}, err
 		}
 		key := p.key(r, config)
+		if interactive {
+			p.sweep(ctx, key)
+		}
 		current, err := p.options.Store.Load(ctx, key)
 		if err != nil {
 			return Preparation{}, safe(ctx, err, auth.CodeProviderFailed)
@@ -482,11 +487,14 @@ func (p *Provider) obtain(ctx context.Context, r auth.Request, config ClientConf
 		}
 	}
 	key := p.key(r, config)
+	if interactive {
+		p.sweep(ctx, key)
+	}
 	machine := config.source == sourceDCR && config.Flow != pkceFlow
 	for attempt := 0; ; attempt++ {
 		if machine {
 			var err error
-			if config, err = p.registered(ctx, config, m, interactive); err != nil {
+			if config, err = p.registered(ctx, config, m, interactive, attempt > 0); err != nil {
 				return Preparation{}, err, false
 			}
 		}
@@ -500,10 +508,15 @@ func (p *Provider) obtain(ctx context.Context, r auth.Request, config ClientConf
 			login, err := p.login(ctx, key, config, m)
 			return Preparation{Login: login}, err, false
 		}
+		if machine && err == nil && config.failing && result.Credential != nil {
+			// A successful token request with this client clears the count;
+			// a failed write only leaves the backoff to elapse.
+			p.recovered(ctx, config)
+		}
 		if reason != errInvalidClient || !machine {
 			return result, err, reason == errEndpoint
 		}
-		if err := p.drop(ctx, config, attempt > 0); err != nil {
+		if err := p.drop(ctx, config); err != nil {
 			return Preparation{}, err, false
 		}
 		if attempt > 0 {
@@ -858,7 +871,7 @@ func (p *Provider) refresh(ctx context.Context, key string, c ClientConfig, m me
 // registered PKCE client is registered here, with the login's exact redirect.
 // Its lifetime is fixed here and does not depend on the caller's context.
 func (p *Provider) login(ctx context.Context, key string, c ClientConfig, m metadata) (*PendingLogin, error) {
-	if c.source == sourceCIMD && !documentAccepts(c.ClientIDMetadataDocument, c.RedirectURI) {
+	if !validRedirect(c.RedirectURI) || (c.source == sourceCIMD && !documentAccepts(c.ClientIDMetadataDocument, c.RedirectURI)) {
 		return nil, fail(auth.CodeInvalidConfiguration)
 	}
 	current, err := p.options.Store.Load(ctx, key)
@@ -890,7 +903,7 @@ func (p *Provider) login(ctx context.Context, key string, c ClientConfig, m meta
 	if err != nil {
 		return nil, err
 	}
-	return &PendingLogin{authorizationURL: loginURL, deadline: pending.ExpiresAt}, nil
+	return &PendingLogin{authorizationURL: loginURL, state: state, deadline: pending.ExpiresAt}, nil
 }
 
 // pending atomically edits a grant's unexpired pending logins under their
@@ -932,8 +945,13 @@ func (p *Provider) pending(ctx context.Context, key string, edit func([]PendingR
 	})
 }
 
-// Cancel abandons every pending login for r. It never changes stored tokens.
-func (p *Provider) Cancel(ctx context.Context, r auth.Request) error {
+// Cancel abandons exactly one pending login for r, matched by its state, so
+// it never ends another caller's login sharing the grant. It never changes
+// stored tokens; an ended or unknown login is a no-op.
+func (p *Provider) Cancel(ctx context.Context, r auth.Request, login *PendingLogin) error {
+	if login == nil || login.state == "" {
+		return nil
+	}
 	r = cloneRequest(r)
 	config, _, cached, err := p.cachedBinding(ctx, r)
 	if err == errStaleBinding {
@@ -945,7 +963,24 @@ func (p *Provider) Cancel(ctx context.Context, r auth.Request) error {
 	if !cached {
 		return nil
 	}
-	return p.pending(ctx, p.key(r, config), func([]PendingRecord) ([]PendingRecord, error) { return nil, nil })
+	return p.pending(ctx, p.key(r, config), func(logins []PendingRecord) ([]PendingRecord, error) {
+		for i, pending := range logins {
+			if subtle.ConstantTimeCompare([]byte(login.state), []byte(pending.State)) == 1 {
+				return append(logins[:i:i], logins[i+1:]...), nil
+			}
+		}
+		return logins, nil
+	})
+}
+
+// errSweep ends a pending-login edit that only deletes expired logins.
+var errSweep = errors.New("sweep")
+
+// sweep deletes a grant's expired persisted pending logins and their verifiers.
+func (p *Provider) sweep(ctx context.Context, key string) {
+	if p.options.PersistLogins {
+		p.pending(ctx, key, func([]PendingRecord) ([]PendingRecord, error) { return nil, errSweep })
+	}
 }
 
 // Complete validates one callback against r's pending login with its state
