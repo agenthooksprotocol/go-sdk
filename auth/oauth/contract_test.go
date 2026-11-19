@@ -177,6 +177,15 @@ func TestCanonicalTokenResponses(t *testing.T) {
 				}
 			}
 			prepared, err := p.Prepare(budget(t), request)
+			if vector.Allowed != nil && !scopeSubset(vector.Requested, vector.Allowed) {
+				// Requested scopes outside the ceiling are a configuration
+				// error, before any request (scope contract rule 4).
+				assertCode(t, err, auth.CodeInvalidConfiguration)
+				if tokenCalls.Load() != 0 {
+					t.Fatal("invalid configuration reached the token endpoint")
+				}
+				return
+			}
 			if vector.Usable {
 				if err != nil || prepared.Credential == nil {
 					t.Fatalf("usable token rejected: %v", err)

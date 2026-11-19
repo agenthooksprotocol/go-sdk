@@ -48,14 +48,20 @@ func (e *Error) Recovery() Recovery {
 
 // SDK-returned Error carries only an allowlisted code and validated required
 // scopes: on interaction_required for a host to pass back to an explicit
-// prepare, on access_denied for diagnostics only. Formatting, recovery and JSON also
-// allowlist host-constructed values. It has no raw cause, endpoint, response
+// prepare, on access_denied for diagnostics only. Scopes are deduplicated and
+// sorted in ascending byte order. LoginEnded is set only on errors from a
+// login completion (oauth.Provider.Complete): true when the pending login
+// named by the callback's state no longer exists after the call (consumed,
+// expired or unknown), false when it is still pending, for example after a
+// stray or invalid callback rejected before the login was claimed.
+// Formatting, recovery and JSON also allowlist host-constructed values. It has no raw cause, endpoint, response
 // body, callback URL or credential fields. Use errors.As to inspect it and
 // errors.Is for the existing auth sentinels. Cancellation is joined separately,
 // without retaining the provider's error chain.
 type Error struct {
-	Code   Code
-	Scopes []string
+	Code       Code
+	Scopes     []string
+	LoginEnded bool
 }
 
 // MarshalJSON redacts unknown codes and scopes. A value receiver protects both
@@ -63,20 +69,22 @@ type Error struct {
 func (e Error) MarshalJSON() ([]byte, error) {
 	safe := Classify(&e)
 	return json.Marshal(struct {
-		Code   Code
-		Scopes []string `json:",omitempty"`
-	}{safe.Code, safe.Scopes})
+		Code       Code
+		Scopes     []string `json:",omitempty"`
+		LoginEnded bool     `json:",omitempty"`
+	}{safe.Code, safe.Scopes, safe.LoginEnded})
 }
 
 // Classify copies the first *Error in err's chain without the chain itself,
 // keeping only an allowlisted code and, where that code permits, grammatically
-// valid scopes. It returns nil when err contains no *Error.
+// valid scopes, and the LoginEnded flag. It returns nil when err contains no
+// *Error.
 func Classify(err error) *Error {
 	var classified *Error
 	if !errors.As(err, &classified) || classified == nil {
 		return nil
 	}
-	result := &Error{Code: safeCode(classified.Code)}
+	result := &Error{Code: safeCode(classified.Code), LoginEnded: classified.LoginEnded}
 	if result.Code == CodeInteractionRequired || result.Code == CodeAccessDenied {
 		for _, scope := range classified.Scopes {
 			if authutil.ValidScope(scope) {

@@ -71,8 +71,20 @@ func fail(code auth.Code, required ...string) error {
 }
 
 // safe is the error-copy boundary for host callbacks: only an allowlisted
-// auth.Error code survives, never the host's error chain.
+// auth.Error code survives, never the host's error chain. Host errors never
+// carry scopes or a login state: only the SDK's own checks attach them.
 func safe(ctx context.Context, err error, fallback auth.Code) error {
+	if ctx.Err() != nil {
+		return errors.Join(fail(fallback), ctx.Err())
+	}
+	if classified := auth.Classify(err); classified != nil {
+		return &auth.Error{Code: classified.Code}
+	}
+	return fail(fallback)
+}
+
+// keep copies an SDK-produced error, keeping the scopes its own checks attached.
+func keep(ctx context.Context, err error, fallback auth.Code) error {
 	if ctx.Err() != nil {
 		return errors.Join(fail(fallback), ctx.Err())
 	}
@@ -120,9 +132,11 @@ func intersect(scopes, ceiling []string) []string {
 	return result
 }
 
-// requested is what the SDK asks for: requested and required scopes within the ceiling.
-func requested(c ClientConfig) []string {
-	return intersect(merge(c.Scopes, c.RequiredScopes...), allowedScopes(c))
+// requested is what the SDK asks for: requested and required scopes, both
+// within the ceiling (validConfig and the ceiling check enforce it), plus any
+// 401 hint, which is already ceiling-filtered.
+func requested(c ClientConfig, hint []string) []string {
+	return merge(merge(c.Scopes, c.RequiredScopes...), hint...)
 }
 func sameScopes(a, b []string) bool { return slices.Equal(merge(a), merge(b)) }
 func scopeSubset(scopes, ceiling []string) bool {
@@ -154,6 +168,11 @@ func validConfig(c ClientConfig) bool {
 		if !authutil.ValidScope(scope) {
 			return false
 		}
+	}
+	// Requested scopes outside the ceiling are a configuration error, never
+	// silently dropped. Required scopes outside it are an access_denied refusal.
+	if !scopeSubset(c.Scopes, allowedScopes(c)) {
+		return false
 	}
 	if c.Flow == "client_credentials" {
 		// An empty ClientID selects a dynamically registered client.
@@ -193,6 +212,7 @@ func cloneRecord(r *Record) *Record {
 	for _, pending := range r.Pending {
 		pending.Scopes = append([]string(nil), pending.Scopes...)
 		pending.Ceiling = append([]string(nil), pending.Ceiling...)
+		pending.Required = append([]string(nil), pending.Required...)
 		copy.Pending = append(copy.Pending, pending)
 	}
 	return &copy
@@ -348,23 +368,60 @@ func (p *Provider) credential(r auth.Request, key string, record *Record) *auth.
 	return &auth.Credential{Type: "bearer", Token: record.AccessToken, Attempt: attempted{p, key, record.AccessToken, requestIdentity(r)}}
 }
 
-// challengeScopes returns the validated scope requirement of a Bearer challenge.
+// challengeScopes returns the validated, sorted scope parameter of a Bearer
+// challenge. A malformed value (empty, repeated, leading or trailing spaces,
+// an invalid character, or a duplicated parameter) or a challenge that cannot
+// be parsed fails closed with access_denied and no scopes.
 func challengeScopes(challenge string) ([]string, error) {
-	required, err := bearerParameter(challenge, "scope")
-	if err != nil {
-		return nil, fail(auth.CodeDiscoveryFailed)
-	}
-	if required != "" && !authutil.ValidScopeList(required) {
+	value, err := bearerParameter(challenge, "scope")
+	if err != nil || (value != "" && !authutil.ValidScopeList(value)) {
 		return nil, fail(auth.CodeAccessDenied)
 	}
-	return strings.Fields(required), nil
+	return merge(strings.Fields(value)), nil
+}
+
+// alreadyGranted reports a step-up whose required set the stored grant
+// already records within the current ceiling: the server and the record
+// disagree, so the operation is refused rather than replaying a token or
+// requesting consent. rejected is empty when no token was sent.
+func alreadyGranted(record *Record, c ClientConfig, rejected string) bool {
+	return rejected != "" && record != nil && scopeSubset(c.RequiredScopes, intersect(record.Scopes, allowedScopes(c)))
+}
+
+// remember records 401 challenge scopes, already ceiling-filtered, to request
+// in the grant's next acquisition or login. They are never a requirement.
+func (p *Provider) remember(key string, scopes []string) {
+	if len(scopes) == 0 {
+		return
+	}
+	p.hintsMu.Lock()
+	defer p.hintsMu.Unlock()
+	if p.hints == nil {
+		p.hints = map[string][]string{}
+	}
+	p.hints[key] = merge(p.hints[key], scopes...)
+}
+
+// hint returns the 401 scopes remembered for a grant.
+func (p *Provider) hint(key string) []string {
+	p.hintsMu.Lock()
+	defer p.hintsMu.Unlock()
+	return append([]string(nil), p.hints[key]...)
+}
+
+// forget drops a grant's remembered 401 scopes once they were requested.
+func (p *Provider) forget(key string) {
+	p.hintsMu.Lock()
+	defer p.hintsMu.Unlock()
+	delete(p.hints, key)
 }
 
 // Prepare is the host-controlled interaction entrypoint. The context MUST carry
 // a deadline for its network work; a created login outlives it. A Login never
 // starts a listener or browser. Required scopes are explicit operation
 // requirements, typically the Scopes of an interaction_required error after a
-// step-up challenge; they must be within the allowed ceiling.
+// step-up challenge; with the host RequiredScopes they must be within the
+// allowed ceiling, or Prepare fails with access_denied before any request.
 func (p *Provider) Prepare(ctx context.Context, r auth.Request, required ...string) (Preparation, error) {
 	return p.PrepareWith(ctx, r, PrepareOptions{RequiredScopes: required})
 }
@@ -380,7 +437,7 @@ func (p *Provider) PrepareWith(ctx context.Context, r auth.Request, options Prep
 	if options.RedirectURI != "" && !validRedirect(options.RedirectURI) {
 		return Preparation{}, fail(auth.CodeInvalidConfiguration)
 	}
-	preparation, err := p.prepare(ctx, cloneRequest(r), "", options.RequiredScopes, options.RedirectURI, false, true, options.ForceRegistration)
+	preparation, err := p.prepare(ctx, cloneRequest(r), "", options.RequiredScopes, options.RedirectURI, false, true, options.ForceRegistration, "")
 	if err == nil && preparation.Credential != nil {
 		p.markPrepared(r)
 	}
@@ -411,9 +468,13 @@ func preparedKey(r auth.Request) string {
 }
 
 // prepare serves a cached grant, refreshes or reissues it, or (only when
-// interactive) creates a pending login. A step-up challenge requirement
-// applies to this call alone.
-func (p *Provider) prepare(ctx context.Context, r auth.Request, challenge string, explicit []string, redirect string, stepUp, interactive, force bool) (Preparation, error) {
+// interactive) creates a pending login. Its required set R is the host
+// RequiredScopes, the explicit scopes and, on a step-up (403), the challenged
+// scopes; it applies to this call alone. A 401 challenge's scopes are only
+// requested by the next acquisition. The ceiling decision on R is local and
+// precedes issuer metadata, token and registration requests. rejected is the
+// access token a step-up challenge rejected, if known.
+func (p *Provider) prepare(ctx context.Context, r auth.Request, challenge string, explicit []string, redirect string, stepUp, interactive, force bool, rejected string) (Preparation, error) {
 	if err := bounded(ctx); err != nil {
 		return Preparation{}, err
 	}
@@ -421,9 +482,14 @@ func (p *Provider) prepare(ctx context.Context, r auth.Request, challenge string
 	if err != nil {
 		return Preparation{}, err
 	}
+	var hint []string
+	if !stepUp {
+		// A 401 scope is a hint for the next request, never a requirement.
+		hint, challenged = challenged, nil
+	}
 	require := func(c ClientConfig) (ClientConfig, error) {
-		// Without a challenged scope, only an explicit host requirement justifies step-up.
-		if stepUp && len(challenged) == 0 && len(c.RequiredScopes) == 0 {
+		// Without a challenged scope, only a host or explicit requirement justifies step-up.
+		if stepUp && len(challenged) == 0 && len(c.RequiredScopes) == 0 && len(explicit) == 0 {
 			return c, fail(auth.CodeAccessDenied)
 		}
 		c.RequiredScopes = merge(merge(c.RequiredScopes, explicit...), challenged...)
@@ -431,6 +497,10 @@ func (p *Provider) prepare(ctx context.Context, r auth.Request, challenge string
 			return c, fail(auth.CodeAccessDenied, c.RequiredScopes...)
 		}
 		return c, nil
+	}
+	note := func(key string, c ClientConfig) {
+		// Out-of-ceiling 401 scopes are simply not requested.
+		p.remember(key, intersect(hint, allowedScopes(c)))
 	}
 	// A stale or policy-refused stored binding is rebuilt by discovery, which
 	// applies current policy to the discovered issuers.
@@ -444,6 +514,7 @@ func (p *Provider) prepare(ctx context.Context, r auth.Request, challenge string
 			return Preparation{}, err
 		}
 		key := p.key(r, config)
+		note(key, config)
 		if interactive {
 			p.sweep(ctx, key)
 		}
@@ -451,13 +522,23 @@ func (p *Provider) prepare(ctx context.Context, r auth.Request, challenge string
 		if err != nil {
 			return Preparation{}, safe(ctx, err, auth.CodeProviderFailed)
 		}
+		if stepUp && alreadyGranted(current, config, rejected) {
+			return Preparation{}, fail(auth.CodeAccessDenied, config.RequiredScopes...)
+		}
 		if satisfies(current, config) {
 			return Preparation{Credential: p.credential(r, key, current)}, nil
 		}
 	}
 	// An exchange or login needs current metadata: full discovery, honouring a
-	// challenge's resource_metadata hint, rebuilds the binding.
-	if config, m, err = p.resolve(ctx, r, challenge); err != nil {
+	// challenge's resource_metadata hint, rebuilds the binding. Client selection
+	// precedes the ceiling decision, which precedes issuer metadata.
+	if config, err = p.discover(ctx, r, challenge); err != nil {
+		return Preparation{}, safe(ctx, err, auth.CodeDiscoveryFailed)
+	}
+	if config, err = require(config); err != nil {
+		return Preparation{}, err
+	}
+	if config, m, err = p.resolveMetadata(ctx, config); err != nil {
 		return Preparation{}, safe(ctx, err, auth.CodeDiscoveryFailed)
 	}
 	if redirect != "" && config.Flow == pkceFlow {
@@ -466,10 +547,8 @@ func (p *Provider) prepare(ctx context.Context, r auth.Request, challenge string
 	if config, err = p.choose(ctx, r, config, m); err != nil {
 		return Preparation{}, err
 	}
-	if config, err = require(config); err != nil {
-		return Preparation{}, err
-	}
-	result, err, _ := p.obtain(ctx, r, config, m, true, stepUp, interactive, force)
+	note(p.key(r, config), config)
+	result, err, _ := p.obtain(ctx, r, config, m, true, stepUp, interactive, force, rejected)
 	return result, err
 }
 
@@ -480,7 +559,7 @@ func (p *Provider) prepare(ctx context.Context, r auth.Request, challenge string
 // compare-and-deletes that registration, then re-registers and re-acquires
 // once. It also reports whether the token endpoint failed without processing
 // the request (stale metadata).
-func (p *Provider) obtain(ctx context.Context, r auth.Request, config ClientConfig, m metadata, persist, stepUp, interactive, force bool) (Preparation, error, bool) {
+func (p *Provider) obtain(ctx context.Context, r auth.Request, config ClientConfig, m metadata, persist, stepUp, interactive, force bool, rejected string) (Preparation, error, bool) {
 	if persist {
 		if err := p.persistBinding(ctx, r, config, m); err != nil {
 			return Preparation{}, err, false
@@ -503,7 +582,7 @@ func (p *Provider) obtain(ctx context.Context, r auth.Request, config ClientConf
 			return Preparation{}, err, false
 		}
 		config.TokenAuthMethod = method
-		result, err, reason := p.acquireOnce(ctx, r, key, config, m, stepUp, interactive)
+		result, err, reason := p.acquireOnce(ctx, r, key, config, m, stepUp, interactive, rejected)
 		if reason == errLogin {
 			login, err := p.login(ctx, key, config, m)
 			return Preparation{Login: login}, err, false
@@ -533,55 +612,69 @@ var errLogin = &auth.Error{Code: auth.CodeInteractionRequired}
 // interactive caller needs consent, errEndpoint when the token endpoint failed
 // without an OAuth error response (the metadata used may be stale) or
 // errInvalidClient when it rejected the client.
-func (p *Provider) acquireOnce(ctx context.Context, r auth.Request, key string, config ClientConfig, m metadata, stepUp, interactive bool) (Preparation, error, error) {
+func (p *Provider) acquireOnce(ctx context.Context, r auth.Request, key string, config ClientConfig, m metadata, stepUp, interactive bool, rejected string) (Preparation, error, error) {
 	var result Preparation
+	// inner is the SDK's own outcome; any other Coordinate error is the host's.
+	var inner error
 	err := p.options.Store.Coordinate(ctx, key, func(ctx context.Context) error {
-		record, err := p.options.Store.Load(ctx, key)
-		if err != nil {
-			return safe(ctx, err, auth.CodeProviderFailed)
-		}
-		record = cloneRecord(record)
-		if satisfies(record, config) {
-			result.Credential = p.credential(r, key, record)
-			return nil
-		}
-		next := record
-		switch {
-		case config.Flow == "client_credentials":
-			next, err = p.machine(ctx, key, config, m, record)
-		case record != nil && record.RefreshToken != "" && !usable(record) && (config.source != sourceDCR || record.ClientID != ""):
-			next, err = p.refresh(ctx, key, config, m, record)
-		}
-		if err != nil {
-			return err
-		}
-		if satisfies(next, config) {
-			result.Credential = p.credential(r, key, next)
-			return nil
-		}
-		if config.Flow == "client_credentials" || (!stepUp && !interactive && usable(next)) {
-			// A live grant lacks an explicit requirement: refresh cannot broaden it.
-			return fail(auth.CodeAccessDenied, config.RequiredScopes...)
-		}
-		if !interactive {
-			return fail(auth.CodeInteractionRequired, config.RequiredScopes...)
-		}
-		return errLogin
+		inner = p.acquireLocked(ctx, r, key, config, m, stepUp, interactive, rejected, &result)
+		return inner
 	})
 	if err != nil {
 		var reason error
 		for _, sentinel := range []error{errEndpoint, errInvalidClient, errLogin} {
-			if errors.Is(err, sentinel) {
+			if errors.Is(inner, sentinel) {
 				reason = sentinel
 			}
 		}
-		return Preparation{}, safe(ctx, err, auth.CodeProviderFailed), reason
+		if inner == nil {
+			return Preparation{}, safe(ctx, err, auth.CodeProviderFailed), nil
+		}
+		return Preparation{}, keep(ctx, inner, auth.CodeProviderFailed), reason
 	}
 	if ctx.Err() != nil {
 		// The exchange completed detached; the caller still sees cancellation.
 		return Preparation{}, errors.Join(fail(auth.CodeProviderFailed), ctx.Err()), nil
 	}
 	return result, nil, nil
+}
+
+// acquireLocked is acquireOnce's work under the grant lock.
+func (p *Provider) acquireLocked(ctx context.Context, r auth.Request, key string, config ClientConfig, m metadata, stepUp, interactive bool, rejected string, result *Preparation) error {
+	record, err := p.options.Store.Load(ctx, key)
+	if err != nil {
+		return safe(ctx, err, auth.CodeProviderFailed)
+	}
+	record = cloneRecord(record)
+	if stepUp && alreadyGranted(record, config, rejected) {
+		return fail(auth.CodeAccessDenied, config.RequiredScopes...)
+	}
+	if satisfies(record, config) {
+		result.Credential = p.credential(r, key, record)
+		return nil
+	}
+	next := record
+	switch {
+	case config.Flow == "client_credentials":
+		next, err = p.machine(ctx, key, config, m, record)
+	case record != nil && record.RefreshToken != "" && !usable(record) && (config.source != sourceDCR || record.ClientID != ""):
+		next, err = p.refresh(ctx, key, config, m, record)
+	}
+	if err != nil {
+		return err
+	}
+	if satisfies(next, config) {
+		result.Credential = p.credential(r, key, next)
+		return nil
+	}
+	if config.Flow == "client_credentials" || (!stepUp && !interactive && usable(next)) {
+		// A live grant lacks an explicit requirement: refresh cannot broaden it.
+		return fail(auth.CodeAccessDenied, config.RequiredScopes...)
+	}
+	if !interactive {
+		return fail(auth.CodeInteractionRequired, config.RequiredScopes...)
+	}
+	return errLogin
 }
 func generation(r *Record) string {
 	if r == nil {
@@ -745,13 +838,15 @@ func oauthConfig(c ClientConfig, m metadata) *oauth2.Config {
 }
 
 // machine issues a client-credentials grant. Re-acquisition for an existing
-// grant also requests and keeps its previously granted scopes.
+// grant also requests and keeps its previously granted scopes, and any
+// remembered 401 challenge scopes.
 func (p *Provider) machine(ctx context.Context, key string, c ClientConfig, m metadata, previous *Record) (*Record, error) {
 	var granted []string
 	if previous != nil {
 		granted = previous.Scopes
 	}
-	c.Scopes = merge(granted, requested(c)...)
+	hint := p.hint(key)
+	c.Scopes = merge(granted, requested(c, hint)...)
 	ctx, cancel := sending(ctx)
 	if cancel == nil {
 		return nil, ctx.Err()
@@ -763,7 +858,10 @@ func (p *Provider) machine(ctx context.Context, key string, c ClientConfig, m me
 		return nil, acquisitionError(ctx, err, false)
 	}
 	next, err := p.grant(ctx, c, merge(granted, allowedScopes(c)...), token, nil)
-	return p.commit(ctx, key, generation(previous), next, err)
+	if next, err = p.commit(ctx, key, generation(previous), next, err); next != nil && len(hint) > 0 {
+		p.forget(key)
+	}
+	return next, err
 }
 
 // errEndpoint marks a token request the endpoint provably did not process
@@ -866,8 +964,9 @@ func (p *Provider) refresh(ctx context.Context, key string, c ClientConfig, m me
 }
 
 // login creates a pending login for this caller. It requests any previously
-// granted scopes plus the ceiling-filtered request, and stores the caller's
-// ceiling, which bounds the grant recorded on completion. A dynamically
+// granted scopes plus the request, required scopes and remembered 401
+// challenge scopes, and stores the caller's ceiling, which bounds the grant
+// recorded on completion, and the required set completion must cover. A dynamically
 // registered PKCE client is registered here, with the login's exact redirect.
 // Its lifetime is fixed here and does not depend on the caller's context.
 func (p *Provider) login(ctx context.Context, key string, c ClientConfig, m metadata) (*PendingLogin, error) {
@@ -879,7 +978,8 @@ func (p *Provider) login(ctx context.Context, key string, c ClientConfig, m meta
 		return nil, safe(ctx, err, auth.CodeProviderFailed)
 	}
 	ceiling := merge(allowedScopes(c))
-	c.Scopes = requested(c)
+	hint := p.hint(key)
+	c.Scopes = requested(c, hint)
 	if current != nil {
 		c.Scopes = merge(current.Scopes, c.Scopes...)
 	}
@@ -894,7 +994,7 @@ func (p *Provider) login(ctx context.Context, key string, c ClientConfig, m meta
 	if err := p.check(ctx, loginURL, Authorization); err != nil {
 		return nil, err
 	}
-	pending := PendingRecord{State: state, Verifier: verifier, RedirectURI: c.RedirectURI, Scopes: c.Scopes, Ceiling: ceiling, ExpiresAt: time.Now().Add(p.options.LoginLifetime), ClientID: c.ClientID}
+	pending := PendingRecord{State: state, Verifier: verifier, RedirectURI: c.RedirectURI, Scopes: c.Scopes, Ceiling: ceiling, Required: merge(c.RequiredScopes), ExpiresAt: time.Now().Add(p.options.LoginLifetime), ClientID: c.ClientID}
 	err = p.pending(ctx, key, func(logins []PendingRecord) ([]PendingRecord, error) {
 		// Beyond the cap, the oldest login is cancelled.
 		logins = append(logins, pending)
@@ -902,6 +1002,9 @@ func (p *Provider) login(ctx context.Context, key string, c ClientConfig, m meta
 	})
 	if err != nil {
 		return nil, err
+	}
+	if len(hint) > 0 {
+		p.forget(key)
 	}
 	return &PendingLogin{authorizationURL: loginURL, state: state, deadline: pending.ExpiresAt}, nil
 }
@@ -988,44 +1091,124 @@ func (p *Provider) sweep(ctx context.Context, key string) {
 // it, or with Options.PersistLogins any Provider sharing the Store. An invalid
 // callback never consumes the login; a cancelled, expired or already used
 // login fails with interaction_required. Completion replaces the grant's
-// client and tokens, so the newest completed login wins.
+// client and tokens, so the newest completed login wins. It succeeds only when
+// the grant, within the current ceiling, covers the login's required set;
+// otherwise it fails with access_denied carrying that set, after the grant is
+// saved and the login consumed.
+//
+// Every returned error carries an *auth.Error whose LoginEnded reports whether
+// the pending login named by the callback's state no longer exists after the
+// call: true once it was consumed, or when it had expired or was unknown;
+// false when it is still pending (or its state could not be determined).
 func (p *Provider) Complete(ctx context.Context, r auth.Request, callback string) (auth.Credential, error) {
-	if err := bounded(ctx); err != nil {
-		return auth.Credential{}, err
-	}
 	r = cloneRequest(r)
+	credential, ended, err := p.complete(ctx, r, callback)
+	if err == nil {
+		return credential, nil
+	}
+	if ended == nil {
+		ended = p.loginEnded(ctx, r, callback)
+	}
+	result := auth.Classify(err)
+	if result == nil {
+		result = &auth.Error{Code: auth.CodeProviderFailed}
+	}
+	result.LoginEnded = *ended
+	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
+		if errors.Is(err, cause) {
+			return auth.Credential{}, errors.Join(result, cause)
+		}
+	}
+	return auth.Credential{}, result
+}
+
+// callbackState returns the callback's single state, if any.
+func callbackState(callback string) string {
+	value, err := url.Parse(callback)
+	if err != nil {
+		return ""
+	}
+	query, err := url.ParseQuery(value.RawQuery)
+	if err != nil || len(query["state"]) != 1 {
+		return ""
+	}
+	return query.Get("state")
+}
+
+// loginEnded reports, for a failure before the login was claimed, whether the
+// pending login named by the callback's state is gone. Without a single state
+// or a current binding no login can match; an indeterminate lookup reports
+// false (still pending).
+func (p *Provider) loginEnded(ctx context.Context, r auth.Request, callback string) *bool {
+	ended := func(value bool) *bool { return &value }
+	state := callbackState(callback)
+	if state == "" {
+		return ended(true)
+	}
+	config, _, cached, err := p.cachedBinding(ctx, r)
+	if err == errStaleBinding || (err == nil && !cached) {
+		return ended(true)
+	}
+	if err != nil {
+		return ended(false)
+	}
+	record, err := p.logins.Load(ctx, pendingKey(p.key(r, config)))
+	if err != nil {
+		return ended(false)
+	}
+	if record != nil {
+		now := time.Now()
+		for _, login := range record.Pending {
+			if login.ExpiresAt.After(now) && subtle.ConstantTimeCompare([]byte(state), []byte(login.State)) == 1 {
+				return ended(false)
+			}
+		}
+	}
+	return ended(true)
+}
+
+// complete is Complete without the login-ended flag. It reports that flag
+// once the claim decided it, or nil for the caller to look it up.
+func (p *Provider) complete(ctx context.Context, r auth.Request, callback string) (auth.Credential, *bool, error) {
+	ended := func(value bool) *bool { return &value }
+	if err := bounded(ctx); err != nil {
+		return auth.Credential{}, nil, err
+	}
 	value, err := url.Parse(callback)
 	if err != nil || value.User != nil || strings.Contains(callback, "#") {
-		return auth.Credential{}, fail(auth.CodeAccessDenied)
+		return auth.Credential{}, nil, fail(auth.CodeAccessDenied)
 	}
 	query, err := url.ParseQuery(value.RawQuery)
 	if err == nil && len(query["state"]) == 0 {
 		// Without a state no login can match, as for an unknown state.
-		return auth.Credential{}, fail(auth.CodeInteractionRequired)
+		return auth.Credential{}, ended(true), fail(auth.CodeInteractionRequired)
 	}
 	if err != nil || len(query["state"]) != 1 || len(query["error"]) > 1 || (query.Get("error") == "" && (len(query["code"]) != 1 || query.Get("code") == "")) {
-		return auth.Credential{}, fail(auth.CodeAccessDenied)
+		return auth.Credential{}, nil, fail(auth.CodeAccessDenied)
 	}
 	// Resolve current secrets, policy and capabilities: the pending login never
 	// makes a captured runtime secret authoritative.
 	config, m, cached, err := p.cachedBinding(ctx, r)
 	if err == nil && !cached {
-		err = fail(auth.CodeInteractionRequired)
+		return auth.Credential{}, ended(true), fail(auth.CodeInteractionRequired)
 	}
 	if err == nil {
 		config, m, err = p.resolveMetadata(ctx, config)
 	}
 	if err != nil {
-		return auth.Credential{}, safe(ctx, err, auth.CodeDiscoveryFailed)
+		return auth.Credential{}, nil, safe(ctx, err, auth.CodeDiscoveryFailed)
 	}
 	key := p.key(r, config)
 	var pending PendingRecord
+	// found reports a live login for the state; claimed that it was consumed.
+	found, claimed := false, false
 	// Claim the valid callback's login once before the exchange.
 	err = p.pending(ctx, key, func(logins []PendingRecord) ([]PendingRecord, error) {
 		for i, login := range logins {
 			if subtle.ConstantTimeCompare([]byte(query.Get("state")), []byte(login.State)) != 1 {
 				continue
 			}
+			found = true
 			if config.source != sourceDCR && login.ClientID != config.ClientID {
 				return nil, fail(auth.CodeInteractionRequired)
 			}
@@ -1036,20 +1219,24 @@ func (p *Provider) Complete(ctx context.Context, r auth.Request, callback string
 			if issuer := query["iss"]; len(issuer) > 1 || (len(issuer) == 1 && issuer[0] != config.Issuer) || (m.ResponseIssuer && len(issuer) != 1) {
 				return nil, fail(auth.CodeAccessDenied)
 			}
-			pending = login
+			pending, claimed = login, true
 			return append(logins[:i:i], logins[i+1:]...), nil
 		}
 		return nil, fail(auth.CodeInteractionRequired)
 	})
 	if err != nil {
-		return auth.Credential{}, safe(ctx, err, auth.CodeProviderFailed)
+		// A failed claim leaves a found login pending; a missing one is gone.
+		return auth.Credential{}, ended(!found), safe(ctx, err, auth.CodeProviderFailed)
+	}
+	if !claimed {
+		return auth.Credential{}, ended(false), fail(auth.CodeProviderFailed)
 	}
 	if denied := query.Get("error"); denied != "" {
 		if denied == "invalid_client" && config.source == sourceCIMD {
 			// The authorization server rejected the CIMD client: configuration.
-			return auth.Credential{}, fail(auth.CodeInvalidConfiguration)
+			return auth.Credential{}, ended(true), fail(auth.CodeInvalidConfiguration)
 		}
-		return auth.Credential{}, fail(auth.CodeAccessDenied)
+		return auth.Credential{}, ended(true), fail(auth.CodeAccessDenied)
 	}
 	exchange := cloneConfig(config)
 	exchange.ClientID, exchange.Scopes, exchange.RedirectURI = pending.ClientID, pending.Scopes, pending.RedirectURI
@@ -1063,16 +1250,17 @@ func (p *Provider) Complete(ctx context.Context, r auth.Request, callback string
 		err = ctx.Err()
 	}
 	if err != nil {
-		return auth.Credential{}, safe(ctx, err, auth.CodeProviderFailed)
+		return auth.Credential{}, ended(true), keep(ctx, err, auth.CodeProviderFailed)
 	}
 	p.markPrepared(r)
-	return *credential, nil
+	return *credential, nil, nil
 }
 
 // exchange redeems a claimed login's code and commits its client and tokens
 // into the grant under the grant lock, replacing the previous ones. Once the
 // code is sent, the outcome is received and committed detached from caller
-// cancellation.
+// cancellation. The committed grant, within the current ceiling, must cover
+// the login's stored required set.
 func (p *Provider) exchange(ctx context.Context, r auth.Request, key string, c ClientConfig, m metadata, pending PendingRecord, code string) (*auth.Credential, error) {
 	ctx, cancel := sending(ctx)
 	if cancel == nil {
@@ -1084,26 +1272,37 @@ func (p *Provider) exchange(ctx context.Context, r auth.Request, key string, c C
 		return nil, acquisitionError(ctx, err, true)
 	}
 	var credential *auth.Credential
+	// inner is the SDK's own outcome; any other Coordinate error is the host's.
+	var inner error
 	err = p.options.Store.Coordinate(ctx, key, func(ctx context.Context) error {
-		current, err := p.options.Store.Load(ctx, key)
-		if err != nil {
-			return safe(ctx, err, auth.CodeProviderFailed)
-		}
-		var granted []string
-		if current != nil {
-			granted = current.Scopes
-		}
-		next, err := p.grant(ctx, c, merge(pending.Ceiling, granted...), token, nil)
-		if next, err = p.commit(ctx, key, generation(current), next, err); err != nil {
-			return err
-		}
-		if !satisfies(next, c) {
-			return fail(auth.CodeAccessDenied)
-		}
-		credential = p.credential(r, key, next)
-		return nil
+		inner = func() error {
+			current, err := p.options.Store.Load(ctx, key)
+			if err != nil {
+				return safe(ctx, err, auth.CodeProviderFailed)
+			}
+			var granted []string
+			if current != nil {
+				granted = current.Scopes
+			}
+			next, err := p.grant(ctx, c, merge(pending.Ceiling, granted...), token, nil)
+			if next, err = p.commit(ctx, key, generation(current), next, err); err != nil {
+				return err
+			}
+			if !usable(next) || !scopeSubset(pending.Required, intersect(next.Scopes, allowedScopes(c))) {
+				return fail(auth.CodeAccessDenied, pending.Required...)
+			}
+			credential = p.credential(r, key, next)
+			return nil
+		}()
+		return inner
 	})
-	return credential, err
+	if inner != nil {
+		return nil, inner
+	}
+	if err != nil {
+		return nil, safe(ctx, err, auth.CodeProviderFailed)
+	}
+	return credential, nil
 }
 
 // processLogins holds pending logins in the creating Provider.
@@ -1156,14 +1355,17 @@ func (p *Provider) Credential(ctx context.Context, r auth.Request) (auth.Credent
 			return auth.Credential{}, fail(auth.CodeCredentialUnavailable)
 		}
 	}
-	result, err := p.prepare(ctx, cloneRequest(r), "", nil, "", false, false, false)
+	result, err := p.prepare(ctx, cloneRequest(r), "", nil, "", false, false, false, "")
 	if err != nil {
 		return auth.Credential{}, err
 	}
 	return *result.Credential, nil
 }
 
-// Challenge drops the rejected token, then recovers without creating a login.
+// Challenge recovers without creating a login. A 401 first retires the
+// rejected token; its scope is only requested by the next acquisition. A 403
+// insufficient_scope keeps the token and its scope is a step-up requirement;
+// one the stored grant already records fails with access_denied.
 func (p *Provider) Challenge(ctx context.Context, r auth.Request, c auth.Challenge) (*auth.Credential, error) {
 	if err := bounded(ctx); err != nil {
 		return nil, err
@@ -1183,8 +1385,12 @@ func (p *Provider) Challenge(ctx context.Context, r auth.Request, c auth.Challen
 	} else if len(r.Binding) != 0 {
 		return nil, fail(auth.CodeInvalidConfiguration)
 	}
-	// A 401 makes the rejected token stale; a 403 keeps it and the scope
-	// requirement drives step-up.
+	// A 401 retires the rejected token before any other decision; its scope
+	// is only requested next. A 403 keeps the token and its scope drives step-up.
+	var rejected string
+	if owner, ok := c.Attempt.(attempted); ok {
+		rejected = owner.token
+	}
 	if owner, ok := c.Attempt.(attempted); ok && c.StatusCode == http.StatusUnauthorized {
 		err := p.options.Store.Coordinate(ctx, owner.key, func(ctx context.Context) error {
 			current, err := p.options.Store.Load(ctx, owner.key)
@@ -1202,7 +1408,7 @@ func (p *Provider) Challenge(ctx context.Context, r auth.Request, c auth.Challen
 			return nil, safe(ctx, err, auth.CodeProviderFailed)
 		}
 	}
-	result, err := p.prepare(ctx, cloneRequest(r), header, nil, "", c.StatusCode == http.StatusForbidden, false, false)
+	result, err := p.prepare(ctx, cloneRequest(r), header, nil, "", c.StatusCode == http.StatusForbidden, false, false, rejected)
 	if err != nil {
 		return nil, err
 	}
@@ -1215,7 +1421,8 @@ func (p *Provider) Challenge(ctx context.Context, r auth.Request, c auth.Challen
 // issuer's metadata when none is persisted. It never runs protected-resource
 // discovery or creates a login. Only a store miss or host policy refusal
 // yields nil, an anonymous attempt; a known binding whose grant cannot be
-// renewed (including one needing consent) fails the operation.
+// renewed (including one needing consent) fails the operation. Host
+// RequiredScopes outside the ceiling fail with access_denied before any request.
 func (p *Provider) PreemptiveCredential(ctx context.Context, r auth.Request) (*auth.Credential, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -1234,6 +1441,10 @@ func (p *Provider) PreemptiveCredential(ctx context.Context, r auth.Request) (*a
 	}
 	if !cached {
 		return nil, nil
+	}
+	// The ceiling decision is local, before any renewal or metadata request.
+	if !scopeSubset(config.RequiredScopes, allowedScopes(config)) {
+		return nil, fail(auth.CodeAccessDenied, config.RequiredScopes...)
 	}
 	key := p.key(r, config)
 	record, err := p.options.Store.Load(ctx, key)
@@ -1254,13 +1465,13 @@ func (p *Provider) PreemptiveCredential(ctx context.Context, r auth.Request) (*a
 			return nil, safe(ctx, err, auth.CodeDiscoveryFailed)
 		}
 	}
-	result, err, stale := p.obtain(ctx, r, config, m, false, false, false, false)
+	result, err, stale := p.obtain(ctx, r, config, m, false, false, false, false, "")
 	if stale {
 		// Refetch only the stored issuer's metadata once, persist it and retry.
 		if config, m, err = p.resolveMetadata(ctx, config); err != nil {
 			return nil, safe(ctx, err, auth.CodeDiscoveryFailed)
 		}
-		result, err, _ = p.obtain(ctx, r, config, m, true, false, false, false)
+		result, err, _ = p.obtain(ctx, r, config, m, true, false, false, false, "")
 	}
 	return result.Credential, err
 }

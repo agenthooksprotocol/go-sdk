@@ -44,13 +44,16 @@ const discoveryLimit = 1 << 20
 
 var errDiscovery = errors.New("oauth discovery failed")
 
-func (p *Provider) resolve(ctx context.Context, request auth.Request, challenge string) (ClientConfig, metadata, error) {
+// discover selects the client for a request: protected-resource discovery
+// (skipped for an explicit OAuth preset), then host client selection. It
+// fetches no issuer metadata, so the caller decides the scope ceiling first.
+func (p *Provider) discover(ctx context.Context, request auth.Request, challenge string) (ClientConfig, error) {
 	target, err := auth.NormalizeTarget(request)
 	if err != nil {
-		return ClientConfig{}, metadata{}, err
+		return ClientConfig{}, err
 	}
 	if target.Kind() == auth.BindingBearer || !discoveryHTTPS(request.Destination) {
-		return ClientConfig{}, metadata{}, fail(auth.CodeUnsupportedBinding)
+		return ClientConfig{}, fail(auth.CodeUnsupportedBinding)
 	}
 	preset, explicit := target.OAuth()
 	var resource protectedResource
@@ -61,7 +64,7 @@ func (p *Provider) resolve(ctx context.Context, request auth.Request, challenge 
 	} else {
 		hint, err := resourceMetadataHint(challenge)
 		if err != nil {
-			return ClientConfig{}, metadata{}, fail(auth.CodeDiscoveryFailed)
+			return ClientConfig{}, fail(auth.CodeDiscoveryFailed)
 		}
 		candidates := []string{hint}
 		if hint == "" {
@@ -72,7 +75,7 @@ func (p *Provider) resolve(ctx context.Context, request auth.Request, challenge 
 			var candidate protectedResource
 			ok, err := fetchDiscovery(ctx, &p.client, func(ctx context.Context, raw string) error { return p.check(ctx, raw, Metadata) }, location, &candidate)
 			if err != nil {
-				return ClientConfig{}, metadata{}, safe(ctx, err, auth.CodeDiscoveryFailed)
+				return ClientConfig{}, safe(ctx, err, auth.CodeDiscoveryFailed)
 			}
 			if !ok {
 				continue
@@ -85,25 +88,25 @@ func (p *Provider) resolve(ctx context.Context, request auth.Request, challenge 
 			// RFC 9728 section 3.3 requires IDENTICAL source identifiers,
 			// independently of coverage and the host's trust decision.
 			if candidate.Resource != expected {
-				return ClientConfig{}, metadata{}, fail(auth.CodeDiscoveryFailed)
+				return ClientConfig{}, fail(auth.CodeDiscoveryFailed)
 			}
 			resource = candidate
 			found = true
 			break
 		}
 		if !found {
-			return ClientConfig{}, metadata{}, fail(auth.CodeDiscoveryFailed)
+			return ClientConfig{}, fail(auth.CodeDiscoveryFailed)
 		}
 	}
 	if !resourceCovers(resource.Resource, request.Destination) || len(resource.AuthorizationServers) == 0 {
-		return ClientConfig{}, metadata{}, fail(auth.CodeDiscoveryFailed)
+		return ClientConfig{}, fail(auth.CodeDiscoveryFailed)
 	}
 	if resource.BearerMethods != nil && !contains(resource.BearerMethods, "header") {
-		return ClientConfig{}, metadata{}, fail(auth.CodeUnsupportedBinding)
+		return ClientConfig{}, fail(auth.CodeUnsupportedBinding)
 	}
 	for _, issuer := range resource.AuthorizationServers {
 		if !discoveryIssuer(issuer) {
-			return ClientConfig{}, metadata{}, fail(auth.CodeDiscoveryFailed)
+			return ClientConfig{}, fail(auth.CodeDiscoveryFailed)
 		}
 	}
 	issuers := append([]string(nil), resource.AuthorizationServers...)
@@ -112,16 +115,16 @@ func (p *Provider) resolve(ctx context.Context, request auth.Request, challenge 
 	}
 	config, err := p.options.SelectClient(ctx, cloneRequest(request), append([]string(nil), issuers...), resource.Resource)
 	if err != nil {
-		return ClientConfig{}, metadata{}, safe(ctx, err, auth.CodeUntrustedDestination)
+		return ClientConfig{}, safe(ctx, err, auth.CodeUntrustedDestination)
 	}
 	config = cloneConfig(config)
 	if !validConfig(config) || config.Resource != resource.Resource || !contains(issuers, config.Issuer) {
-		return ClientConfig{}, metadata{}, fail(auth.CodeInvalidConfiguration)
+		return ClientConfig{}, fail(auth.CodeInvalidConfiguration)
 	}
 	if explicit && (config.Issuer != preset.Issuer || config.ClientID != preset.ClientID || config.Flow != preset.Flow || !sameScopes(config.Scopes, preset.Scopes)) {
-		return ClientConfig{}, metadata{}, fail(auth.CodeInvalidConfiguration)
+		return ClientConfig{}, fail(auth.CodeInvalidConfiguration)
 	}
-	return p.resolveMetadata(ctx, config)
+	return config, nil
 }
 
 // resolveMetadata refreshes issuer capabilities without revisiting trusted PRM.

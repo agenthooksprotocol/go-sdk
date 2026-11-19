@@ -651,9 +651,12 @@ func TestLifecycleStepUpKeepsPreviousGrant(t *testing.T) {
 	original := p.options.SelectClient
 	p.options.SelectClient = func(ctx context.Context, r auth.Request, issuers []string, resource string) (ClientConfig, error) {
 		c, err := original(ctx, r, issuers, resource)
-		c.AllowedScopes = []string{"admin"}
+		// Requested scopes stay within the ceiling (invalid_configuration otherwise).
+		c.Scopes, c.AllowedScopes = []string{"admin"}, []string{"admin"}
 		return c, err
 	}
+	// The preset names events, so the narrowed caller uses the learned binding.
+	r.Binding = nil
 	prepared, err := p.Prepare(budget(t), r, "admin")
 	if err != nil || prepared.Login == nil || !slices.Equal(merge(loginScopes(prepared.Login)), []string{"admin", "events"}) {
 		t.Fatalf("step-up consent dropped the previous grant: %v", err)

@@ -225,11 +225,14 @@ func TestPendingLoginKeepsCreatingCeiling(t *testing.T) {
 		t.Fatalf("narrower caller's login: %v", err)
 	}
 	f.mode.Store("admin-scope")
-	credential, err := p.Complete(budget(t), r, callback(broad.Login, "code"))
-	if err != nil {
-		t.Fatal(err)
+	// The broad login's required admin is outside the current ceiling: the
+	// completion is refused with its stored required set, the grant still saved.
+	_, err = p.Complete(budget(t), r, callback(broad.Login, "code"))
+	assertCode(t, err, auth.CodeAccessDenied)
+	if got := errorScopes(t, err); !slices.Equal(got, []string{"admin"}) {
+		t.Fatalf("completion refusal scopes = %v", got)
 	}
-	record, _ := f.store.Load(budget(t), credential.Attempt.(attempted).key)
+	record, _ := f.store.Load(budget(t), p.key(r, mustConfig(t, p, r)))
 	if !sameScopes(record.Scopes, []string{"events", "admin"}) {
 		t.Fatalf("completion not bounded by the creating ceiling: %v", record.Scopes)
 	}

@@ -22,10 +22,12 @@ const (
 )
 
 // ClientConfig is selected by local policy, never by an advertisement alone.
-// Scopes are requested scopes. AllowedScopes, the ceiling, defaults to Scopes;
-// it governs what the SDK requests and records, not what an issued token can
-// do (enforce that in ValidateToken). RequiredScopes are explicit operation
-// requirements. ClientSecret is a
+// Scopes are requested scopes, never required; they must lie within
+// AllowedScopes or the configuration is invalid (invalid_configuration).
+// AllowedScopes, the ceiling, defaults to Scopes; it governs what the SDK
+// requests and records, not what an issued token can do (enforce that in
+// ValidateToken). RequiredScopes are host-required operation scopes; one
+// outside the ceiling refuses the operation with access_denied. ClientSecret is a
 // runtime secret, not registration data. Its formatting is always redacted.
 //
 // A non-empty ClientID is a pre-registered client and always wins. With an
@@ -165,8 +167,12 @@ type BindingMetadata struct {
 type PendingRecord struct {
 	State, Verifier, RedirectURI string
 	// Scopes are requested; Ceiling bounds the grant recorded on completion.
-	Scopes, Ceiling []string
-	ExpiresAt       time.Time
+	// Required is the login's required set: the host RequiredScopes at
+	// prepare time plus the explicit and challenged scopes it was prepared
+	// with. Completion succeeds only when the grant, within the current
+	// ceiling, covers it.
+	Scopes, Ceiling, Required []string
+	ExpiresAt                 time.Time
 	// ClientID is the client the login completes with, for DCR the client
 	// registered for this login.
 	ClientID string
@@ -236,6 +242,10 @@ type Provider struct {
 	logins Store
 	// prepared counts successful host prepares per endpoint (*atomic.Uint64).
 	prepared sync.Map
+	// hints holds process-local 401 challenge scopes per grant key, requested
+	// by that grant's next acquisition or login. They are never required.
+	hintsMu sync.Mutex
+	hints   map[string][]string
 }
 
 // PendingLogin describes a pending login. Only the explicit AuthorizationURL
