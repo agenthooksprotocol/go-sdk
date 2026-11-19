@@ -3,14 +3,12 @@ package oauth
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -26,18 +24,21 @@ const (
 	sourceDCR           = "dcr"
 )
 
-func (p *Provider) registrationKey(c ClientConfig) string {
-	redirect := ""
-	if c.Flow == pkceFlow {
-		redirect = c.RedirectURI
+// identity is the grant key's client identity: the configured client source,
+// never an issued client_id.
+func identity(c ClientConfig) string {
+	switch c.source {
+	case sourceCIMD:
+		return "cimd:" + c.ClientID
+	case sourceDCR:
+		return "dcr"
 	}
-	return frame("ahp.oauth.registration:", p.options.Namespace, c.Issuer, c.Flow, redirect)
+	return "preregistered:" + c.ClientID
 }
 
-// requestDigest identifies the host registration policy a record was made with.
-func requestDigest(policy *RegistrationPolicy) string {
-	sum := sha256.Sum256([]byte(frame("ahp.oauth.registration-request:", policy.ClientName, policy.SoftwareID, policy.SoftwareVersion, strings.Join(merge(policy.Scopes), " "), policy.InitialAccessTokenRef)))
-	return hex.EncodeToString(sum[:])
+// registrationKey locates the client-credentials registration for an issuer.
+func (p *Provider) registrationKey(c ClientConfig) string {
+	return frame("ahp.oauth.registration:", p.options.Namespace, c.Issuer)
 }
 
 // validDocumentURL: https, a path, no userinfo, fragment or dot segments.
@@ -54,6 +55,49 @@ func validDocumentURL(raw string) bool {
 	return true
 }
 
+// loopback reports a literal loopback IP host; a name such as localhost is not.
+func loopback(host string) bool {
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// validRedirect accepts https, or http only to a literal loopback IP (RFC 8252).
+func validRedirect(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || !authutil.ValidURL(raw, true) || u.RawQuery != "" || u.ForceQuery {
+		return false
+	}
+	return u.Scheme == "https" || (u.Scheme == "http" && loopback(u.Hostname()))
+}
+
+// redirectMatches compares a login's redirect with a declared CIMD redirect
+// URI: exactly, or for a loopback http redirect without userinfo, without the
+// port, as authorization servers do (RFC 8252 section 7.3).
+func redirectMatches(declared, redirect string) bool {
+	if declared == redirect {
+		return true
+	}
+	d, err := url.Parse(declared)
+	r, err2 := url.Parse(redirect)
+	if err != nil || err2 != nil || r.Scheme != "http" || d.Scheme != "http" || r.User != nil || d.User != nil || !loopback(r.Hostname()) {
+		return false
+	}
+	return d.Hostname() == r.Hostname() && d.EscapedPath() == r.EscapedPath() && d.RawQuery == r.RawQuery && d.ForceQuery == r.ForceQuery && d.Fragment == r.Fragment
+}
+
+// documentAccepts checks a selected CIMD client's URL and the login redirect.
+func documentAccepts(document *MetadataDocument, redirect string) bool {
+	if document == nil || !validDocumentURL(document.URL) {
+		return false
+	}
+	for _, declared := range document.RedirectURIs {
+		if redirectMatches(declared, redirect) {
+			return true
+		}
+	}
+	return false
+}
+
 // recorded keeps a binding's recorded CIMD/DCR selection while current host
 // policy still permits it, whatever the issuer metadata now advertises.
 func recorded(c ClientConfig, b *BindingMetadata) ClientConfig {
@@ -68,7 +112,7 @@ func recorded(c ClientConfig, b *BindingMetadata) ClientConfig {
 	case b.Source == sourceCIMD && c.Flow == pkceFlow && c.ClientIDMetadataDocument != nil && c.ClientIDMetadataDocument.URL == b.Config.ClientID:
 		c.ClientID, c.ClientSecret, c.TokenAuthMethod, c.source = b.Config.ClientID, "", "none", sourceCIMD
 	case b.Source == sourceDCR && c.Registration != nil:
-		c.ClientID, c.ClientSecret, c.source = b.Config.ClientID, "", sourceDCR
+		c.ClientSecret, c.source = "", sourceDCR
 	}
 	return c
 }
@@ -89,7 +133,8 @@ func (p *Provider) choose(ctx context.Context, r auth.Request, c ClientConfig, m
 	}
 	document := c.ClientIDMetadataDocument
 	if c.Flow == pkceFlow && document != nil && bool(m.CIMDSupported) {
-		if !validDocumentURL(document.URL) || !contains(document.RedirectURIs, c.RedirectURI) {
+		// Without a redirect yet, login checks it.
+		if !validDocumentURL(document.URL) || (c.RedirectURI != "" && !documentAccepts(document, c.RedirectURI)) {
 			return c, fail(auth.CodeInvalidConfiguration)
 		}
 		c.ClientID, c.ClientSecret, c.TokenAuthMethod, c.source = document.URL, "", "none", sourceCIMD
@@ -105,6 +150,9 @@ func (p *Provider) choose(ctx context.Context, r auth.Request, c ClientConfig, m
 		return c, fail(auth.CodeUntrustedDestination)
 	}
 	c.ClientSecret, c.source = "", sourceDCR
+	if c.Flow == pkceFlow {
+		c.TokenAuthMethod = "none"
+	}
 	return c, nil
 }
 
@@ -122,27 +170,13 @@ func secretMethod(m metadata) string {
 	return ""
 }
 
-func blocked(record *Record, digest string) bool {
-	failure := record.RegistrationFailure
-	return failure != nil && failure.RequestDigest == digest && time.Now().Before(failure.NextAttempt)
-}
-
-// renewalDue reports a known secret expiry inside the proactive renewal
-// margin, min(10% of its lifetime since local registration, RenewalMargin).
-func (p *Provider) renewalDue(reg *RegistrationRecord) bool {
-	if reg.SecretExpiresAt.IsZero() {
-		return false
-	}
-	margin := min(reg.SecretExpiresAt.Sub(reg.RegisteredAt)/10, p.options.RenewalMargin)
-	return !time.Now().Before(reg.SecretExpiresAt.Add(-margin))
-}
-
-// registered resolves the dynamic registration for a DCR acquisition under
-// the registration-key lock: it reuses a usable record, or registers when
-// permitted. Only interactive (host Prepare) registers a PKCE client or
-// bypasses the failed marker.
-func (p *Provider) registered(ctx context.Context, c ClientConfig, m metadata, interactive, force bool) (ClientConfig, error) {
-	key, digest := p.registrationKey(c), requestDigest(c.Registration)
+// registered resolves the client-credentials registration under the
+// registration-key lock: it reuses a usable record, or registers once. Only a
+// host Prepare with ForceRegistration (force) replaces a usable record; a host
+// Prepare (interactive) and the one re-registration after invalid_client
+// (bypass) ignore the backoff.
+func (p *Provider) registered(ctx context.Context, c ClientConfig, m metadata, interactive, bypass, force bool) (ClientConfig, error) {
+	key := p.registrationKey(c)
 	err := p.options.Store.Coordinate(ctx, key, func(ctx context.Context) error {
 		record, err := p.options.Store.Load(ctx, key)
 		if err != nil {
@@ -151,38 +185,18 @@ func (p *Provider) registered(ctx context.Context, c ClientConfig, m metadata, i
 		if record == nil {
 			record = &Record{}
 		}
-		if interactive && record.RegistrationFailure != nil {
-			// A host prepare clears the failed marker, restarting the backoff.
-			next := cloneRecord(record)
-			next.RegistrationFailure, next.Generation = nil, randomID()
-			if err := p.save(ctx, key, record.Generation, next); err != nil {
-				return err
-			}
-			record = next
-		}
-		if reg := record.Registration; reg != nil && (force || reg.RequestDigest != digest) {
-			// Policy changed (or the host forces it): compare-and-delete.
-			next := cloneRecord(record)
-			next.Registration, next.Generation = nil, randomID()
-			if err := p.replace(ctx, key, record, next); err != nil {
-				return err
-			}
-			record = next
-		}
-		if reg := record.Registration; reg != nil && (reg.SecretExpiresAt.IsZero() || time.Now().Before(reg.SecretExpiresAt)) {
-			if secret, ok := p.secret(ctx, c, reg); ok {
+		if reg := record.Registration; reg != nil && (reg.SecretExpiresAt.IsZero() || time.Now().Before(reg.SecretExpiresAt)) && !force {
+			if secret, ok := p.secret(ctx, reg); ok {
 				c = use(c, reg, secret)
-				c.renew = c.Flow != pkceFlow && p.renewalDue(reg)
+				c.failing = record.RegistrationFailure != nil
 				return nil
 			}
 		}
-		if c.Flow == pkceFlow && !interactive {
-			return fail(auth.CodeInteractionRequired)
+		if failure := record.RegistrationFailure; !interactive && !bypass && failure != nil && time.Now().Before(failure.NextAttempt) {
+			return fail(failure.Code)
 		}
-		if !interactive && blocked(record, digest) {
-			return fail(auth.CodeCredentialUnavailable)
-		}
-		c, err = p.register(ctx, key, record, c, m, digest)
+		c, err = p.register(ctx, key, record, c, m)
+		c.failing = c.registered != "" && record.RegistrationFailure != nil
 		return err
 	})
 	if err != nil {
@@ -191,45 +205,13 @@ func (p *Provider) registered(ctx context.Context, c ClientConfig, m metadata, i
 	return c, nil
 }
 
-// renew proactively re-registers a client-credentials client whose secret
-// expires within the renewal margin, after a successful acquisition with the
-// current registration. It is detached best-effort work bounded by its own
-// commit budget: it holds the registration lock, re-checks that the record is
-// still the one used and still due, and updates the failed marker on failure,
-// but never affects the operation's result, error or wait.
-func (p *Provider) renew(ctx context.Context, c ClientConfig, m metadata, interactive bool) {
-	if c.source != sourceDCR || c.Flow == pkceFlow || !c.renew {
-		return
-	}
-	detached, cancel := persisting(ctx)
-	go func() {
-		defer cancel()
-		key, digest := p.registrationKey(c), requestDigest(c.Registration)
-		p.options.Store.Coordinate(detached, key, func(ctx context.Context) error {
-			record, err := p.options.Store.Load(ctx, key)
-			if err != nil || record == nil || record.Registration == nil {
-				return nil
-			}
-			reg := record.Registration
-			if reg.Generation != c.registered || reg.RequestDigest != digest || !p.renewalDue(reg) || !time.Now().Before(reg.SecretExpiresAt) || (!interactive && blocked(record, digest)) {
-				return nil
-			}
-			_, err = p.register(ctx, key, record, c, m, digest)
-			return err
-		})
-	}()
-}
-
 func use(c ClientConfig, reg *RegistrationRecord, secret string) ClientConfig {
-	c.ClientID, c.ClientSecret, c.TokenAuthMethod, c.registered, c.renew = reg.ClientID, secret, reg.TokenAuthMethod, reg.Generation, false
+	c.ClientID, c.ClientSecret, c.TokenAuthMethod, c.registered = reg.ClientID, secret, reg.TokenAuthMethod, reg.Generation
 	return c
 }
 
-// secret resolves a confidential registration's secret; public clients have none.
-func (p *Provider) secret(ctx context.Context, c ClientConfig, reg *RegistrationRecord) (string, bool) {
-	if c.Flow == pkceFlow {
-		return "", reg.SecretRef == ""
-	}
+// secret resolves a registration's client secret through the host hook.
+func (p *Provider) secret(ctx context.Context, reg *RegistrationRecord) (string, bool) {
 	if p.options.Secrets == nil || reg.SecretRef == "" {
 		return "", false
 	}
@@ -249,9 +231,10 @@ func (p *Provider) replace(ctx context.Context, key string, old, next *Record) e
 	return nil
 }
 
-// drop compare-and-deletes one rejected registration generation and, when
-// mark is set, records a failed attempt.
-func (p *Provider) drop(ctx context.Context, c ClientConfig, mark bool) error {
+// drop compare-and-deletes the client-credentials registration generation a
+// token endpoint rejected with invalid_client. A repeated rejection (after the
+// one re-registration) counts as a failed registration for the backoff.
+func (p *Provider) drop(ctx context.Context, c ClientConfig, repeated bool) error {
 	key := p.registrationKey(c)
 	return p.options.Store.Coordinate(ctx, key, func(ctx context.Context) error {
 		record, err := p.options.Store.Load(ctx, key)
@@ -261,25 +244,45 @@ func (p *Provider) drop(ctx context.Context, c ClientConfig, mark bool) error {
 		if record == nil {
 			record = &Record{}
 		}
-		next := cloneRecord(record)
-		if reg := record.Registration; reg != nil && reg.Generation == c.registered {
-			next.Registration = nil
-		} else if !mark {
+		current := record.Registration != nil && record.Registration.Generation == c.registered
+		if !current && !repeated {
 			return nil
 		}
-		if mark {
-			next.RegistrationFailure = p.failure(record, requestDigest(c.Registration), 0)
+		next := cloneRecord(record)
+		if current {
+			next.Registration = nil
+		}
+		if repeated {
+			next.RegistrationFailure = p.failure(record, auth.CodeCredentialUnavailable, 0)
 		}
 		next.Generation = randomID()
 		return p.replace(ctx, key, record, next)
 	})
 }
 
-// failure is the next failed marker: exponential backoff from the attempt
-// count, or a later Retry-After, capped at the host maximum.
-func (p *Provider) failure(record *Record, digest string, retryAfter time.Duration) *RegistrationFailure {
+// recovered clears the failure count after a token request with registration
+// generation c.registered succeeded.
+func (p *Provider) recovered(ctx context.Context, c ClientConfig) error {
+	key := p.registrationKey(c)
+	return p.options.Store.Coordinate(ctx, key, func(ctx context.Context) error {
+		record, err := p.options.Store.Load(ctx, key)
+		if err != nil {
+			return safe(ctx, err, auth.CodeProviderFailed)
+		}
+		if record == nil || record.RegistrationFailure == nil || record.Registration == nil || record.Registration.Generation != c.registered {
+			return nil
+		}
+		next := cloneRecord(record)
+		next.RegistrationFailure, next.Generation = nil, randomID()
+		return p.save(ctx, key, record.Generation, next)
+	})
+}
+
+// failure is the next backoff: exponential from the attempt count, or a later
+// Retry-After, capped at the host maximum.
+func (p *Provider) failure(record *Record, code auth.Code, retryAfter time.Duration) *RegistrationFailure {
 	attempts := 1
-	if previous := record.RegistrationFailure; previous != nil && previous.RequestDigest == digest {
+	if previous := record.RegistrationFailure; previous != nil {
 		attempts = previous.Attempts + 1
 	}
 	wait := p.options.RegistrationBackoff
@@ -287,29 +290,28 @@ func (p *Provider) failure(record *Record, digest string, retryAfter time.Durati
 		wait *= 2
 	}
 	wait = min(max(wait, retryAfter), p.options.RegistrationBackoffMax)
-	now := time.Now()
-	return &RegistrationFailure{RequestDigest: digest, FailedAt: now, NextAttempt: now.Add(wait), Attempts: attempts}
+	return &RegistrationFailure{Code: code, Attempts: attempts, NextAttempt: time.Now().Add(wait)}
 }
 
-// register sends one RFC 7591 request and persists an accepted registration
-// by compare-and-set; every failed outcome updates the failed marker.
-func (p *Provider) register(ctx context.Context, key string, record *Record, c ClientConfig, m metadata, digest string) (ClientConfig, error) {
-	// A recorded DCR selection skips choose, so recheck confidential feasibility.
+// registration builds an RFC 7591 request for c and resolves its initial
+// access token. A PKCE request registers the login's exact redirect.
+func (p *Provider) registration(ctx context.Context, c ClientConfig, m metadata) (map[string]any, string, error) {
 	if m.RegistrationEndpoint == "" || (c.Flow != pkceFlow && (p.options.Secrets == nil || secretMethod(m) == "")) {
-		return c, fail(auth.CodeCredentialUnavailable)
+		// A recorded DCR selection skips choose: recheck feasibility.
+		return nil, "", fail(auth.CodeCredentialUnavailable)
 	}
 	if err := p.check(ctx, m.RegistrationEndpoint, Registration); err != nil {
-		return c, err
+		return nil, "", err
 	}
 	policy := c.Registration
 	initial := ""
 	if policy.InitialAccessTokenRef != "" {
 		if p.options.Secrets == nil {
-			return c, fail(auth.CodeCredentialUnavailable)
+			return nil, "", fail(auth.CodeCredentialUnavailable)
 		}
 		token, err := p.options.Secrets.Resolve(ctx, policy.InitialAccessTokenRef)
 		if err != nil || !authutil.ValidBearer(token) {
-			return c, safe(ctx, err, auth.CodeCredentialUnavailable)
+			return nil, "", safe(ctx, err, auth.CodeCredentialUnavailable)
 		}
 		initial = token
 	}
@@ -317,6 +319,9 @@ func (p *Provider) register(ctx context.Context, key string, record *Record, c C
 	method := "none"
 	if c.Flow == pkceFlow {
 		request["redirect_uris"] = []string{c.RedirectURI}
+		if u, _ := url.Parse(c.RedirectURI); u.Scheme == "http" {
+			request["application_type"] = "native"
+		}
 		request["grant_types"] = []string{"authorization_code", "refresh_token"}
 		request["response_types"] = []string{"code"}
 	} else {
@@ -329,6 +334,31 @@ func (p *Provider) register(ctx context.Context, key string, record *Record, c C
 			request[name] = value
 		}
 	}
+	return request, initial, nil
+}
+
+// registerLogin registers a public PKCE client for one login and persists
+// nothing: the login holds the issued client_id until completion stores it
+// with the tokens.
+func (p *Provider) registerLogin(ctx context.Context, c ClientConfig, m metadata) (string, error) {
+	request, initial, err := p.registration(ctx, c, m)
+	if err != nil {
+		return "", err
+	}
+	reg, _, _, err := p.send(ctx, m.RegistrationEndpoint, initial, request, c.Flow)
+	if err != nil {
+		return "", err
+	}
+	return reg.ClientID, nil
+}
+
+// register sends one client-credentials registration and persists an
+// accepted one by compare-and-set; a failure records the backoff.
+func (p *Provider) register(ctx context.Context, key string, record *Record, c ClientConfig, m metadata) (ClientConfig, error) {
+	request, initial, err := p.registration(ctx, c, m)
+	if err != nil {
+		return c, err
+	}
 	// Once written, a registration may have been processed: receive it, store
 	// its secret and persist it detached from caller cancellation, so a cancel
 	// never orphans a client; the caller still sees the cancellation.
@@ -338,7 +368,7 @@ func (p *Provider) register(ctx context.Context, key string, record *Record, c C
 	}
 	defer cancel()
 	reg, secret, retryAfter, err := p.send(persist, m.RegistrationEndpoint, initial, request, c.Flow)
-	if err == nil && secret != "" {
+	if err == nil {
 		reg.SecretRef = randomID()
 		if storeErr := p.options.Secrets.Store(persist, reg.SecretRef, secret); storeErr != nil {
 			err = safe(persist, storeErr, auth.CodeProviderFailed)
@@ -347,21 +377,24 @@ func (p *Provider) register(ctx context.Context, key string, record *Record, c C
 	if err != nil {
 		if persist.Err() == nil {
 			failed := cloneRecord(record)
-			failed.RegistrationFailure, failed.Generation = p.failure(record, digest, retryAfter), randomID()
+			code := auth.CodeProviderFailed
+			if classified := auth.Classify(err); classified != nil {
+				code = classified.Code
+			}
+			failed.RegistrationFailure, failed.Generation = p.failure(record, code, retryAfter), randomID()
 			p.save(persist, key, generation(record), failed)
 		}
 		return c, err
 	}
-	reg.RequestDigest, reg.Generation, reg.RegisteredAt = digest, randomID(), time.Now()
+	reg.Generation = randomID()
 	next := cloneRecord(record)
-	next.Registration, next.RegistrationFailure, next.Generation = reg, nil, randomID()
+	// The failure count survives until a token request with this client succeeds.
+	next.Registration, next.Generation = reg, randomID()
 	if err := p.replace(persist, key, record, next); err != nil {
 		// Lost the compare-and-set: delete our fresh secret and use the winner's.
-		if reg.SecretRef != "" {
-			p.options.Secrets.Delete(persist, reg.SecretRef)
-		}
-		if winner, loadErr := p.options.Store.Load(persist, key); loadErr == nil && winner != nil && winner.Registration != nil && winner.Registration.RequestDigest == digest {
-			if secret, ok := p.secret(persist, c, winner.Registration); ok {
+		p.options.Secrets.Delete(persist, reg.SecretRef)
+		if winner, loadErr := p.options.Store.Load(persist, key); loadErr == nil && winner != nil && winner.Registration != nil {
+			if secret, ok := p.secret(persist, winner.Registration); ok {
 				return use(c, winner.Registration, secret), nil
 			}
 		}
@@ -420,24 +453,25 @@ func (p *Provider) send(ctx context.Context, endpoint, initial string, body map[
 }
 
 // accept validates a 200/201 registration object against the request.
-// Management fields, echoed scope and unknown members are ignored.
+// Management fields, echoed scope and unknown members are ignored, and so are
+// a public PKCE client's secret and its expiry.
 func accept(fields map[string]json.RawMessage, request map[string]any, flow string) (*RegistrationRecord, string, bool) {
+	// A JSON null is never absent: an echoed field is a value or missing.
 	field := func(name string, value any) bool {
 		raw, present := fields[name]
-		return !present || json.Unmarshal(raw, value) == nil
+		return !present || (string(bytes.TrimSpace(raw)) != "null" && json.Unmarshal(raw, value) == nil)
 	}
 	var clientID, method, secret string
 	var redirects, grants []string
 	if json.Unmarshal(fields["client_id"], &clientID) != nil || clientID == "" || !field("redirect_uris", &redirects) || !field("grant_types", &grants) || !field("token_endpoint_auth_method", &method) {
 		return nil, "", false
 	}
-	requestedRedirects, _ := request["redirect_uris"].([]string)
 	requestedMethod := request["token_endpoint_auth_method"].(string)
 	wantGrant := "client_credentials"
 	if flow == pkceFlow {
 		wantGrant = "authorization_code"
 	}
-	if _, ok := fields["redirect_uris"]; ok && !slices.Equal(merge(redirects), merge(requestedRedirects)) {
+	if requested, _ := request["redirect_uris"].([]string); len(requested) == 1 && fields["redirect_uris"] != nil && !contains(redirects, requested[0]) {
 		return nil, "", false
 	}
 	if _, ok := fields["grant_types"]; ok && !contains(grants, wantGrant) {
@@ -446,12 +480,13 @@ func accept(fields map[string]json.RawMessage, request map[string]any, flow stri
 	if _, ok := fields["token_endpoint_auth_method"]; ok && method != requestedMethod {
 		return nil, "", false
 	}
-	if raw, ok := fields["client_secret"]; flow == pkceFlow && ok {
-		return nil, "", false
-	} else if flow != pkceFlow && (json.Unmarshal(raw, &secret) != nil || secret == "") {
+	reg := &RegistrationRecord{ClientID: clientID, TokenAuthMethod: requestedMethod}
+	if flow == pkceFlow {
+		return reg, "", true
+	}
+	if json.Unmarshal(fields["client_secret"], &secret) != nil || secret == "" {
 		return nil, "", false
 	}
-	reg := &RegistrationRecord{ClientID: clientID, TokenAuthMethod: requestedMethod, RedirectURIs: requestedRedirects, GrantTypes: grants}
 	if raw, ok := fields["client_secret_expires_at"]; ok {
 		seconds, err := strconv.ParseInt(string(raw), 10, 64)
 		if err != nil || seconds < 0 {

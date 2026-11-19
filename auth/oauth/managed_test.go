@@ -322,21 +322,21 @@ func finishLogin(t *testing.T, p *Provider, r auth.Request, required ...string) 
 	return credential
 }
 
-// pendingRecord reads the stored login for r's grant.
-func pendingRecord(t *testing.T, f *fixture, p *Provider, r auth.Request) *PendingRecord {
+// pendingRecord reads the newest pending login for r's grant.
+func pendingRecord(t *testing.T, p *Provider, r auth.Request) *PendingRecord {
 	t.Helper()
 	config, _, cached, err := p.cachedBinding(budget(t), r)
 	if err != nil || !cached {
 		t.Fatalf("binding: %v", err)
 	}
-	record, err := f.store.Load(budget(t), p.key(r, config))
+	record, err := p.logins.Load(budget(t), pendingKey(p.key(r, config)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record == nil {
+	if record == nil || len(record.Pending) == 0 {
 		return nil
 	}
-	return record.Pending
+	return &record.Pending[len(record.Pending)-1]
 }
 func expire(t *testing.T, f *fixture, c auth.Credential) {
 	t.Helper()
@@ -361,18 +361,14 @@ func expire(t *testing.T, f *fixture, c auth.Credential) {
 	}
 }
 
-func TestManagedPKCECompletionAndPendingDedup(t *testing.T) {
+func TestManagedPKCECompletion(t *testing.T) {
 	f, p, r := setup(t, "authorization_code_pkce")
 	ctx := budget(t)
 	state, err := p.Prepare(ctx, r)
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := p.Prepare(ctx, r)
-	if err != nil || state.Login.AuthorizationURL() != again.Login.AuthorizationURL() {
-		t.Fatal("pending login was not shared")
-	}
-	pending := pendingRecord(t, f, p, r)
+	pending := pendingRecord(t, p, r)
 	u, _ := url.Parse(state.Login.AuthorizationURL())
 	q := u.Query()
 	digest := sha256.Sum256([]byte(pending.Verifier))
@@ -577,7 +573,7 @@ func TestManagedFailedRefreshCommitDoesNotReuseOldGeneration(t *testing.T) {
 	}
 }
 func TestManagedCallbackBindingAndNoImplicitConsent(t *testing.T) {
-	for _, change := range []string{"state", "redirect", "redirect-escape", "issuer", "duplicate"} {
+	for _, change := range []string{"state", "missing-state", "redirect", "redirect-escape", "issuer", "duplicate"} {
 		t.Run(change, func(t *testing.T) {
 			f, p, r := setup(t, "authorization_code_pkce")
 			ctx := budget(t)
@@ -593,6 +589,8 @@ func TestManagedCallbackBindingAndNoImplicitConsent(t *testing.T) {
 			switch change {
 			case "state":
 				q.Set("state", "wrong")
+			case "missing-state":
+				q.Del("state")
 			case "redirect":
 				redirect = "https://evil.example/callback"
 			case "redirect-escape":
@@ -603,7 +601,7 @@ func TestManagedCallbackBindingAndNoImplicitConsent(t *testing.T) {
 				q.Add("state", q.Get("state"))
 			}
 			_, err = p.Complete(ctx, r, redirect+"?"+q.Encode())
-			if change == "state" {
+			if change == "state" || change == "missing-state" {
 				assertCode(t, err, auth.CodeInteractionRequired)
 			} else {
 				assertCode(t, err, auth.CodeAccessDenied)
@@ -679,4 +677,22 @@ func TestManagedChallengeDiscoveryAndForeignAttempt(t *testing.T) {
 	assertCode(t, err, auth.CodeInvalidConfiguration)
 	_, err = p.Prepare(context.Background(), r)
 	assertCode(t, err, auth.CodeInvalidConfiguration)
+}
+
+// dumpStore serializes stored records whose key has prefix.
+func (f *fixture) dumpStore(t *testing.T, prefix string) map[string]string {
+	t.Helper()
+	f.store.mu.Lock()
+	defer f.store.mu.Unlock()
+	result := map[string]string{}
+	for key, record := range f.store.values {
+		if strings.HasPrefix(key, prefix) {
+			encoded, err := json.Marshal(record)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result[key] = string(encoded)
+		}
+	}
+	return result
 }

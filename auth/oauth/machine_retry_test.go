@@ -30,7 +30,7 @@ func TestClientCredentialsTransientReissueWithoutLogin(t *testing.T) {
 			if f.refreshCalls.Load() != 0 || f.tokenCalls.Load() != 3 {
 				t.Fatal("machine grant did not reissue noninteractively")
 			}
-			if anyPending(f.store) {
+			if anyPending(p) {
 				t.Fatal("machine failure allocated pending consent")
 			}
 		})

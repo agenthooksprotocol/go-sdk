@@ -16,21 +16,10 @@ type registrationFixture struct {
 	RegistrationKeys []struct {
 		ID    string `json:"id"`
 		Input struct {
-			Namespace, Issuer, Flow, Redirect string
+			Namespace, Issuer string
 		} `json:"input"`
 		RegistrationKey string `json:"registration_key"`
 	} `json:"registration_keys"`
-	Digests []struct {
-		ID    string `json:"id"`
-		Input struct {
-			ClientName            string   `json:"client_name"`
-			SoftwareID            string   `json:"software_id"`
-			SoftwareVersion       string   `json:"software_version"`
-			RegistrationScope     []string `json:"registration_scope"`
-			InitialAccessTokenRef string   `json:"initial_access_token_ref"`
-		} `json:"input"`
-		RequestDigest string `json:"request_digest"`
-	} `json:"registration_request_digests"`
 	Selection []struct {
 		ID    string `json:"id"`
 		Input struct {
@@ -49,6 +38,7 @@ type registrationFixture struct {
 			Source, Error string
 			ClientID      string `json:"client_id"`
 			Method        string `json:"token_endpoint_auth_method"`
+			Identity      string `json:"client_identity"`
 		} `json:"expect"`
 	} `json:"client_selection"`
 	Responses []struct {
@@ -83,19 +73,14 @@ func readRegistrationContract(t *testing.T) registrationFixture {
 	return fixture
 }
 
-func TestCanonicalRegistrationKeysAndDigests(t *testing.T) {
-	fixture := readRegistrationContract(t)
-	for _, vector := range fixture.RegistrationKeys {
+func TestCanonicalRegistrationKeys(t *testing.T) {
+	for _, vector := range readRegistrationContract(t).RegistrationKeys {
 		i := vector.Input
 		p := &Provider{options: Options{Namespace: i.Namespace}}
-		if got := p.registrationKey(ClientConfig{Issuer: i.Issuer, Flow: i.Flow, RedirectURI: i.Redirect}); got != vector.RegistrationKey {
-			t.Errorf("%s: registration key = %q; want %q", vector.ID, got, vector.RegistrationKey)
-		}
-	}
-	for _, vector := range fixture.Digests {
-		i := vector.Input
-		if got := requestDigest(&RegistrationPolicy{ClientName: i.ClientName, SoftwareID: i.SoftwareID, SoftwareVersion: i.SoftwareVersion, Scopes: i.RegistrationScope, InitialAccessTokenRef: i.InitialAccessTokenRef}); got != vector.RequestDigest {
-			t.Errorf("%s: digest = %q; want %q", vector.ID, got, vector.RequestDigest)
+		for _, flow := range []string{ccFlow, pkceFlow} {
+			if got := p.registrationKey(ClientConfig{Issuer: i.Issuer, Flow: flow, RedirectURI: "http://127.0.0.1:8765/callback"}); got != vector.RegistrationKey {
+				t.Errorf("%s: registration key = %q; want %q", vector.ID, got, vector.RegistrationKey)
+			}
 		}
 	}
 }
@@ -143,7 +128,7 @@ func TestCanonicalClientSelection(t *testing.T) {
 			prepared, err := p.Prepare(budget(t), r)
 			if vector.Expect.Error != "" {
 				assertCode(t, err, auth.Code(vector.Expect.Error))
-				if f.registerCalls.Load() != 0 || anyPending(f.store) {
+				if f.registerCalls.Load() != 0 || anyPending(p) {
 					t.Fatal("failed selection registered or created a login")
 				}
 				return
@@ -153,6 +138,10 @@ func TestCanonicalClientSelection(t *testing.T) {
 			}
 			if f.documentCalls.Load() != 0 {
 				t.Fatal("SDK fetched the client ID metadata document")
+			}
+			config, _, cached, err := p.cachedBinding(budget(t), r)
+			if err != nil || !cached || identity(config) != rewrite(vector.Expect.Identity) {
+				t.Fatalf("client identity = %q; want %q (%v)", identity(config), vector.Expect.Identity, err)
 			}
 			switch vector.Expect.Source {
 			case sourcePreregistered, sourceCIMD:
@@ -213,7 +202,7 @@ func TestCanonicalRegistrationResponses(t *testing.T) {
 				f.issued[id] = secret
 			})
 			p := f.provider()
-			_, err := p.Prepare(budget(t), f.request("backend"))
+			prepared, err := p.Prepare(budget(t), f.request("backend"))
 			sent, _ := json.Marshal(f.registrations[0].Body)
 			want, _ := json.Marshal(vector.Request)
 			if string(sent) != string(want) {
@@ -225,16 +214,21 @@ func TestCanonicalRegistrationResponses(t *testing.T) {
 				if record != nil && record.Registration != nil {
 					t.Fatal("rejected registration persisted")
 				}
-				if record == nil || record.RegistrationFailure == nil {
-					t.Fatal("failed registration left no backoff marker")
+				// Only client credentials keep a registration backoff.
+				if (record != nil && record.RegistrationFailure != nil) != (vector.Flow == ccFlow) || anyPending(p) {
+					t.Fatalf("failed registration persisted %+v", record)
 				}
 				return
 			}
 			if err != nil {
 				t.Fatal(err)
 			}
-			reg := record.Registration
-			if reg == nil || reg.ClientID != vector.Expect.Record.ClientID || (reg.SecretRef != "") != vector.Expect.Record.SecretRef || reg.SecretExpiresAt.IsZero() != (vector.Expect.Expiry == "none") || reg.RequestDigest != requestDigest(f.config.Registration) {
+			if vector.Flow == pkceFlow {
+				// A PKCE client lives in its login, never in a registration record.
+				if record != nil || loginClientID(t, prepared.Login) != vector.Expect.Record.ClientID || vector.Expect.Record.SecretRef || f.secrets.count() != 0 {
+					t.Fatalf("record = %+v", record)
+				}
+			} else if reg := record.Registration; reg == nil || reg.ClientID != vector.Expect.Record.ClientID || (reg.SecretRef != "") != vector.Expect.Record.SecretRef || reg.SecretExpiresAt.IsZero() != (vector.Expect.Expiry == "none") {
 				t.Fatalf("record = %+v", reg)
 			}
 			dump := f.dump(t)

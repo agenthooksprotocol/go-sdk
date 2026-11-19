@@ -92,7 +92,7 @@ func TestUnboundLookupAnonymousFallback(t *testing.T) {
 			if err != nil || credential != nil {
 				t.Fatalf("lookup did not fall back to anonymous: %v", err)
 			}
-			if f.metadataCalls.Load() != metadata || f.tokenCalls.Load() != tokens || anyPending(f.store) {
+			if f.metadataCalls.Load() != metadata || f.tokenCalls.Load() != tokens || anyPending(p) {
 				t.Fatal("lookup performed discovery, acquisition or login")
 			}
 		})
@@ -188,7 +188,7 @@ func TestUnreplayedChallengePreparesNextAttempt(t *testing.T) {
 					t.Fatalf("attempt %d: status %d", attempt, response.StatusCode)
 				}
 			}
-			if f.tokenCalls.Load() != 1 || anyPending(f.store) {
+			if f.tokenCalls.Load() != 1 || anyPending(p) {
 				t.Fatal("challenge handling did not acquire exactly once without login")
 			}
 		})

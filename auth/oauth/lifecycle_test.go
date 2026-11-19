@@ -15,13 +15,20 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// anyPending reports whether any stored record holds a pending login.
-func anyPending(s *memoryStore) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, record := range s.values {
-		if record.Pending != nil {
-			return true
+// anyPending reports whether p holds or stored any pending login.
+func anyPending(p *Provider) bool {
+	switch s := p.logins.(type) {
+	case *processLogins:
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return len(s.values) > 0
+	case *memoryStore:
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for _, record := range s.values {
+			if len(record.Pending) > 0 {
+				return true
+			}
 		}
 	}
 	return false
@@ -60,10 +67,10 @@ func TestLifecycleDeliveryNeverCreatesPendingLogin(t *testing.T) {
 	if cached != nil {
 		t.Fatal("lookup served a credential without a grant")
 	}
-	if anyPending(f.store) {
+	if anyPending(p) {
 		t.Fatal("delivery path created a pending login")
 	}
-	if prepared, err := p.Prepare(budget(t), r); err != nil || prepared.Login == nil || !anyPending(f.store) {
+	if prepared, err := p.Prepare(budget(t), r); err != nil || prepared.Login == nil || !anyPending(p) {
 		t.Fatal("explicit prepare did not create a stored login")
 	}
 }
@@ -88,7 +95,7 @@ func TestLifecycleStepUpRoundTrip(t *testing.T) {
 			_, err := p.Challenge(budget(t), r, challenge)
 			if flow == "authorization_code_pkce" {
 				assertCode(t, err, auth.CodeInteractionRequired)
-				if !slices.Equal(errorScopes(t, err), []string{"admin"}) || anyPending(f.store) {
+				if !slices.Equal(errorScopes(t, err), []string{"admin"}) || anyPending(p) {
 					t.Fatal("step-up error lost scopes or created a login")
 				}
 				prepared, err := p.Prepare(budget(t), r, errorScopes(t, err)...)
@@ -317,7 +324,7 @@ func TestLifecycleAcquisitionErrorsAreFlowSpecific(t *testing.T) {
 				want = auth.CodeInvalidConfiguration
 			}
 			assertCode(t, err, want)
-			if anyPending(f.store) {
+			if anyPending(p) {
 				t.Fatal("machine failure allocated interactive consent")
 			}
 		})
@@ -401,7 +408,7 @@ func TestLifecycleCompletionUsesCurrentSecretAndPolicy(t *testing.T) {
 	_, err = p.Complete(budget(t), r, callback(prepared.Login, "code"))
 	assertCode(t, err, auth.CodeUntrustedDestination)
 	denied = false
-	if pendingRecord(t, f, p, r) == nil || f.tokenCalls.Load() != 0 {
+	if pendingRecord(t, p, r) == nil || f.tokenCalls.Load() != 0 {
 		t.Fatal("failed policy check consumed consent or exchanged code")
 	}
 	secret = "rotated-secret"
@@ -421,7 +428,7 @@ func TestLifecycleCompletionUsesCurrentSecretAndPolicy(t *testing.T) {
 }
 
 func TestLifecycleNoScopeChallengeUsesOnlyHostRequirement(t *testing.T) {
-	f, p, r := setup(t, "authorization_code_pkce")
+	_, p, r := setup(t, "authorization_code_pkce")
 	original := p.options.SelectClient
 	required := false
 	p.options.SelectClient = func(ctx context.Context, r auth.Request, issuers []string, resource string) (ClientConfig, error) {
@@ -439,7 +446,7 @@ func TestLifecycleNoScopeChallengeUsesOnlyHostRequirement(t *testing.T) {
 	required = true
 	_, err = p.Challenge(budget(t), r, challenge)
 	assertCode(t, err, auth.CodeInteractionRequired)
-	if anyPending(f.store) {
+	if anyPending(p) {
 		t.Fatal("no-scope challenge allocated host consent")
 	}
 	prepared, err := p.Prepare(budget(t), r)
@@ -517,7 +524,7 @@ func TestLifecycleTokenValidationFailureClearsInFlight(t *testing.T) {
 				_, err := p.Prepare(budget(t), r)
 				assertCode(t, err, auth.CodeProviderFailed)
 				record, _ := f.store.Load(budget(t), key)
-				if record == nil || record.RefreshToken != "refresh-token" || usable(record) || record.Pending != nil {
+				if record == nil || record.RefreshToken != "refresh-token" || usable(record) {
 					t.Fatal("invalid refresh response left wrong state")
 				}
 			} else {
@@ -531,7 +538,7 @@ func TestLifecycleTokenValidationFailureClearsInFlight(t *testing.T) {
 				config, _, _, _ := p.cachedBinding(budget(t), r)
 				key = p.key(r, config)
 				record, _ := f.store.Load(budget(t), key)
-				if record == nil || record.Pending != nil || record.AccessToken != "" || record.RefreshToken != "" {
+				if record != nil || anyPending(p) {
 					t.Fatal("invalid code exchange persisted tokens or left the login in flight")
 				}
 			}
@@ -548,7 +555,7 @@ func TestLifecycleClientCredentialsTransientReissue(t *testing.T) {
 	f.mode.Store("non-oauth")
 	_, err := p.Credential(budget(t), r)
 	assertCode(t, err, auth.CodeProviderFailed)
-	if anyPending(f.store) {
+	if anyPending(p) {
 		t.Fatal("machine outage allocated consent")
 	}
 	f.mode.Store("ok")
@@ -631,7 +638,7 @@ func TestLifecyclePrepareRequiredOutsideCeilingDenied(t *testing.T) {
 	f, p, r := setup(t, "authorization_code_pkce")
 	_, err := p.Prepare(budget(t), r, "admin")
 	assertCode(t, err, auth.CodeAccessDenied)
-	if anyPending(f.store) || f.tokenCalls.Load() != 0 {
+	if anyPending(p) || f.tokenCalls.Load() != 0 {
 		t.Fatal("required scope outside the ceiling started acquisition")
 	}
 }
