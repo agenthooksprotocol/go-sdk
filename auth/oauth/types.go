@@ -72,8 +72,9 @@ type MetadataDocument struct {
 // ClientConfig.Issuer and the request metadata to send. ClientName is required.
 // Scopes, when set, is the registration scope. InitialAccessTokenRef, when set,
 // is resolved through Options.Secrets and sent as a Bearer credential only to
-// that issuer's registration endpoint; it is never persisted. A host Prepare
-// replaces a client-credentials registration made under different settings.
+// that issuer's registration endpoint; it is never persisted. A changed policy
+// applies to new registrations; PrepareOptions.ForceRegistration replaces a
+// usable client-credentials registration.
 type RegistrationPolicy struct {
 	ClientName, SoftwareID, SoftwareVersion string
 	Scopes                                  []string
@@ -93,9 +94,14 @@ type SecretStore interface {
 // explicit operation requirements. RedirectURI, when set, replaces the
 // selected client's redirect for a login this Prepare creates, for example a
 // loopback listener bound on a fresh port for each login.
+//
+// ForceRegistration replaces a usable client-credentials registration, for
+// example so changed registration settings take effect; the old secret
+// reference is deleted. Otherwise a usable registration is never replaced.
 type PrepareOptions struct {
-	RequiredScopes []string
-	RedirectURI    string
+	RequiredScopes    []string
+	RedirectURI       string
+	ForceRegistration bool
 }
 
 func (ClientConfig) String() string   { return "oauth.ClientConfig{redacted}" }
@@ -127,13 +133,12 @@ type Record struct {
 
 // RegistrationRecord is one stored client-credentials registration. SecretRef
 // is the host SecretStore reference of its secret. A zero SecretExpiresAt means
-// no known expiry. RequestDigest identifies the RegistrationPolicy it was made
-// with. Generation identifies this registration, independently of the
+// no known expiry. Generation identifies this registration, independently of the
 // enclosing Record generation.
 type RegistrationRecord struct {
 	ClientID, SecretRef, TokenAuthMethod string
 	SecretExpiresAt                      time.Time
-	RequestDigest, Generation            string
+	Generation                           string
 }
 
 // RegistrationFailure is the client-credentials registration backoff. Until

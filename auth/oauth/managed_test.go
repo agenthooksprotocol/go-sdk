@@ -573,7 +573,7 @@ func TestManagedFailedRefreshCommitDoesNotReuseOldGeneration(t *testing.T) {
 	}
 }
 func TestManagedCallbackBindingAndNoImplicitConsent(t *testing.T) {
-	for _, change := range []string{"state", "redirect", "redirect-escape", "issuer", "duplicate"} {
+	for _, change := range []string{"state", "missing-state", "redirect", "redirect-escape", "issuer", "duplicate"} {
 		t.Run(change, func(t *testing.T) {
 			f, p, r := setup(t, "authorization_code_pkce")
 			ctx := budget(t)
@@ -589,6 +589,8 @@ func TestManagedCallbackBindingAndNoImplicitConsent(t *testing.T) {
 			switch change {
 			case "state":
 				q.Set("state", "wrong")
+			case "missing-state":
+				q.Del("state")
 			case "redirect":
 				redirect = "https://evil.example/callback"
 			case "redirect-escape":
@@ -599,7 +601,7 @@ func TestManagedCallbackBindingAndNoImplicitConsent(t *testing.T) {
 				q.Add("state", q.Get("state"))
 			}
 			_, err = p.Complete(ctx, r, redirect+"?"+q.Encode())
-			if change == "state" {
+			if change == "state" || change == "missing-state" {
 				assertCode(t, err, auth.CodeInteractionRequired)
 			} else {
 				assertCode(t, err, auth.CodeAccessDenied)

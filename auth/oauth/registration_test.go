@@ -289,9 +289,10 @@ func TestInvalidClientReregistersOnce(t *testing.T) {
 	}
 }
 
-// A server that accepts registrations but rejects their clients: each
-// invalid_client counts as a failed registration, the count survives the new
-// registration, so the backoff doubles round after round and only a
+// A server that accepts registrations but rejects their clients: the first
+// invalid_client just re-registers, the repeated one counts as a failed
+// registration, and the count survives the new registration, so each round
+// adds one attempt, the backoff doubles round after round and only a
 // successful token request clears it.
 func TestInvalidClientBackoffDoubles(t *testing.T) {
 	f := dcrSetup(t, ccFlow)
@@ -311,9 +312,9 @@ func TestInvalidClientBackoffDoubles(t *testing.T) {
 		if got := f.registerCalls.Load(); got != int32(2*round) {
 			t.Fatalf("round %d: registrations = %d; want 2 per round", round, got)
 		}
-		// Two rejections per round: attempts 2r, backoff 2^(2r-1) minutes.
-		want := time.Minute << (2*round - 1)
-		if marker == nil || marker.Attempts != 2*round || marker.Code != auth.CodeCredentialUnavailable || marker.NextAttempt.Before(before.Add(want)) || marker.NextAttempt.After(time.Now().Add(want)) {
+		// One counted rejection per round: backoff 2^(r-1) minutes.
+		want := time.Minute << (round - 1)
+		if marker == nil || marker.Attempts != round || marker.Code != auth.CodeCredentialUnavailable || marker.NextAttempt.Before(before.Add(want)) || marker.NextAttempt.After(time.Now().Add(want)) {
 			t.Fatalf("round %d: marker = %+v; want backoff %v", round, marker, want)
 		}
 		// Every operation during the backoff sends nothing.
@@ -498,9 +499,10 @@ func mustLookup(t *testing.T, p *Provider, r auth.Request) *auth.Credential {
 	return credential
 }
 
-// Only a host Prepare replaces a usable registration made under other
-// registration settings; the old secret reference is then deleted.
-func TestPrepareReplacesRegistrationOnPolicyChange(t *testing.T) {
+// A usable registration is never replaced automatically, not even by a host
+// Prepare after a policy change; only ForceRegistration replaces it, and the
+// old secret reference is then deleted.
+func TestForceRegistrationReplacesRegistration(t *testing.T) {
 	f := dcrSetup(t, ccFlow)
 	p, r := f.provider(), f.request("backend")
 	credential := prepared(t, p, r).Credential
@@ -510,15 +512,17 @@ func TestPrepareReplacesRegistrationOnPolicyChange(t *testing.T) {
 	})
 	expireGrant(t, f, credential)
 	mustToken(t, mustLookup(t, p, r), nil, "access-dcr-1")
+	expireGrant(t, f, credential)
+	mustToken(t, prepared(t, p, r).Credential, nil, "access-dcr-1")
 	if f.registerCalls.Load() != 1 {
-		t.Fatal("lookup replaced a usable registration")
+		t.Fatal("a policy change replaced a usable registration")
 	}
 	expireGrant(t, f, credential)
-	result := prepared(t, p, r)
-	mustToken(t, result.Credential, nil, "access-dcr-2")
+	result, err := p.PrepareWith(budget(t), r, PrepareOptions{ForceRegistration: true})
+	mustToken(t, result.Credential, err, "access-dcr-2")
 	body := f.registrations[1].Body
-	if body["client_name"] != "Renamed" || body["software_id"] != "adapter" || body["scope"] != "events" || !slices.Equal(f.secrets.deleted, []string{first}) || f.secrets.count() != 1 {
-		t.Fatalf("re-registration %v deleted=%v", body, f.secrets.deleted)
+	if f.registerCalls.Load() != 2 || body["client_name"] != "Renamed" || body["software_id"] != "adapter" || body["scope"] != "events" || !slices.Equal(f.secrets.deleted, []string{first}) || f.secrets.count() != 1 {
+		t.Fatalf("forced re-registration %v deleted=%v", body, f.secrets.deleted)
 	}
 }
 
@@ -908,4 +912,61 @@ func TestRecordedCIMDChecksNewRedirect(t *testing.T) {
 	_, err := p.PrepareWith(budget(t), r, PrepareOptions{RedirectURI: "http://127.0.0.1:53002/other"})
 	assertCode(t, err, auth.CodeInvalidConfiguration)
 	mustLogin(t, p, r, PrepareOptions{RedirectURI: "http://127.0.0.1:53003/callback"})
+}
+
+// invalid_client for a CIMD client, on the callback or at code exchange, is
+// invalid_configuration, never a DCR fallback.
+func TestCIMDInvalidClientAtCompletion(t *testing.T) {
+	for _, where := range []string{"callback", "exchange"} {
+		t.Run(where, func(t *testing.T) {
+			f := dcrSetup(t, pkceFlow)
+			document := f.server.URL + "/client.json"
+			f.set(func(f *dcrFixture) {
+				f.metadata["client_id_metadata_document_supported"] = true
+				f.config.ClientIDMetadataDocument = &MetadataDocument{URL: document, RedirectURIs: []string{f.config.RedirectURI}}
+			})
+			p, r := f.provider(), f.request("backend")
+			login := prepared(t, p, r).Login
+			u, _ := url.Parse(login.AuthorizationURL())
+			query := url.Values{"state": {u.Query().Get("state")}, "iss": {f.server.URL}}
+			if where == "callback" {
+				query.Set("error", "invalid_client")
+			} else {
+				query.Set("code", "code")
+				f.set(func(f *dcrFixture) { f.rejected[document] = true })
+			}
+			_, err := p.Complete(budget(t), r, f.config.RedirectURI+"?"+query.Encode())
+			assertCode(t, err, auth.CodeInvalidConfiguration)
+			if f.registerCalls.Load() != 0 {
+				t.Fatal("CIMD invalid_client fell back to registration")
+			}
+		})
+	}
+}
+
+// A JSON null is never an absent registration field.
+func TestRegistrationNullFieldsRejected(t *testing.T) {
+	for _, tc := range []struct{ flow, body string }{
+		{ccFlow, `{"client_id":"dcr-1","client_secret":"s","redirect_uris":null}`},
+		{ccFlow, `{"client_id":"dcr-1","client_secret":"s","client_secret_expires_at":null}`},
+		{ccFlow, `{"client_id":"dcr-1","client_secret":"s","grant_types":null}`},
+		{ccFlow, `{"client_id":"dcr-1","client_secret":"s","token_endpoint_auth_method":null}`},
+		{ccFlow, `{"client_id":"dcr-1","client_secret":null}`},
+		{pkceFlow, `{"client_id":"dcr-1","redirect_uris":null}`},
+		{pkceFlow, `{"client_id":"dcr-1","grant_types":null}`},
+		{pkceFlow, `{"client_id":"dcr-1","token_endpoint_auth_method":null}`},
+		{pkceFlow, `{"client_id":null}`},
+	} {
+		f := dcrSetup(t, tc.flow)
+		f.set(func(f *dcrFixture) { f.respond = respondStatus(201, nil, tc.body) })
+		_, err := f.provider().Prepare(budget(t), f.request("backend"))
+		assertCode(t, err, auth.CodeInvalidConfiguration)
+	}
+	// An array, even an empty one, is accepted for client credentials.
+	f := dcrSetup(t, ccFlow)
+	f.set(func(f *dcrFixture) {
+		f.issued["dcr-1"] = "s"
+		f.respond = respondStatus(201, nil, `{"client_id":"dcr-1","client_secret":"s","redirect_uris":[]}`)
+	})
+	mustToken(t, prepared(t, f.provider(), f.request("backend")).Credential, nil, "access-dcr-1")
 }

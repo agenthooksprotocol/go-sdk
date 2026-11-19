@@ -380,7 +380,7 @@ func (p *Provider) PrepareWith(ctx context.Context, r auth.Request, options Prep
 	if options.RedirectURI != "" && !validRedirect(options.RedirectURI) {
 		return Preparation{}, fail(auth.CodeInvalidConfiguration)
 	}
-	preparation, err := p.prepare(ctx, cloneRequest(r), "", options.RequiredScopes, options.RedirectURI, false, true)
+	preparation, err := p.prepare(ctx, cloneRequest(r), "", options.RequiredScopes, options.RedirectURI, false, true, options.ForceRegistration)
 	if err == nil && preparation.Credential != nil {
 		p.markPrepared(r)
 	}
@@ -413,7 +413,7 @@ func preparedKey(r auth.Request) string {
 // prepare serves a cached grant, refreshes or reissues it, or (only when
 // interactive) creates a pending login. A step-up challenge requirement
 // applies to this call alone.
-func (p *Provider) prepare(ctx context.Context, r auth.Request, challenge string, explicit []string, redirect string, stepUp, interactive bool) (Preparation, error) {
+func (p *Provider) prepare(ctx context.Context, r auth.Request, challenge string, explicit []string, redirect string, stepUp, interactive, force bool) (Preparation, error) {
 	if err := bounded(ctx); err != nil {
 		return Preparation{}, err
 	}
@@ -438,7 +438,7 @@ func (p *Provider) prepare(ctx context.Context, r auth.Request, challenge string
 	if err != nil && err != errStaleBinding && (ctx.Err() != nil || !errors.As(err, new(refusal))) {
 		return Preparation{}, safe(ctx, err, auth.CodeDiscoveryFailed)
 	}
-	if cached {
+	if cached && !(force && config.Flow != pkceFlow) {
 		// A usable grant requires no remote metadata or store write.
 		if config, err = require(config); err != nil {
 			return Preparation{}, err
@@ -469,7 +469,7 @@ func (p *Provider) prepare(ctx context.Context, r auth.Request, challenge string
 	if config, err = require(config); err != nil {
 		return Preparation{}, err
 	}
-	result, err, _ := p.obtain(ctx, r, config, m, true, stepUp, interactive)
+	result, err, _ := p.obtain(ctx, r, config, m, true, stepUp, interactive, force)
 	return result, err
 }
 
@@ -480,7 +480,7 @@ func (p *Provider) prepare(ctx context.Context, r auth.Request, challenge string
 // compare-and-deletes that registration, then re-registers and re-acquires
 // once. It also reports whether the token endpoint failed without processing
 // the request (stale metadata).
-func (p *Provider) obtain(ctx context.Context, r auth.Request, config ClientConfig, m metadata, persist, stepUp, interactive bool) (Preparation, error, bool) {
+func (p *Provider) obtain(ctx context.Context, r auth.Request, config ClientConfig, m metadata, persist, stepUp, interactive, force bool) (Preparation, error, bool) {
 	if persist {
 		if err := p.persistBinding(ctx, r, config, m); err != nil {
 			return Preparation{}, err, false
@@ -494,7 +494,7 @@ func (p *Provider) obtain(ctx context.Context, r auth.Request, config ClientConf
 	for attempt := 0; ; attempt++ {
 		if machine {
 			var err error
-			if config, err = p.registered(ctx, config, m, interactive, attempt > 0); err != nil {
+			if config, err = p.registered(ctx, config, m, interactive, attempt > 0, force && attempt == 0); err != nil {
 				return Preparation{}, err, false
 			}
 		}
@@ -516,7 +516,7 @@ func (p *Provider) obtain(ctx context.Context, r auth.Request, config ClientConf
 		if reason != errInvalidClient || !machine {
 			return result, err, reason == errEndpoint
 		}
-		if err := p.drop(ctx, config); err != nil {
+		if err := p.drop(ctx, config, attempt > 0); err != nil {
 			return Preparation{}, err, false
 		}
 		if attempt > 0 {
@@ -999,6 +999,10 @@ func (p *Provider) Complete(ctx context.Context, r auth.Request, callback string
 		return auth.Credential{}, fail(auth.CodeAccessDenied)
 	}
 	query, err := url.ParseQuery(value.RawQuery)
+	if err == nil && len(query["state"]) == 0 {
+		// Without a state no login can match, as for an unknown state.
+		return auth.Credential{}, fail(auth.CodeInteractionRequired)
+	}
 	if err != nil || len(query["state"]) != 1 || len(query["error"]) > 1 || (query.Get("error") == "" && (len(query["code"]) != 1 || query.Get("code") == "")) {
 		return auth.Credential{}, fail(auth.CodeAccessDenied)
 	}
@@ -1040,7 +1044,11 @@ func (p *Provider) Complete(ctx context.Context, r auth.Request, callback string
 	if err != nil {
 		return auth.Credential{}, safe(ctx, err, auth.CodeProviderFailed)
 	}
-	if query.Get("error") != "" {
+	if denied := query.Get("error"); denied != "" {
+		if denied == "invalid_client" && config.source == sourceCIMD {
+			// The authorization server rejected the CIMD client: configuration.
+			return auth.Credential{}, fail(auth.CodeInvalidConfiguration)
+		}
 		return auth.Credential{}, fail(auth.CodeAccessDenied)
 	}
 	exchange := cloneConfig(config)
@@ -1148,7 +1156,7 @@ func (p *Provider) Credential(ctx context.Context, r auth.Request) (auth.Credent
 			return auth.Credential{}, fail(auth.CodeCredentialUnavailable)
 		}
 	}
-	result, err := p.prepare(ctx, cloneRequest(r), "", nil, "", false, false)
+	result, err := p.prepare(ctx, cloneRequest(r), "", nil, "", false, false, false)
 	if err != nil {
 		return auth.Credential{}, err
 	}
@@ -1194,7 +1202,7 @@ func (p *Provider) Challenge(ctx context.Context, r auth.Request, c auth.Challen
 			return nil, safe(ctx, err, auth.CodeProviderFailed)
 		}
 	}
-	result, err := p.prepare(ctx, cloneRequest(r), header, nil, "", c.StatusCode == http.StatusForbidden, false)
+	result, err := p.prepare(ctx, cloneRequest(r), header, nil, "", c.StatusCode == http.StatusForbidden, false, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1246,13 +1254,13 @@ func (p *Provider) PreemptiveCredential(ctx context.Context, r auth.Request) (*a
 			return nil, safe(ctx, err, auth.CodeDiscoveryFailed)
 		}
 	}
-	result, err, stale := p.obtain(ctx, r, config, m, false, false, false)
+	result, err, stale := p.obtain(ctx, r, config, m, false, false, false, false)
 	if stale {
 		// Refetch only the stored issuer's metadata once, persist it and retry.
 		if config, m, err = p.resolveMetadata(ctx, config); err != nil {
 			return nil, safe(ctx, err, auth.CodeDiscoveryFailed)
 		}
-		result, err, _ = p.obtain(ctx, r, config, m, true, false, false)
+		result, err, _ = p.obtain(ctx, r, config, m, true, false, false, false)
 	}
 	return result.Credential, err
 }

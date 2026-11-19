@@ -3,8 +3,6 @@ package oauth
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -41,12 +39,6 @@ func identity(c ClientConfig) string {
 // registrationKey locates the client-credentials registration for an issuer.
 func (p *Provider) registrationKey(c ClientConfig) string {
 	return frame("ahp.oauth.registration:", p.options.Namespace, c.Issuer)
-}
-
-// requestDigest identifies the host registration policy a record was made with.
-func requestDigest(policy *RegistrationPolicy) string {
-	sum := sha256.Sum256([]byte(frame("ahp.oauth.registration-request:", policy.ClientName, policy.SoftwareID, policy.SoftwareVersion, strings.Join(merge(policy.Scopes), " "), policy.InitialAccessTokenRef)))
-	return hex.EncodeToString(sum[:])
 }
 
 // validDocumentURL: https, a path, no userinfo, fragment or dot segments.
@@ -180,11 +172,11 @@ func secretMethod(m metadata) string {
 
 // registered resolves the client-credentials registration under the
 // registration-key lock: it reuses a usable record, or registers once. Only a
-// host Prepare (interactive) replaces a usable record made under other
-// registration settings; it and the one re-registration after invalid_client
+// host Prepare with ForceRegistration (force) replaces a usable record; a host
+// Prepare (interactive) and the one re-registration after invalid_client
 // (bypass) ignore the backoff.
-func (p *Provider) registered(ctx context.Context, c ClientConfig, m metadata, interactive, bypass bool) (ClientConfig, error) {
-	key, digest := p.registrationKey(c), requestDigest(c.Registration)
+func (p *Provider) registered(ctx context.Context, c ClientConfig, m metadata, interactive, bypass, force bool) (ClientConfig, error) {
+	key := p.registrationKey(c)
 	err := p.options.Store.Coordinate(ctx, key, func(ctx context.Context) error {
 		record, err := p.options.Store.Load(ctx, key)
 		if err != nil {
@@ -193,7 +185,7 @@ func (p *Provider) registered(ctx context.Context, c ClientConfig, m metadata, i
 		if record == nil {
 			record = &Record{}
 		}
-		if reg := record.Registration; reg != nil && (reg.SecretExpiresAt.IsZero() || time.Now().Before(reg.SecretExpiresAt)) && (!interactive || reg.RequestDigest == digest) {
+		if reg := record.Registration; reg != nil && (reg.SecretExpiresAt.IsZero() || time.Now().Before(reg.SecretExpiresAt)) && !force {
 			if secret, ok := p.secret(ctx, reg); ok {
 				c = use(c, reg, secret)
 				c.failing = record.RegistrationFailure != nil
@@ -203,7 +195,7 @@ func (p *Provider) registered(ctx context.Context, c ClientConfig, m metadata, i
 		if failure := record.RegistrationFailure; !interactive && !bypass && failure != nil && time.Now().Before(failure.NextAttempt) {
 			return fail(failure.Code)
 		}
-		c, err = p.register(ctx, key, record, c, m, digest)
+		c, err = p.register(ctx, key, record, c, m)
 		c.failing = c.registered != "" && record.RegistrationFailure != nil
 		return err
 	})
@@ -240,9 +232,9 @@ func (p *Provider) replace(ctx context.Context, key string, old, next *Record) e
 }
 
 // drop compare-and-deletes the client-credentials registration generation a
-// token endpoint rejected with invalid_client, which counts as a failed
-// registration for the backoff.
-func (p *Provider) drop(ctx context.Context, c ClientConfig) error {
+// token endpoint rejected with invalid_client. A repeated rejection (after the
+// one re-registration) counts as a failed registration for the backoff.
+func (p *Provider) drop(ctx context.Context, c ClientConfig, repeated bool) error {
 	key := p.registrationKey(c)
 	return p.options.Store.Coordinate(ctx, key, func(ctx context.Context) error {
 		record, err := p.options.Store.Load(ctx, key)
@@ -252,11 +244,18 @@ func (p *Provider) drop(ctx context.Context, c ClientConfig) error {
 		if record == nil {
 			record = &Record{}
 		}
+		current := record.Registration != nil && record.Registration.Generation == c.registered
+		if !current && !repeated {
+			return nil
+		}
 		next := cloneRecord(record)
-		if reg := record.Registration; reg != nil && reg.Generation == c.registered {
+		if current {
 			next.Registration = nil
 		}
-		next.RegistrationFailure, next.Generation = p.failure(record, auth.CodeCredentialUnavailable, 0), randomID()
+		if repeated {
+			next.RegistrationFailure = p.failure(record, auth.CodeCredentialUnavailable, 0)
+		}
+		next.Generation = randomID()
 		return p.replace(ctx, key, record, next)
 	})
 }
@@ -355,7 +354,7 @@ func (p *Provider) registerLogin(ctx context.Context, c ClientConfig, m metadata
 
 // register sends one client-credentials registration and persists an
 // accepted one by compare-and-set; a failure records the backoff.
-func (p *Provider) register(ctx context.Context, key string, record *Record, c ClientConfig, m metadata, digest string) (ClientConfig, error) {
+func (p *Provider) register(ctx context.Context, key string, record *Record, c ClientConfig, m metadata) (ClientConfig, error) {
 	request, initial, err := p.registration(ctx, c, m)
 	if err != nil {
 		return c, err
@@ -387,7 +386,7 @@ func (p *Provider) register(ctx context.Context, key string, record *Record, c C
 		}
 		return c, err
 	}
-	reg.RequestDigest, reg.Generation = digest, randomID()
+	reg.Generation = randomID()
 	next := cloneRecord(record)
 	// The failure count survives until a token request with this client succeeds.
 	next.Registration, next.Generation = reg, randomID()
@@ -457,9 +456,10 @@ func (p *Provider) send(ctx context.Context, endpoint, initial string, body map[
 // Management fields, echoed scope and unknown members are ignored, and so are
 // a public PKCE client's secret and its expiry.
 func accept(fields map[string]json.RawMessage, request map[string]any, flow string) (*RegistrationRecord, string, bool) {
+	// A JSON null is never absent: an echoed field is a value or missing.
 	field := func(name string, value any) bool {
 		raw, present := fields[name]
-		return !present || json.Unmarshal(raw, value) == nil
+		return !present || (string(bytes.TrimSpace(raw)) != "null" && json.Unmarshal(raw, value) == nil)
 	}
 	var clientID, method, secret string
 	var redirects, grants []string

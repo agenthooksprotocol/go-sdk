@@ -228,7 +228,7 @@ func TestCanonicalRegistrationResponses(t *testing.T) {
 				if record != nil || loginClientID(t, prepared.Login) != vector.Expect.Record.ClientID || vector.Expect.Record.SecretRef || f.secrets.count() != 0 {
 					t.Fatalf("record = %+v", record)
 				}
-			} else if reg := record.Registration; reg == nil || reg.ClientID != vector.Expect.Record.ClientID || (reg.SecretRef != "") != vector.Expect.Record.SecretRef || reg.SecretExpiresAt.IsZero() != (vector.Expect.Expiry == "none") || reg.RequestDigest != requestDigest(f.config.Registration) {
+			} else if reg := record.Registration; reg == nil || reg.ClientID != vector.Expect.Record.ClientID || (reg.SecretRef != "") != vector.Expect.Record.SecretRef || reg.SecretExpiresAt.IsZero() != (vector.Expect.Expiry == "none") {
 				t.Fatalf("record = %+v", reg)
 			}
 			dump := f.dump(t)
