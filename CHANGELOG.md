@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.14.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.13.1...v0.14.0) (2026-11-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* **auth:** grants are keyed by the configured client identity, so stored grants from earlier versions are not found and users sign in again. PKCE logins register per login with their own redirect; pending logins are process-owned unless persisted, capped, and completed by state; loopback CIMD redirects match without the port and localhost is rejected. Client-credentials registration re-registers on invalid_client with a growing backoff and is replaced on host prepare only when forced. Options for removed mechanisms (PKCE registration records, proactive renewal, stable redirects, supersede) are gone.
+
+### Features
+
+* **auth:** align client registration and pending logins with MCP clients ([#56](https://github.com/agenthooksprotocol/go-sdk/issues/56)) ([010aedb](https://github.com/agenthooksprotocol/go-sdk/commit/010aedbb7e590c3d747ef312cd1b8581472781aa))
+
 ## [0.13.1](https://github.com/agenthooksprotocol/go-sdk/compare/v0.13.0...v0.13.1) (2026-11-18)
 
 
