@@ -236,19 +236,30 @@ func (p *Provider) replace(ctx context.Context, key string, old, next *Record) e
 }
 
 // drop compare-and-deletes the client-credentials registration generation a
-// token endpoint rejected with invalid_client.
-func (p *Provider) drop(ctx context.Context, c ClientConfig) error {
+// token endpoint rejected with invalid_client. A repeated rejection (failed)
+// also counts as a failed registration for the backoff.
+func (p *Provider) drop(ctx context.Context, c ClientConfig, failed bool) error {
 	key := p.registrationKey(c)
 	return p.options.Store.Coordinate(ctx, key, func(ctx context.Context) error {
 		record, err := p.options.Store.Load(ctx, key)
 		if err != nil {
 			return safe(ctx, err, auth.CodeProviderFailed)
 		}
-		if record == nil || record.Registration == nil || record.Registration.Generation != c.registered {
+		if record == nil {
+			record = &Record{}
+		}
+		current := record.Registration != nil && record.Registration.Generation == c.registered
+		if !current && !failed {
 			return nil
 		}
 		next := cloneRecord(record)
-		next.Registration, next.Generation = nil, randomID()
+		if current {
+			next.Registration = nil
+		}
+		if failed {
+			next.RegistrationFailure = p.failure(record, auth.CodeCredentialUnavailable, 0)
+		}
+		next.Generation = randomID()
 		return p.replace(ctx, key, record, next)
 	})
 }

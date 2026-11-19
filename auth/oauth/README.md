@@ -188,7 +188,8 @@ only to `Options.Secrets` (`Store`, `Resolve`, `Delete` by reference); records
 hold its reference, and replaced or deleted registrations have their reference
 deleted. A registration is re-registered when its secret expired or cannot be
 resolved, and after a token-endpoint `invalid_client` (at most once per
-operation; a repeated `invalid_client` is `credential_unavailable`). A host
+operation; a repeated `invalid_client` is `credential_unavailable` and counts as
+a failed registration for the backoff). A host
 `Prepare` also replaces one made under a different `RegistrationPolicy`. After
 a failed registration, no registration request is sent until a backoff passes
 (`RegistrationBackoff`, default 1 minute doubling, and any `Retry-After`, capped

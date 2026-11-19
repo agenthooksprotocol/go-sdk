@@ -503,7 +503,7 @@ func (p *Provider) obtain(ctx context.Context, r auth.Request, config ClientConf
 		if reason != errInvalidClient || !machine {
 			return result, err, reason == errEndpoint
 		}
-		if err := p.drop(ctx, config); err != nil {
+		if err := p.drop(ctx, config, attempt > 0); err != nil {
 			return Preparation{}, err, false
 		}
 		if attempt > 0 {

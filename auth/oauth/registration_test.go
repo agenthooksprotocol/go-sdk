@@ -290,8 +290,23 @@ func TestInvalidClientReregistersOnce(t *testing.T) {
 	expireGrant(t, f, credential)
 	_, err = p.Credential(budget(t), r)
 	assertCode(t, err, auth.CodeCredentialUnavailable)
-	if record := f.registration(t, f.config); f.registerCalls.Load() != 3 || record.Registration != nil {
+	record := f.registration(t, f.config)
+	if f.registerCalls.Load() != 3 || record.Registration != nil || record.RegistrationFailure == nil || record.RegistrationFailure.Attempts != 1 || record.RegistrationFailure.Code != auth.CodeCredentialUnavailable {
 		t.Fatalf("repeated invalid_client: calls=%d record=%+v", f.registerCalls.Load(), record)
+	}
+	// It counts as a failed registration: no re-registration on every
+	// operation until the backoff passes; host Prepare bypasses it.
+	for range 3 {
+		_, err = p.Credential(budget(t), r)
+		assertCode(t, err, auth.CodeCredentialUnavailable)
+	}
+	if f.registerCalls.Load() != 3 {
+		t.Fatalf("re-registered during the backoff: %d", f.registerCalls.Load())
+	}
+	f.set(func(f *dcrFixture) { f.rejected["dcr-4"] = false })
+	mustToken(t, prepared(t, p, r).Credential, nil, "access-dcr-4")
+	if record := f.registration(t, f.config); f.registerCalls.Load() != 4 || record.RegistrationFailure != nil {
+		t.Fatalf("prepare did not repair: %+v", record)
 	}
 }
 
