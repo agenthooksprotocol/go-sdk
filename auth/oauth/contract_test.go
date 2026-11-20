@@ -3,6 +3,7 @@ package oauth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -46,6 +47,7 @@ type contractFixture struct {
 		PreviousGranted  []string        `json:"previous_granted"`
 		Requested        []string        `json:"requested"`
 		Allowed          []string        `json:"allowed"`
+		ErrorScopes      []string        `json:"error_scopes"`
 		Required         []string        `json:"required"`
 		Response         json.RawMessage `json:"response"`
 		Error            string          `json:"error"`
@@ -195,6 +197,11 @@ func TestCanonicalTokenResponses(t *testing.T) {
 			}
 			if vector.Error != "" {
 				assertCode(t, err, auth.Code(vector.Error))
+				var classified *auth.Error
+				errors.As(err, &classified)
+				if !slices.Equal(classified.Scopes, vector.ErrorScopes) || (len(vector.ErrorScopes) == 0 && classified.Scopes != nil) {
+					t.Fatalf("error scopes = %v; want %v", classified.Scopes, vector.ErrorScopes)
+				}
 			}
 			record, loadErr := store.Load(budget(t), p.key(request, config))
 			if loadErr != nil {
@@ -223,7 +230,7 @@ func TestCanonicalTokenResponses(t *testing.T) {
 					t.Fatal("expiry classification mismatch")
 				}
 
-				if vector.Exchange == "refresh" {
+				if vector.Exchange == "refresh" && vector.Usable {
 					if cached, err := p.Prepare(budget(t), request); err != nil || cached.Credential == nil {
 						t.Fatalf("reuse unknown-expiry token: %v", err)
 					}
@@ -251,6 +258,16 @@ func TestCanonicalTokenResponses(t *testing.T) {
 // lifecycleCoverage maps every lifecycle id in the vendored fixture to the
 // native tests exercising it at real store, network and transport boundaries.
 var lifecycleCoverage = map[string][]string{
+	"preset-scopes-requested-not-required":             {"TestScopeContractPresetScopesRequested", "TestCanonicalScopeDecisions"},
+	"ceiling-refusal-before-network-every-path":        {"TestScopeContractCeilingRefusalIsLocal", "TestCanonicalScopeDecisions"},
+	"requested-outside-ceiling-invalid-configuration":  {"TestScopeContractRequestedOutsideCeilingInvalid", "TestCanonicalScopeDecisions"},
+	"challenge-401-scope-requested-not-required":       {"TestScopeContract401ScopeIsRequestedNotRequired", "TestCanonicalScopeDecisions"},
+	"malformed-challenge-scope-denied":                 {"TestScopeContractMalformedChallengeScope", "TestCanonicalScopeDecisions"},
+	"insufficient-scope-already-granted-denied":        {"TestScopeContractInsufficientButGranted", "TestCanonicalScopeDecisions"},
+	"complete-enforces-stored-required-set":            {"TestScopeContractCompleteEnforcesStoredRequired", "TestCanonicalCompletions"},
+	"grant-narrower-than-required-denied":              {"TestScopeContractNarrowerRenewal", "TestCanonicalTokenResponses"},
+	"host-policy-errors-carry-no-scopes":               {"TestScopeContractHostErrorsCarryNoScopes", "TestCanonicalScopeDecisions"},
+	"complete-error-login-ended":                       {"TestScopeContractCompleteLoginEnded", "TestCanonicalCompletions"},
 	"cached-token-metadata-outage":                     {"TestCachedUnboundUnsafeDeliveryAfterProviderRecreation"},
 	"unbound-preemptive-unsafe-delivery":               {"TestCachedUnboundUnsafeDeliveryAfterProviderRecreation"},
 	"unbound-lookup-anonymous-fallback":                {"TestUnboundLookupAnonymousFallback", "TestUnboundLookupFailuresAreNotAnonymous", "TestUnboundLookupStaleBindingIdentity"},

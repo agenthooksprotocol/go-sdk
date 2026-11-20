@@ -653,6 +653,9 @@ func (p *Provider) acquireLocked(ctx context.Context, r auth.Request, key string
 		result.Credential = p.credential(r, key, record)
 		return nil
 	}
+	// covered: the previous grant already recorded R, so a renewal that comes
+	// back narrower is the server narrowing it, not a step-up.
+	covered := record != nil && scopeSubset(config.RequiredScopes, intersect(record.Scopes, allowedScopes(config)))
 	next := record
 	switch {
 	case config.Flow == "client_credentials":
@@ -667,8 +670,9 @@ func (p *Provider) acquireLocked(ctx context.Context, r auth.Request, key string
 		result.Credential = p.credential(r, key, next)
 		return nil
 	}
-	if config.Flow == "client_credentials" || (!stepUp && !interactive && usable(next)) {
-		// A live grant lacks an explicit requirement: refresh cannot broaden it.
+	if config.Flow == "client_credentials" || (usable(next) && (covered || (!stepUp && !interactive))) {
+		// A live grant lacks a requirement: refresh cannot broaden it, and a
+		// grant narrower than a recorded R is the server's refusal.
 		return fail(auth.CodeAccessDenied, config.RequiredScopes...)
 	}
 	if !interactive {
@@ -1113,6 +1117,10 @@ func (p *Provider) Complete(ctx context.Context, r auth.Request, callback string
 	if result == nil {
 		result = &auth.Error{Code: auth.CodeProviderFailed}
 	}
+	if errors.Is(err, errCallback) && *ended {
+		// Without a login named by its state, any callback is for no login.
+		result = &auth.Error{Code: auth.CodeInteractionRequired}
+	}
 	result.LoginEnded = *ended
 	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
 		if errors.Is(err, cause) {
@@ -1122,27 +1130,27 @@ func (p *Provider) Complete(ctx context.Context, r auth.Request, callback string
 	return auth.Credential{}, result
 }
 
-// callbackState returns the callback's single state, if any.
-func callbackState(callback string) string {
+// callbackStates returns the callback's state values.
+func callbackStates(callback string) []string {
 	value, err := url.Parse(callback)
 	if err != nil {
-		return ""
+		return nil
 	}
 	query, err := url.ParseQuery(value.RawQuery)
-	if err != nil || len(query["state"]) != 1 {
-		return ""
+	if err != nil {
+		return nil
 	}
-	return query.Get("state")
+	return query["state"]
 }
 
 // loginEnded reports, for a failure before the login was claimed, whether the
-// pending login named by the callback's state is gone. Without a single state
-// or a current binding no login can match; an indeterminate lookup reports
+// pending login named by the callback's state is gone. Without a state or a
+// current binding no login can match; an indeterminate lookup reports
 // false (still pending).
 func (p *Provider) loginEnded(ctx context.Context, r auth.Request, callback string) *bool {
 	ended := func(value bool) *bool { return &value }
-	state := callbackState(callback)
-	if state == "" {
+	states := callbackStates(callback)
+	if len(states) == 0 {
 		return ended(true)
 	}
 	config, _, cached, err := p.cachedBinding(ctx, r)
@@ -1159,13 +1167,18 @@ func (p *Provider) loginEnded(ctx context.Context, r auth.Request, callback stri
 	if record != nil {
 		now := time.Now()
 		for _, login := range record.Pending {
-			if login.ExpiresAt.After(now) && subtle.ConstantTimeCompare([]byte(state), []byte(login.State)) == 1 {
-				return ended(false)
+			for _, state := range states {
+				if login.ExpiresAt.After(now) && subtle.ConstantTimeCompare([]byte(state), []byte(login.State)) == 1 {
+					return ended(false)
+				}
 			}
 		}
 	}
 	return ended(true)
 }
+
+// errCallback marks a callback rejected before its login was looked up.
+var errCallback = &auth.Error{Code: auth.CodeAccessDenied}
 
 // complete is Complete without the login-ended flag. It reports that flag
 // once the claim decided it, or nil for the caller to look it up.
@@ -1176,15 +1189,25 @@ func (p *Provider) complete(ctx context.Context, r auth.Request, callback string
 	}
 	value, err := url.Parse(callback)
 	if err != nil || value.User != nil || strings.Contains(callback, "#") {
-		return auth.Credential{}, nil, fail(auth.CodeAccessDenied)
+		return auth.Credential{}, nil, errCallback
 	}
 	query, err := url.ParseQuery(value.RawQuery)
 	if err == nil && len(query["state"]) == 0 {
 		// Without a state no login can match, as for an unknown state.
 		return auth.Credential{}, ended(true), fail(auth.CodeInteractionRequired)
 	}
-	if err != nil || len(query["state"]) != 1 || len(query["error"]) > 1 || (query.Get("error") == "" && (len(query["code"]) != 1 || query.Get("code") == "")) {
-		return auth.Credential{}, nil, fail(auth.CodeAccessDenied)
+	if err != nil {
+		return auth.Credential{}, nil, errCallback
+	}
+	for _, values := range query {
+		// No duplicated parameter.
+		if len(values) != 1 {
+			return auth.Credential{}, nil, errCallback
+		}
+	}
+	if code, denied := query.Get("code"), query.Has("error"); denied == query.Has("code") || (!denied && code == "") || (denied && query.Get("error") == "") {
+		// Exactly one of a nonempty code or error.
+		return auth.Credential{}, nil, errCallback
 	}
 	// Resolve current secrets, policy and capabilities: the pending login never
 	// makes a captured runtime secret authoritative.
@@ -1241,9 +1264,18 @@ func (p *Provider) complete(ctx context.Context, r auth.Request, callback string
 	exchange := cloneConfig(config)
 	exchange.ClientID, exchange.Scopes, exchange.RedirectURI = pending.ClientID, pending.Scopes, pending.RedirectURI
 	credential, err := p.exchange(ctx, r, key, exchange, m, pending, query.Get("code"))
-	if errors.Is(err, errInvalidClient) && config.source == sourceDCR {
-		// Only this login ends; the stored grant may hold an older valid client.
-		err = fail(auth.CodeInteractionRequired)
+	if errors.Is(err, errInvalidClient) {
+		switch config.source {
+		case sourceDCR:
+			// Only this login ends; the stored grant may hold an older valid
+			// client. The next prepare registers again.
+			err = fail(auth.CodeInteractionRequired)
+		case sourceCIMD:
+			err = fail(auth.CodeInvalidConfiguration)
+		default:
+			// The host repairs its pre-registered client information.
+			err = fail(auth.CodeCredentialUnavailable)
+		}
 	}
 	if err == nil && ctx.Err() != nil {
 		// The exchange completed detached; the caller still sees cancellation.

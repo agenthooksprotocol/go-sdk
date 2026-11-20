@@ -394,6 +394,15 @@ func TestScopeContractCompleteLoginEnded(t *testing.T) {
 	if encoded, _ := json.Marshal(err.(*auth.Error)); string(encoded) != `{"Code":"interaction_required","LoginEnded":true}` {
 		t.Fatalf("JSON = %s", encoded)
 	}
+	// Without a login named by its state, even an invalid callback is
+	// interaction_required.
+	_, err = p.Complete(budget(t), r, "https://client.example/callback?state=unknown&code=code#fragment")
+	assertCode(t, err, auth.CodeInteractionRequired)
+	ended(err, true)
+	// A callback with both code and error is invalid, before the claim.
+	_, err = p.Complete(budget(t), r, "https://client.example/callback?state="+state+"&code=code&error=access_denied")
+	assertCode(t, err, auth.CodeAccessDenied)
+	ended(err, false)
 	// Consent denial consumes the login; a replay finds it gone.
 	denied := "https://client.example/callback?state=" + state + "&error=access_denied&iss=" + mustConfig(t, p, r).Issuer
 	_, err = p.Complete(budget(t), r, denied)

@@ -147,6 +147,17 @@ or expiry; a callback for an ended login fails with `interaction_required`.
 `Cancel` never erases stored credentials. With `PersistLogins`, a host
 `Prepare` also deletes the grant's expired pending logins and their verifiers.
 
+`Complete` codes: a callback whose `state` names no live login (absent,
+unknown, expired or ended) is `interaction_required`, however malformed. An
+invalid callback for a live login (redirect, `iss`, fragment, userinfo, not
+exactly one of `code` or `error`, a duplicated parameter) is `access_denied`
+and does not consume it. After the claim: consent denial is `access_denied`;
+token-endpoint `invalid_grant` is `interaction_required`; `invalid_client` is
+`credential_unavailable` for a pre-registered client, `invalid_configuration`
+for a CIMD client and `interaction_required` for a DCR client (the next
+`Prepare` registers again); any other token-endpoint failure or invalid token
+response is `provider_failed`. These carry no scopes.
+
 Every `Complete` error carries an `*auth.Error` whose `LoginEnded` reports
 whether the pending login named by the callback's `state` no longer exists
 after the call: `true` when it was consumed, had expired or was unknown,
