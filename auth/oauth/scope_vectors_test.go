@@ -24,8 +24,9 @@ import (
 
 type scopeVectors struct {
 	ScopeDecisions []struct {
-		ID    string `json:"id"`
-		Input struct {
+		ID       string   `json:"id"`
+		Requires []string `json:"requires"`
+		Input    struct {
 			Flow         string   `json:"flow"`
 			Path         string   `json:"path"`
 			Binding      string   `json:"binding"`
@@ -49,8 +50,9 @@ type scopeVectors struct {
 		Expect vectorExpect `json:"expect"`
 	} `json:"scope_decisions"`
 	Completions []struct {
-		ID    string `json:"id"`
-		Input struct {
+		ID       string   `json:"id"`
+		Requires []string `json:"requires"`
+		Input    struct {
 			Pending        string   `json:"pending"`
 			Handle         string   `json:"handle"`
 			ClientSource   string   `json:"client_source"`
@@ -59,6 +61,11 @@ type scopeVectors struct {
 			StoredRequired []string `json:"stored_required"`
 			Granted        []string `json:"granted"`
 			Ceiling        []string `json:"ceiling"`
+			HostError      *struct {
+				Callback string   `json:"callback"`
+				Code     string   `json:"code"`
+				Scopes   []string `json:"scopes"`
+			} `json:"host_error"`
 		} `json:"input"`
 		Expect vectorExpect `json:"expect"`
 	} `json:"completions"`
@@ -75,6 +82,25 @@ type vectorExpect struct {
 	Retired                     bool      `json:"retired"`
 	LoginEnded                  *bool     `json:"login_ended"`
 	GrantPersisted              *bool     `json:"grant_persisted"`
+}
+
+// goFeatures are the optional SDK features this SDK has. Go's Complete takes
+// no pending-login handle: a callback names its login only by state.
+var goFeatures = map[string]bool{"token_validation_callback": true, "complete_handle": false}
+
+// requireFeatures skips a vector needing an optional feature Go lacks and
+// fails on a feature this runner does not know.
+func requireFeatures(t *testing.T, requires []string) {
+	t.Helper()
+	for _, feature := range requires {
+		has, known := goFeatures[feature]
+		if !known {
+			t.Fatalf("unknown SDK feature %q", feature)
+		}
+		if !has {
+			t.Skipf("requires %s, which the Go SDK does not have", feature)
+		}
+	}
 }
 
 func readScopeVectors(t *testing.T) scopeVectors {
@@ -211,6 +237,7 @@ func vectorError(t *testing.T, err error, expect vectorExpect) *auth.Error {
 func TestCanonicalScopeDecisions(t *testing.T) {
 	for _, vector := range readScopeVectors(t).ScopeDecisions {
 		t.Run(vector.ID, func(t *testing.T) {
+			requireFeatures(t, vector.Requires)
 			in, expect := vector.Input, vector.Expect
 			s := newVectorServer(t)
 			config := ClientConfig{Issuer: s.server.URL, Resource: s.resource, ClientID: "client", Flow: in.Flow, Scopes: in.Requested, AllowedScopes: in.Ceiling, RequiredScopes: in.HostRequired, RedirectURI: "https://client.example/callback"}
@@ -366,20 +393,12 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 	}
 }
 
-// Go's Complete takes no pending-login handle: a callback names its login
-// only by state, so a state that differs from a host handle cannot arise.
-var completionsWithoutHandle = map[string]bool{"complete-invalid-callback-state-mismatch": true}
-
 func TestCanonicalCompletions(t *testing.T) {
 	for _, vector := range readScopeVectors(t).Completions {
 		t.Run(vector.ID, func(t *testing.T) {
+			requireFeatures(t, vector.Requires)
 			in, expect := vector.Input, vector.Expect
-			if completionsWithoutHandle[vector.ID] {
-				if in.Callback != "state_mismatch" || in.Handle != "matching" {
-					t.Fatal("handle-only vector changed")
-				}
-				t.Skip("Go's Complete has no pending-login handle")
-			}
+			// Without complete_handle, handle matching means none is passed.
 			s := newVectorServer(t)
 			redirect := "https://client.example/callback"
 			config := ClientConfig{Issuer: s.server.URL, Resource: s.resource, Flow: pkceFlow, Scopes: in.Ceiling, AllowedScopes: merge(in.Ceiling, in.StoredRequired...), RedirectURI: redirect}
@@ -395,6 +414,7 @@ func TestCanonicalCompletions(t *testing.T) {
 				t.Fatalf("unknown client source %q", in.ClientSource)
 			}
 			var mu sync.Mutex
+			var hostErr error
 			store := newStore()
 			p, err := New(Options{Namespace: "vectors", Store: store, HTTPClient: s.server.Client(), CheckDestination: func(ctx context.Context, raw string, _ Purpose) error {
 				if !strings.HasPrefix(raw, s.server.URL+"/") {
@@ -404,10 +424,16 @@ func TestCanonicalCompletions(t *testing.T) {
 			}, SelectClient: func(ctx context.Context, _ auth.Request, _ []string, _ string) (ClientConfig, error) {
 				mu.Lock()
 				defer mu.Unlock()
+				if hostErr != nil {
+					return ClientConfig{}, hostErr
+				}
 				return cloneConfig(config), ctx.Err()
 			}, ValidateToken: func(ctx context.Context, _ ClientConfig, _ *oauth2.Token) error { return ctx.Err() }})
 			if err != nil {
 				t.Fatal(err)
+			}
+			if in.HostError != nil && in.HostError.Callback != "client_selection" {
+				t.Fatalf("unknown host callback %q", in.HostError.Callback)
 			}
 			r := auth.Request{BackendID: "backend", Purpose: auth.Event, Destination: s.resource}
 			prepared, err := p.PrepareWith(budget(t), r, PrepareOptions{RequiredScopes: in.StoredRequired})
@@ -421,6 +447,12 @@ func TestCanonicalCompletions(t *testing.T) {
 			config.AllowedScopes = in.Ceiling
 			mu.Unlock()
 			key := p.key(r, mustConfig(t, p, r))
+			if in.HostError != nil {
+				// The host callback fails before the claim.
+				mu.Lock()
+				hostErr = &auth.Error{Code: auth.Code(in.HostError.Code), Scopes: in.HostError.Scopes}
+				mu.Unlock()
+			}
 			switch in.Pending {
 			case "pending", "unknown":
 			case "expired":
@@ -470,7 +502,8 @@ func TestCanonicalCompletions(t *testing.T) {
 			default:
 				t.Fatalf("unknown callback %q", in.Callback)
 			}
-			_, err = p.Complete(budget(t), r, base+"?"+query.Encode()+suffix)
+			callback := base + "?" + query.Encode() + suffix
+			_, err = p.Complete(budget(t), r, callback)
 			if expect.Code == nil {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
@@ -482,6 +515,15 @@ func TestCanonicalCompletions(t *testing.T) {
 				record, _ := store.Load(budget(t), key)
 				if persisted := record != nil && record.AccessToken == "vector-access"; persisted != *expect.GrantPersisted {
 					t.Fatalf("grant persisted = %v; want %v", persisted, *expect.GrantPersisted)
+				}
+			}
+			if in.HostError != nil {
+				// The login stayed pending: once the host recovers it completes.
+				mu.Lock()
+				hostErr = nil
+				mu.Unlock()
+				if _, err := p.Complete(budget(t), r, callback); err != nil {
+					t.Fatalf("login did not complete after the host failure: %v", err)
 				}
 			}
 		})

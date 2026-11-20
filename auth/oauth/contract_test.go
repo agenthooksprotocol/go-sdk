@@ -43,6 +43,7 @@ type contractFixture struct {
 	} `json:"keys"`
 	Tokens []struct {
 		ID               string          `json:"id"`
+		Requires         []string        `json:"requires"`
 		Exchange         string          `json:"exchange"`
 		PreviousGranted  []string        `json:"previous_granted"`
 		Requested        []string        `json:"requested"`
@@ -105,6 +106,7 @@ func TestCanonicalGrantKeys(t *testing.T) {
 func TestCanonicalTokenResponses(t *testing.T) {
 	for _, vector := range readContract(t).Tokens {
 		t.Run(vector.ID, func(t *testing.T) {
+			requireFeatures(t, vector.Requires)
 			var responseFields struct {
 				RefreshToken string `json:"refresh_token"`
 			}
