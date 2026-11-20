@@ -412,3 +412,36 @@ func TestScopeContractCompleteLoginEnded(t *testing.T) {
 	assertCode(t, err, auth.CodeInteractionRequired)
 	ended(err, true)
 }
+
+// A redirect with its own query is invalid configuration, so a callback is
+// matched on scheme, host, port and path; parameters the authorization server
+// adds (session_state) are allowed.
+func TestCompleteRedirectQuery(t *testing.T) {
+	_, p, r := setup(t, "authorization_code_pkce")
+	_, err := p.PrepareWith(budget(t), r, PrepareOptions{RedirectURI: "https://client.example/callback?tenant=a"})
+	contractError(t, err, auth.CodeInvalidConfiguration)
+	prepared, err := p.Prepare(budget(t), r)
+	if err != nil || prepared.Login == nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Complete(budget(t), r, callback(prepared.Login, "code")+"&session_state=added-by-server"); err != nil {
+		t.Fatalf("authorization-server parameter refused: %v", err)
+	}
+}
+
+// With a nil AllowedScopes, Complete's ceiling is the current requested
+// scopes, never the login's requested scopes.
+func TestCompleteNilCeilingIsCurrentScopes(t *testing.T) {
+	f, p, r := setup(t, "authorization_code_pkce")
+	original := p.options.SelectClient
+	allowAdmin(p)
+	prepared, err := p.Prepare(budget(t), r, "admin")
+	if err != nil || prepared.Login == nil {
+		t.Fatal(err)
+	}
+	// The host drops admin: the ceiling defaults to Scopes, events.
+	p.options.SelectClient = original
+	f.mode.Store("admin-scope")
+	_, err = p.Complete(budget(t), r, callback(prepared.Login, "code"))
+	contractError(t, err, auth.CodeAccessDenied, "admin")
+}

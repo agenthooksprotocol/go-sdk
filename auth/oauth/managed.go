@@ -1235,8 +1235,7 @@ func (p *Provider) complete(ctx context.Context, r auth.Request, callback string
 			if config.source != sourceDCR && login.ClientID != config.ClientID {
 				return nil, fail(auth.CodeInteractionRequired)
 			}
-			redirect, _ := url.Parse(login.RedirectURI)
-			if value.Scheme != redirect.Scheme || value.Host != redirect.Host || value.EscapedPath() != redirect.EscapedPath() {
+			if !callbackMatches(value, login.RedirectURI) {
 				return nil, fail(auth.CodeAccessDenied)
 			}
 			if issuer := query["iss"]; len(issuer) > 1 || (len(issuer) == 1 && issuer[0] != config.Issuer) || (m.ResponseIssuer && len(issuer) != 1) {
@@ -1261,9 +1260,12 @@ func (p *Provider) complete(ctx context.Context, r auth.Request, callback string
 		}
 		return auth.Credential{}, ended(true), fail(auth.CodeAccessDenied)
 	}
+	// The current ceiling, before the login's requested scopes replace Scopes:
+	// a nil AllowedScopes defaults to the current, not the requested, scopes.
+	ceiling := allowedScopes(config)
 	exchange := cloneConfig(config)
 	exchange.ClientID, exchange.Scopes, exchange.RedirectURI = pending.ClientID, pending.Scopes, pending.RedirectURI
-	credential, err := p.exchange(ctx, r, key, exchange, m, pending, query.Get("code"))
+	credential, err := p.exchange(ctx, r, key, exchange, ceiling, m, pending, query.Get("code"))
 	if errors.Is(err, errInvalidClient) {
 		switch config.source {
 		case sourceDCR:
@@ -1288,12 +1290,29 @@ func (p *Provider) complete(ctx context.Context, r auth.Request, callback string
 	return *credential, nil, nil
 }
 
+// callbackMatches compares a callback with the login's exact redirect: scheme,
+// host and port, path, and every parameter of the redirect's own query.
+// Parameters the authorization server adds (session_state) are allowed.
+func callbackMatches(callback *url.URL, raw string) bool {
+	redirect, err := url.Parse(raw)
+	if err != nil || callback.Scheme != redirect.Scheme || callback.Host != redirect.Host || callback.EscapedPath() != redirect.EscapedPath() {
+		return false
+	}
+	got := callback.Query()
+	for name, values := range redirect.Query() {
+		if !slices.Equal(got[name], values) {
+			return false
+		}
+	}
+	return true
+}
+
 // exchange redeems a claimed login's code and commits its client and tokens
 // into the grant under the grant lock, replacing the previous ones. Once the
 // code is sent, the outcome is received and committed detached from caller
 // cancellation. The committed grant, within the current ceiling, must cover
 // the login's stored required set.
-func (p *Provider) exchange(ctx context.Context, r auth.Request, key string, c ClientConfig, m metadata, pending PendingRecord, code string) (*auth.Credential, error) {
+func (p *Provider) exchange(ctx context.Context, r auth.Request, key string, c ClientConfig, ceiling []string, m metadata, pending PendingRecord, code string) (*auth.Credential, error) {
 	ctx, cancel := sending(ctx)
 	if cancel == nil {
 		return nil, ctx.Err()
@@ -1320,7 +1339,7 @@ func (p *Provider) exchange(ctx context.Context, r auth.Request, key string, c C
 			if next, err = p.commit(ctx, key, generation(current), next, err); err != nil {
 				return err
 			}
-			if !usable(next) || !scopeSubset(pending.Required, intersect(next.Scopes, allowedScopes(c))) {
+			if !usable(next) || !scopeSubset(pending.Required, intersect(next.Scopes, ceiling)) {
 				return fail(auth.CodeAccessDenied, pending.Required...)
 			}
 			credential = p.credential(r, key, next)
