@@ -260,6 +260,10 @@ func TestCanonicalTokenResponses(t *testing.T) {
 // lifecycleCoverage maps every lifecycle id in the vendored fixture to the
 // native tests exercising it at real store, network and transport boundaries.
 var lifecycleCoverage = map[string][]string{
+	"entry-points-route-through-decide":                {"TestDecideEntryPointRouting", "TestCanonicalScopeDecisions"},
+	"transport-challenge-routing":                      {"TestDecideTransportChallenges"},
+	"replay-rejection-retires-token":                   {"TestDecideTransportChallenges"},
+	"complete-token-endpoint-errors-classified":        {"TestCanonicalCompletions"},
 	"preset-scopes-requested-not-required":             {"TestScopeContractPresetScopesRequested", "TestCanonicalScopeDecisions"},
 	"ceiling-refusal-before-network-every-path":        {"TestScopeContractCeilingRefusalIsLocal", "TestCanonicalScopeDecisions"},
 	"requested-outside-ceiling-invalid-configuration":  {"TestScopeContractRequestedOutsideCeilingInvalid", "TestCanonicalScopeDecisions"},

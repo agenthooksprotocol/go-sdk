@@ -23,7 +23,8 @@ import (
 )
 
 // Fake only the genuine host persistence/coordination boundary. No replacement
-// production path, test callback or instrumentation exists in Provider.
+// production path or test callback exists in Provider; its only
+// instrumentation is the decision trace, nil outside tests.
 type memoryStore struct {
 	mu       sync.Mutex
 	values   map[string]*Record

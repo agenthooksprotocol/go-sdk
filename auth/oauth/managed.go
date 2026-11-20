@@ -192,6 +192,9 @@ func cloneRecord(r *Record) *Record {
 		pending.Scopes = append([]string(nil), pending.Scopes...)
 		pending.Ceiling = append([]string(nil), pending.Ceiling...)
 		pending.Required = append([]string(nil), pending.Required...)
+		if pending.HostRequired != nil {
+			pending.HostRequired = append([]string{}, pending.HostRequired...)
+		}
 		copy.Pending = append(copy.Pending, pending)
 	}
 	return &copy
@@ -939,7 +942,7 @@ func (p *Provider) login(ctx context.Context, key string, c ClientConfig, m meta
 	if err := p.check(ctx, loginURL, Authorization); err != nil {
 		return nil, err
 	}
-	pending := PendingRecord{State: state, Verifier: verifier, RedirectURI: c.RedirectURI, Scopes: c.Scopes, Ceiling: ceiling, Required: d.required, HasRequired: true, ExpiresAt: time.Now().Add(p.options.LoginLifetime), ClientID: c.ClientID}
+	pending := PendingRecord{State: state, Verifier: verifier, RedirectURI: c.RedirectURI, Scopes: c.Scopes, Ceiling: ceiling, Required: d.required, HasRequired: true, HostRequired: merge(c.RequiredScopes), ExpiresAt: time.Now().Add(p.options.LoginLifetime), ClientID: c.ClientID}
 	err = p.pending(ctx, key, func(logins []PendingRecord) ([]PendingRecord, error) {
 		// Beyond the cap, the oldest login is cancelled.
 		logins = append(logins, pending)
@@ -1204,6 +1207,9 @@ func (p *Provider) complete(ctx context.Context, r auth.Request, callback string
 	if !pending.HasRequired {
 		// A login from an older release stored no required set.
 		required = merge(config.RequiredScopes)
+		if pending.HostRequired != nil {
+			required = merge(pending.HostRequired)
+		}
 	}
 	exchange := cloneConfig(config)
 	exchange.ClientID, exchange.Scopes, exchange.RedirectURI = pending.ClientID, pending.Scopes, pending.RedirectURI

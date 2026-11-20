@@ -172,11 +172,13 @@ type PendingRecord struct {
 	// with. Completion succeeds only when the grant, within the current
 	// ceiling, covers it.
 	Scopes, Ceiling, Required []string
-	// HasRequired marks a record that stores Required; a record written by
-	// an older release has none, and completion then requires the current
-	// host RequiredScopes.
-	HasRequired bool
-	ExpiresAt   time.Time
+	// HasRequired marks a record that stores Required. A record written by
+	// an older release has none: completion then requires HostRequired, the
+	// host RequiredScopes at prepare time, when the record holds it, else the
+	// current host RequiredScopes.
+	HasRequired  bool
+	HostRequired []string
+	ExpiresAt    time.Time
 	// ClientID is the client the login completes with, for DCR the client
 	// registered for this login.
 	ClientID string

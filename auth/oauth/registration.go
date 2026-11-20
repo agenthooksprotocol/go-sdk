@@ -61,10 +61,14 @@ func loopback(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// validRedirect accepts https, or http only to a literal loopback IP (RFC 8252).
+// validRedirect accepts https, or http only to a literal loopback IP (RFC
+// 8252). A query is allowed (RFC 6749 section 3.1.2); a callback must repeat it.
 func validRedirect(raw string) bool {
 	u, err := url.Parse(raw)
-	if err != nil || !authutil.ValidURL(raw, true) || u.RawQuery != "" || u.ForceQuery {
+	if err != nil || !authutil.ValidURL(raw, true) || (u.ForceQuery && u.RawQuery == "") {
+		return false
+	}
+	if _, err := url.ParseQuery(u.RawQuery); err != nil {
 		return false
 	}
 	return u.Scheme == "https" || (u.Scheme == "http" && loopback(u.Hostname()))

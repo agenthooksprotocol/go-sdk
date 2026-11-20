@@ -124,6 +124,27 @@ func TestDecideTransportChallenges(t *testing.T) {
 			t.Fatalf("decisions = %v", got)
 		}
 	})
+	for _, header := range []string{`Bearer error="invalid_token"`, `Bearer error="insufficient_scope", Bearer error="insufficient_scope"`, `Bearer error="insufficient_scope", scope="`} {
+		t.Run("other 403 "+header, func(t *testing.T) {
+			// Not exactly one parseable Bearer insufficient_scope challenge:
+			// returned as is, without the provider or a retry.
+			f, p, r := setup(t, pkceFlow)
+			finishLogin(t, p, r)
+			f.onEvents = func(w http.ResponseWriter, _ *http.Request) bool {
+				w.Header().Set("WWW-Authenticate", header)
+				w.WriteHeader(403)
+				return true
+			}
+			ops := traced(p)
+			response, err := deliver(t, f, p, r, intercept)
+			if err != nil || response.StatusCode != 403 || f.eventCalls.Load() != 1 {
+				t.Fatalf("403 retried or failed: %v", err)
+			}
+			if got := ops(); len(got) != 1 || got[0] != opCredential {
+				t.Fatalf("decisions = %v", got)
+			}
+		})
+	}
 	t.Run("401 with insufficient_scope", func(t *testing.T) {
 		f, p, r := setup(t, pkceFlow)
 		allowAdmin(p)

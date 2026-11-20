@@ -179,7 +179,9 @@ To bind a new loopback port for each login, as MCP clients do, pass it with
 `PrepareWith(ctx, request, oauth.PrepareOptions{RedirectURI: redirect})`;
 `SelectClient` then need not return a `RedirectURI`. A redirect is required
 only when a login is created; lookup, refresh and `Complete` never need one.
-Redirects are HTTPS or HTTP to a literal loopback IP (`127.0.0.1`, `[::1]`);
+Redirects are HTTPS or HTTP to a literal loopback IP (`127.0.0.1`, `[::1]`),
+optionally with a query, which a callback must repeat exactly (parameters the
+authorization server adds, such as `session_state`, are allowed);
 `localhost` is `invalid_configuration` (RFC 8252 section 8.3), checked before
 client selection, registration or any login.
 

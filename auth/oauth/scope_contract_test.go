@@ -432,19 +432,23 @@ func TestScopeContractCompleteLoginEnded(t *testing.T) {
 	ended(err, true)
 }
 
-// A redirect with its own query is invalid configuration, so a callback is
-// matched on scheme, host, port and path; parameters the authorization server
-// adds (session_state) are allowed.
+// Complete compares the redirect's own query parameters; parameters the
+// authorization server adds (session_state) are allowed.
 func TestCompleteRedirectQuery(t *testing.T) {
 	_, p, r := setup(t, "authorization_code_pkce")
-	_, err := p.PrepareWith(budget(t), r, PrepareOptions{RedirectURI: "https://client.example/callback?tenant=a"})
-	contractError(t, err, auth.CodeInvalidConfiguration)
-	prepared, err := p.Prepare(budget(t), r)
+	prepared, err := p.PrepareWith(budget(t), r, PrepareOptions{RedirectURI: "https://client.example/callback?tenant=a"})
 	if err != nil || prepared.Login == nil {
 		t.Fatal(err)
 	}
-	if _, err := p.Complete(budget(t), r, callback(prepared.Login, "code")+"&session_state=added-by-server"); err != nil {
-		t.Fatalf("authorization-server parameter refused: %v", err)
+	valid := callback(prepared.Login, "code")
+	for _, query := range []string{"", "&tenant=b"} {
+		_, err = p.Complete(budget(t), r, valid+query)
+		if ended := contractError(t, err, auth.CodeAccessDenied).LoginEnded; ended == nil || *ended {
+			t.Fatal("invalid callback ended the login")
+		}
+	}
+	if _, err := p.Complete(budget(t), r, valid+"&tenant=a&session_state=added-by-server"); err != nil {
+		t.Fatalf("callback with the redirect's query refused: %v", err)
 	}
 }
 
