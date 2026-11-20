@@ -670,9 +670,9 @@ func (p *Provider) acquireLocked(ctx context.Context, r auth.Request, key string
 		result.Credential = p.credential(r, key, next)
 		return nil
 	}
-	if config.Flow == "client_credentials" || (usable(next) && (covered || (!stepUp && !interactive))) {
-		// A live grant lacks a requirement: refresh cannot broaden it, and a
-		// grant narrower than a recorded R is the server's refusal.
+	if config.Flow == "client_credentials" || (usable(next) && covered) {
+		// A renewal narrower than a recorded R is the server's refusal. A
+		// PKCE grant that never covered R needs consent instead.
 		return fail(auth.CodeAccessDenied, config.RequiredScopes...)
 	}
 	if !interactive {

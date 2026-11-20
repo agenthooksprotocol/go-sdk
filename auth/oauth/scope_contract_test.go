@@ -301,7 +301,8 @@ func TestScopeContractNarrowerRenewal(t *testing.T) {
 	t.Run("refresh", func(t *testing.T) {
 		f, p, r := setup(t, "authorization_code_pkce")
 		allowAdmin(p)
-		first := finishLogin(t, p, r)
+		f.mode.Store("admin-scope")
+		first := finishLogin(t, p, r, "admin")
 		configure(p, func(c *ClientConfig) { c.RequiredScopes = []string{"admin"} })
 		expire(t, f, first)
 		f.tokenBody.Store(`{"access_token":"refreshed-token","refresh_token":"rotated-refresh","token_type":"Bearer","expires_in":3600,"scope":"events"}`)
@@ -312,6 +313,21 @@ func TestScopeContractNarrowerRenewal(t *testing.T) {
 			t.Fatal("narrower refresh not persisted")
 		}
 	})
+}
+
+// A live PKCE grant that never covered R was not narrowed by any exchange: it
+// needs consent (interaction_required with R), not access_denied.
+func TestPKCEGrantNeverCoveringRequiresConsent(t *testing.T) {
+	_, p, r := setup(t, "authorization_code_pkce")
+	allowAdmin(p)
+	finishLogin(t, p, r)
+	configure(p, func(c *ClientConfig) { c.RequiredScopes = []string{"admin"} })
+	_, err := p.Credential(budget(t), r)
+	contractError(t, err, auth.CodeInteractionRequired, "admin")
+	prepared, err := p.Prepare(budget(t), r)
+	if err != nil || prepared.Login == nil {
+		t.Fatalf("prepare did not offer consent: %v", err)
+	}
 }
 
 // Rule 11: errors from host callbacks never carry scopes.

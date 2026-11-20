@@ -288,10 +288,11 @@ func TestLifecycleRefreshUsesPreviousGrant(t *testing.T) {
 			if mode == "refresh-omitted-scope" {
 				return
 			}
-			// The ignored broadening is not usable for an admin-requiring operation.
+			// The ignored broadening is not usable for an admin-requiring
+			// operation: the grant never covered admin, so it needs consent.
 			required = true
 			_, err = p.Credential(budget(t), r)
-			assertCode(t, err, auth.CodeAccessDenied)
+			assertCode(t, err, auth.CodeInteractionRequired)
 			required = false
 			recreated, err := New(p.options)
 			if err != nil {
