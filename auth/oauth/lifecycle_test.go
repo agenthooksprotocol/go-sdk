@@ -320,9 +320,12 @@ func TestLifecycleAcquisitionErrorsAreFlowSpecific(t *testing.T) {
 			f, p, r := setup(t, "client_credentials")
 			f.mode.Store(mode)
 			_, err := p.Credential(budget(t), r)
-			want := auth.CodeCredentialUnavailable
+			// Token-endpoint errors carry no scope code: invalid_grant is
+			// provider_failed for client credentials, and a pre-registered
+			// client's invalid_client is credential_unavailable.
+			want := auth.CodeProviderFailed
 			if mode == "invalid-client" {
-				want = auth.CodeInvalidConfiguration
+				want = auth.CodeCredentialUnavailable
 			}
 			assertCode(t, err, want)
 			if anyPending(p) {
@@ -494,7 +497,7 @@ func TestLifecycleRefreshInvalidGrant(t *testing.T) {
 			}
 			f.mode.Store("reject")
 			_, err := p.Prepare(budget(t), r)
-			assertCode(t, err, auth.CodeRefreshRejected)
+			assertCode(t, err, auth.CodeInteractionRequired)
 			record, _ := f.store.Load(budget(t), key)
 			if stale {
 				if record == nil || record.Generation != "newer" || record.RefreshToken != "newer-refresh" {

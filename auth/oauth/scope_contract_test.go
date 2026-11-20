@@ -184,7 +184,7 @@ func TestScopeContract401ScopeIsRequestedNotRequired(t *testing.T) {
 		first := finishLogin(t, p, r)
 		f.mode.Store("reject")
 		_, err := p.Challenge(budget(t), r, auth.Challenge{StatusCode: 401, Header: http.Header{"Www-Authenticate": {`Bearer scope="admin write"`}}, Attempt: first.Attempt})
-		contractError(t, err, auth.CodeRefreshRejected)
+		contractError(t, err, auth.CodeInteractionRequired)
 		f.mode.Store("ok")
 		prepared, err := p.Prepare(budget(t), r)
 		if err != nil || prepared.Login == nil {

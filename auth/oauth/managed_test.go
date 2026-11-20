@@ -521,7 +521,7 @@ func TestManagedTemporaryRefreshRetainsAndDefinitiveRejectionRepairs(t *testing.
 	expire(t, f, *state.Credential)
 	f.mode.Store("reject")
 	_, err = p.Prepare(ctx, r)
-	assertCode(t, err, auth.CodeRefreshRejected)
+	assertCode(t, err, auth.CodeInteractionRequired)
 	repair, err := p.Prepare(ctx, r)
 	if err != nil || repair.Login == nil {
 		t.Fatal("rejected refresh cannot be repaired by consent")

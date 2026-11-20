@@ -100,8 +100,10 @@ type completionVector struct {
 }
 
 // goFeatures are the optional SDK features this SDK has. Go's Complete takes
-// no pending-login handle: a callback names its login only by state.
-var goFeatures = map[string]bool{"token_validation_callback": true, "complete_handle": false}
+// no pending-login handle (a callback names its login only by state), and
+// Options.ValidateToken validates token-endpoint responses only, not a stored
+// token at use, so Go has no token_validation_callback in the spec's sense.
+var goFeatures = map[string]bool{"token_validation_callback": false, "complete_handle": false}
 
 // requireFeatures skips a vector needing an optional feature Go lacks and
 // fails on a feature this runner does not know.
@@ -402,11 +404,6 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 				if g.Refresh {
 					seeded.RefreshToken = "seed-refresh"
 				}
-				if callback == "token_validation" {
-					// Go validates tokens as the token endpoint issues them: the
-					// stored token is renewed so the host callback runs.
-					seeded.ExpiresAt, seeded.RefreshToken = time.Now().Add(-time.Hour), "seed-refresh"
-				}
 				if ok, err := store.CompareAndSwap(budget(t), key, "", cloneRecord(seeded)); !ok || err != nil {
 					t.Fatalf("seed grant: %v", err)
 				}
@@ -448,9 +445,14 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 				}
 			case "fresh":
 				if in.Binding == "unbound" {
-					// The first use of an unbound target is anonymous; its 401
-					// is the only way to reach OAuth.
-					credential, err = p.Challenge(budget(t), r, auth.Challenge{StatusCode: 401, Header: http.Header{}})
+					// An anonymous request to an unbound target receives the
+					// vector's 401 (a bare one when none is given), handled by
+					// Challenge with no token sent.
+					challenge := auth.Challenge{StatusCode: 401, Header: http.Header{}}
+					if in.Challenge != nil {
+						challenge = auth.Challenge{StatusCode: in.Challenge.Status, Header: http.Header{"Www-Authenticate": {in.Challenge.WWWAuthenticate}}}
+					}
+					credential, err = p.Challenge(budget(t), r, challenge)
 				} else {
 					var c auth.Credential
 					if c, err = p.Credential(budget(t), r); err == nil {

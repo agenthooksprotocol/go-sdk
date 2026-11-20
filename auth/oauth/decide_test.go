@@ -336,3 +336,82 @@ func (s *failingSwapStore) CompareAndSwap(ctx context.Context, key, expected str
 	}
 	return s.Store.CompareAndSwap(ctx, key, expected, value)
 }
+
+// Token-endpoint errors outside Complete never carry scopes or a scope code:
+// a PKCE refresh invalid_grant is interaction_required, unauthorized_client
+// credential_unavailable, a pre-registered client's invalid_client
+// credential_unavailable, and everything else provider_failed.
+func TestDecideTokenEndpointErrorsOutsideComplete(t *testing.T) {
+	cases := []struct {
+		name, mode, body string
+		pkce, machine    auth.Code
+	}{
+		{"invalid_grant", "", `400 {"error":"invalid_grant"}`, auth.CodeInteractionRequired, auth.CodeProviderFailed},
+		{"unauthorized_client", "", `400 {"error":"unauthorized_client"}`, auth.CodeCredentialUnavailable, auth.CodeCredentialUnavailable},
+		{"invalid_client", "", `401 {"error":"invalid_client"}`, auth.CodeCredentialUnavailable, auth.CodeCredentialUnavailable},
+		{"access_denied", "", `400 {"error":"access_denied"}`, auth.CodeProviderFailed, auth.CodeProviderFailed},
+		{"invalid_scope", "", `400 {"error":"invalid_scope"}`, auth.CodeProviderFailed, auth.CodeProviderFailed},
+		{"server_error", "", `500 {"error":"server_error"}`, auth.CodeProviderFailed, auth.CodeProviderFailed},
+		{"invalid response", "", `{"access_token":"access-token","expires_in":3600}`, auth.CodeProviderFailed, auth.CodeProviderFailed},
+		{"unreachable", "reset", "", auth.CodeProviderFailed, auth.CodeProviderFailed},
+	}
+	for _, tc := range cases {
+		t.Run("refresh "+tc.name, func(t *testing.T) {
+			f, p, r := setup(t, pkceFlow)
+			first := finishLogin(t, p, r)
+			expire(t, f, first)
+			f.tokenBody.Store(tc.body)
+			if tc.mode != "" {
+				f.mode.Store(tc.mode)
+			}
+			_, err := p.Credential(budget(t), r)
+			contractError(t, err, tc.pkce)
+			if f.refreshCalls.Load() != 1 {
+				t.Fatal("no refresh")
+			}
+		})
+		t.Run("client credentials "+tc.name, func(t *testing.T) {
+			f, p, r := setup(t, "client_credentials")
+			f.tokenBody.Store(tc.body)
+			if tc.mode != "" {
+				f.mode.Store(tc.mode)
+			}
+			_, err := p.Credential(budget(t), r)
+			contractError(t, err, tc.machine)
+		})
+	}
+	for source, code := range map[string]auth.Code{sourcePreregistered: auth.CodeCredentialUnavailable, sourceCIMD: auth.CodeInvalidConfiguration, sourceDCR: auth.CodeInteractionRequired} {
+		if err := clientError(source); auth.Classify(err).Code != code {
+			t.Fatalf("invalid_client for %s = %v; want %s", source, err, code)
+		}
+	}
+}
+
+// An unusable resource_metadata hint in a well-formed 401 falls back to the
+// default discovery locations instead of failing discovery.
+func TestDecideUnusableHintFallsBack(t *testing.T) {
+	f, p, r := setup(t, "client_credentials")
+	r.Binding = nil
+	credential, err := p.Challenge(budget(t), r, auth.Challenge{StatusCode: 401, Header: http.Header{"Www-Authenticate": {`Bearer resource_metadata="http://insecure.example/prm"`}}})
+	if err != nil || credential == nil || f.resourceCalls.Load() != 1 {
+		t.Fatalf("unusable hint did not fall back: %v", err)
+	}
+}
+
+// An unbound target's unparseable challenge falls back to the default
+// discovery locations (one protected-resource fetch for client selection),
+// then decide refuses it: access_denied, no scopes, no authorization-server
+// request.
+func TestDecideUnboundUnparseableChallenge(t *testing.T) {
+	for _, header := range []string{`Bearer realm="unterminated`, `Bearer scope="a  b", resource_metadata="https://elsewhere.example/prm"`} {
+		t.Run(header, func(t *testing.T) {
+			f, p, r := setup(t, "client_credentials")
+			r.Binding = nil
+			_, err := p.Challenge(budget(t), r, auth.Challenge{StatusCode: 401, Header: http.Header{"Www-Authenticate": {header}}})
+			contractError(t, err, auth.CodeAccessDenied)
+			if f.resourceCalls.Load() > 1 || f.metadataCalls.Load() != f.resourceCalls.Load() || f.tokenCalls.Load() != 0 {
+				t.Fatalf("network: %d resource, %d metadata, %d token", f.resourceCalls.Load(), f.metadataCalls.Load(), f.tokenCalls.Load())
+			}
+		})
+	}
+}

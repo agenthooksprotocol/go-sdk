@@ -482,7 +482,12 @@ func (p *Provider) operate(ctx context.Context, r auth.Request, q call) (Prepara
 	}
 	// An exchange, login or registration needs current metadata: full
 	// discovery, honouring a challenge's resource_metadata, rebuilds the binding.
-	if config, err = p.discover(ctx, r, q.challenge.header); err != nil {
+	// A malformed challenge's hint is never followed: default locations.
+	header := q.challenge.header
+	if q.challenge.kind == malformed {
+		header = ""
+	}
+	if config, err = p.discover(ctx, r, header); err != nil {
 		return Preparation{}, err
 	}
 	// The client source of an unrecorded CIMD or DCR client is chosen from
@@ -550,7 +555,10 @@ func (p *Provider) obtain(ctx context.Context, r auth.Request, config ClientConf
 			// a failed write only leaves the backoff to elapse.
 			p.recovered(ctx, config)
 		}
-		if reason != errInvalidClient || !machine {
+		if reason == errInvalidClient && !machine {
+			return Preparation{}, clientError(config.source), false
+		}
+		if reason != errInvalidClient {
 			return result, err, reason == errEndpoint
 		}
 		if err := p.drop(ctx, config, attempt > 0); err != nil {
@@ -795,9 +803,9 @@ func oauthConfig(c ClientConfig, m metadata) *oauth2.Config {
 	return &oauth2.Config{ClientID: c.ClientID, ClientSecret: c.ClientSecret, RedirectURL: c.RedirectURI, Scopes: append([]string(nil), c.Scopes...), Endpoint: oauth2.Endpoint{AuthURL: m.AuthorizationEndpoint, TokenURL: m.TokenEndpoint, AuthStyle: authStyle(c)}}
 }
 
-// machine issues a client-credentials grant. Re-acquisition for an existing
-// grant also requests and keeps its previously granted scopes, and any
-// remembered 401 challenge scopes.
+// machine issues a client-credentials grant requesting scopes, decide's
+// acquisition set: previously granted scopes plus the request, R and this
+// operation's 401 hint, within the ceiling.
 func (p *Provider) machine(ctx context.Context, key string, c ClientConfig, m metadata, previous *Record, scopes []string) (*Record, error) {
 	var granted []string
 	if previous != nil {
@@ -812,7 +820,7 @@ func (p *Provider) machine(ctx context.Context, key string, c ClientConfig, m me
 	conf := clientcredentials.Config{ClientID: c.ClientID, ClientSecret: c.ClientSecret, TokenURL: m.TokenEndpoint, Scopes: c.Scopes, AuthStyle: authStyle(c), EndpointParams: url.Values{"resource": {c.Resource}}}
 	token, err := conf.Token(context.WithValue(ctx, oauth2.HTTPClient, p.tokenClient(c, m, nil)))
 	if err != nil {
-		return nil, acquisitionError(ctx, err, false)
+		return nil, acquisitionError(ctx, err)
 	}
 	next, err := p.grant(ctx, c, merge(granted, allowedScopes(c)...), token, nil)
 	return p.commit(ctx, key, generation(previous), next, err)
@@ -839,7 +847,14 @@ func unsent(err error) bool {
 	return errors.As(err, &dns) || (errors.As(err, &op) && op.Op == "dial") || errors.As(err, &verify) || errors.As(err, &header) || errors.As(err, &alert)
 }
 
-func acquisitionError(ctx context.Context, err error, interactive bool) error {
+// acquisitionError classifies a failed refresh or client-credentials token
+// request. It never carries scopes and never chooses a scope code:
+// unauthorized_client is credential_unavailable, invalid_client is
+// errInvalidClient (classified by client source by the caller), an
+// endpoint that provably did not process the request is errEndpoint, and
+// everything else (including access_denied and invalid_scope) is
+// provider_failed. A refresh invalid_grant is handled by refresh.
+func acquisitionError(ctx context.Context, err error) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -852,22 +867,31 @@ func acquisitionError(ctx context.Context, err error, interactive bool) error {
 		return fail(auth.CodeProviderFailed)
 	}
 	switch rejected.ErrorCode {
-	case "invalid_grant":
-		if interactive {
-			return fail(auth.CodeInteractionRequired)
-		}
-		return fail(auth.CodeCredentialUnavailable)
 	case "invalid_client":
 		return errInvalidClient
-	case "access_denied", "invalid_scope":
-		return fail(auth.CodeAccessDenied)
+	case "unauthorized_client":
+		return fail(auth.CodeCredentialUnavailable)
 	}
 	return fail(auth.CodeProviderFailed)
 }
 
+// clientError classifies a token-endpoint invalid_client by client source:
+// the host repairs a pre-registered client (credential_unavailable), a CIMD
+// client is configuration, and a DCR client needs a new registration
+// through a login (interaction_required).
+func clientError(source string) error {
+	switch source {
+	case sourceDCR:
+		return fail(auth.CodeInteractionRequired)
+	case sourceCIMD:
+		return fail(auth.CodeInvalidConfiguration)
+	}
+	return fail(auth.CodeCredentialUnavailable)
+}
+
 // refresh never broadens the previous grant and uses the client stored with
-// it. Transient failures keep the record untouched; a definitive invalid_grant,
-// or invalid_client for a registered client, drops it.
+// it. Transient failures keep the record untouched; a definitive invalid_grant
+// (interaction_required), or invalid_client for a registered client, drops it.
 func (p *Provider) refresh(ctx context.Context, key string, c ClientConfig, m metadata, previous *Record) (*Record, error) {
 	if c.source == sourceDCR {
 		c.ClientID, c.ClientSecret, c.TokenAuthMethod = previous.ClientID, "", "none"
@@ -905,19 +929,20 @@ func (p *Provider) refresh(ctx context.Context, key string, c ClientConfig, m me
 				return nil, safe(ctx, saveErr, auth.CodeProviderFailed)
 			}
 			if invalidClient {
-				return nil, fail(auth.CodeInteractionRequired)
+				return nil, clientError(sourceDCR)
 			}
-			return nil, fail(auth.CodeRefreshRejected)
+			// The grant is gone: consent is needed again.
+			return nil, fail(auth.CodeInteractionRequired)
 		}
-		return nil, acquisitionError(ctx, err, false)
+		return nil, acquisitionError(ctx, err)
 	}
 	next, err := p.grant(ctx, c, previous.Scopes, token, previous)
 	return p.commit(ctx, key, previous.Generation, next, err)
 }
 
-// login creates a pending login for this caller. It requests any previously
-// granted scopes plus the request, required scopes and remembered 401
-// challenge scopes, and stores the caller's ceiling, which bounds the grant
+// login creates a pending login for this caller. It requests decide's login
+// set (previously granted scopes plus the request and R, within the ceiling),
+// and stores the caller's ceiling, which bounds the grant
 // recorded on completion, and the required set completion must cover. A dynamically
 // registered PKCE client is registered here, with the login's exact redirect.
 // Its lifetime is fixed here and does not depend on the caller's context.
@@ -1215,17 +1240,9 @@ func (p *Provider) complete(ctx context.Context, r auth.Request, callback string
 	exchange.ClientID, exchange.Scopes, exchange.RedirectURI = pending.ClientID, pending.Scopes, pending.RedirectURI
 	credential, err := p.exchange(ctx, r, key, exchange, ceiling, required, m, pending, query.Get("code"))
 	if errors.Is(err, errInvalidClient) {
-		switch config.source {
-		case sourceDCR:
-			// Only this login ends; the stored grant may hold an older valid
-			// client. The next prepare registers again.
-			err = fail(auth.CodeInteractionRequired)
-		case sourceCIMD:
-			err = fail(auth.CodeInvalidConfiguration)
-		default:
-			// The host repairs its pre-registered client information.
-			err = fail(auth.CodeCredentialUnavailable)
-		}
+		// Only this login ends; for DCR the stored grant may hold an older
+		// valid client, and the next prepare registers again.
+		err = clientError(config.source)
 	}
 	if err == nil && ctx.Err() != nil {
 		// The exchange completed detached; the caller still sees cancellation.

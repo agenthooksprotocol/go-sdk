@@ -147,7 +147,7 @@ func expireStored(t *testing.T, f *fixture, p *Provider, r auth.Request) {
 // A known binding whose up-front renewal fails fails the operation; it is never
 // sent anonymously.
 func TestUpFrontRefreshFailureNoAnonymousFallback(t *testing.T) {
-	for mode, code := range map[string]auth.Code{"temporary": auth.CodeProviderFailed, "reject": auth.CodeRefreshRejected} {
+	for mode, code := range map[string]auth.Code{"temporary": auth.CodeProviderFailed, "reject": auth.CodeInteractionRequired} {
 		t.Run(mode, func(t *testing.T) {
 			f, p, r := setup(t, "authorization_code_pkce")
 			r.Binding = nil
@@ -285,7 +285,7 @@ func TestKnownBindingWithoutTokenRequiresLogin(t *testing.T) {
 	expireStored(t, f, p, r)
 	f.mode.Store("reject")
 	_, err := p.Prepare(budget(t), r)
-	assertCode(t, err, auth.CodeRefreshRejected)
+	assertCode(t, err, auth.CodeInteractionRequired)
 	_, err = doNotification(t, f, p, r)
 	assertCode(t, err, auth.CodeInteractionRequired)
 	if f.eventCalls.Load() != 0 {
@@ -382,7 +382,8 @@ func TestStaleMetadataRefetchOnce(t *testing.T) {
 					t.Fatal("refetched metadata not persisted")
 				}
 			case "oauth-error":
-				assertCode(t, err, auth.CodeInvalidConfiguration)
+				// A pre-registered client's invalid_client: the host repairs it.
+				assertCode(t, err, auth.CodeCredentialUnavailable)
 				if f.metadataCalls.Load() != metadata {
 					t.Fatal("OAuth error triggered a metadata refetch")
 				}
@@ -398,7 +399,7 @@ func TestStaleMetadataRefetchOnce(t *testing.T) {
 // their error with no metadata refetch and no immediate retry, so a spent
 // refresh token is never replayed.
 func TestAmbiguousRenewalFailureNoRefetch(t *testing.T) {
-	for mode, code := range map[string]auth.Code{"temporary": auth.CodeProviderFailed, "non-oauth": auth.CodeProviderFailed, "redirect": auth.CodeProviderFailed, "cancel": auth.CodeProviderFailed, "reset": auth.CodeProviderFailed, "reject": auth.CodeRefreshRejected} {
+	for mode, code := range map[string]auth.Code{"temporary": auth.CodeProviderFailed, "non-oauth": auth.CodeProviderFailed, "redirect": auth.CodeProviderFailed, "cancel": auth.CodeProviderFailed, "reset": auth.CodeProviderFailed, "reject": auth.CodeInteractionRequired} {
 		t.Run(mode, func(t *testing.T) {
 			f, p, r := setup(t, "authorization_code_pkce")
 			r.Binding = nil

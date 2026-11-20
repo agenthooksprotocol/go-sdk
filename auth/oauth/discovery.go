@@ -62,9 +62,11 @@ func (p *Provider) discover(ctx context.Context, request auth.Request, challenge
 		// let a challenge replace that identity with an advertised one.
 		resource = protectedResource{Resource: preset.Resource, AuthorizationServers: []string{preset.Issuer}}
 	} else {
+		// An unusable hint (or an unparseable challenge, which decide
+		// refuses) falls back to the default locations.
 		hint, err := resourceMetadataHint(challenge)
 		if err != nil {
-			return ClientConfig{}, fail(auth.CodeDiscoveryFailed)
+			hint = ""
 		}
 		candidates := []string{hint}
 		if hint == "" {
