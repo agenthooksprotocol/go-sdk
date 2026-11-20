@@ -1434,9 +1434,6 @@ func (p *Provider) Credential(ctx context.Context, r auth.Request) (auth.Credent
 // requirement, refused when the stored grant already records it for the
 // rejected generation.
 func (p *Provider) Challenge(ctx context.Context, r auth.Request, c auth.Challenge) (*auth.Credential, error) {
-	if err := bounded(ctx); err != nil {
-		return nil, classify(ctx, err, auth.CodeInvalidConfiguration, nil)
-	}
 	q := call{op: opChallenge, challenge: parseChallenge(c.StatusCode, strings.Join(c.Header.Values("WWW-Authenticate"), ", "))}
 	if c.StatusCode != http.StatusUnauthorized && c.StatusCode != http.StatusForbidden {
 		q.challenge = challenge{kind: forbidden, status: c.StatusCode}
@@ -1463,6 +1460,10 @@ func (p *Provider) Challenge(ctx context.Context, r auth.Request, c auth.Challen
 		}
 	} else if len(r.Binding) != 0 {
 		return nil, classify(ctx, fail(auth.CodeInvalidConfiguration), auth.CodeInvalidConfiguration, nil)
+	}
+	// The budget check follows the 401 retirement: step 0 runs whatever the outcome.
+	if err := bounded(ctx); err != nil {
+		return nil, classify(ctx, err, auth.CodeInvalidConfiguration, nil)
 	}
 	result, err := p.operate(ctx, cloneRequest(r), q)
 	if err != nil {

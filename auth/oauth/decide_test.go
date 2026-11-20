@@ -416,3 +416,20 @@ func TestDecideUnboundUnparseableChallenge(t *testing.T) {
 		})
 	}
 }
+
+// Step 0: a 401 retires the sent generation before any other check,
+// including the context-budget check.
+func TestDecideChallengeRetiresBeforeBudget(t *testing.T) {
+	f, p, r := setup(t, pkceFlow)
+	first := finishLogin(t, p, r)
+	before := network(f)
+	_, err := p.Challenge(context.Background(), r, auth.Challenge{StatusCode: 401, Header: http.Header{}, Attempt: first.Attempt})
+	contractError(t, err, auth.CodeInvalidConfiguration)
+	record, _ := f.store.Load(budget(t), first.Attempt.(attempted).key)
+	if record.AccessToken != "" || record.Generation == first.Attempt.(attempted).generation {
+		t.Fatal("a 401 without a deadline did not retire the rejected token")
+	}
+	if n := network(f) - before; n != 0 {
+		t.Fatalf("network calls = %d", n)
+	}
+}

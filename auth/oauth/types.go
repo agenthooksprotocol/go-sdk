@@ -172,10 +172,11 @@ type PendingRecord struct {
 	// with. Completion succeeds only when the grant, within the current
 	// ceiling, covers it.
 	Scopes, Ceiling, Required []string
-	// HasRequired marks a record that stores Required. A record written by
-	// an older release has none: completion then requires HostRequired, the
-	// host RequiredScopes at prepare time, when the record holds it, else the
-	// current host RequiredScopes.
+	// HasRequired marks a record that stores Required. HostRequired is the
+	// host RequiredScopes at prepare time. A record without HasRequired
+	// (written by an older release, which stored neither) is completed
+	// against HostRequired when it holds one, else the current host
+	// RequiredScopes.
 	HasRequired  bool
 	HostRequired []string
 	ExpiresAt    time.Time
