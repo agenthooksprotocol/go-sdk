@@ -159,7 +159,7 @@ type vectorServer struct {
 	scopes  [][]string
 	grants  []string
 
-	prm, authorizationServer atomic.Int32
+	prm, authorizationServer, registrations atomic.Int32
 }
 
 func newVectorServer(t *testing.T) *vectorServer {
@@ -198,9 +198,15 @@ func (s *vectorServer) serve(w http.ResponseWriter, r *http.Request) {
 	case "/.well-known/oauth-authorization-server":
 		json.NewEncoder(w).Encode(s.metadata())
 	case "/register":
+		s.registrations.Add(1)
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
-		response := map[string]any{"client_id": "dcr-client", "redirect_uris": body["redirect_uris"], "grant_types": body["grant_types"], "token_endpoint_auth_method": body["token_endpoint_auth_method"]}
+		response := map[string]any{"client_id": "dcr-client"}
+		for _, name := range []string{"redirect_uris", "grant_types", "token_endpoint_auth_method"} {
+			if value, ok := body[name]; ok {
+				response[name] = value
+			}
+		}
 		if body["token_endpoint_auth_method"] != "none" {
 			response["client_secret"] = "dcr-secret"
 		}
@@ -305,6 +311,21 @@ func (s *writesStore) retired(key, generation string) bool {
 	return false
 }
 
+// vectorHost is the vectors' protected resource origin; the runner's TLS
+// server stands in for it, set per test.
+var vectorHost = struct {
+	sync.Mutex
+	url string
+}{}
+
+// vectorHeader points a challenge's https://api.example URLs at the test
+// server: the same resource, at a reachable origin.
+func vectorHeader(header string) string {
+	vectorHost.Lock()
+	defer vectorHost.Unlock()
+	return strings.ReplaceAll(header, "https://api.example", vectorHost.url)
+}
+
 func vectorGeneration(n int) string { return fmt.Sprintf("generation-%d", n) }
 
 func TestCanonicalScopeDecisions(t *testing.T) {
@@ -314,6 +335,9 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 			requireFeatures(t, vector.Requires)
 			in, expect := vector.Input, vector.Expect
 			s := newVectorServer(t)
+			vectorHost.Lock()
+			vectorHost.url = s.server.URL
+			vectorHost.Unlock()
 			config := ClientConfig{Issuer: s.server.URL, Resource: s.resource, ClientID: "client", Flow: in.Flow, Scopes: in.Requested, AllowedScopes: in.Ceiling, RequiredScopes: in.HostRequired, RedirectURI: "https://client.example/callback"}
 			if in.Flow == "client_credentials" {
 				config.ClientSecret = "vector-secret"
@@ -450,7 +474,7 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 					// Challenge with no token sent.
 					challenge := auth.Challenge{StatusCode: 401, Header: http.Header{}}
 					if in.Challenge != nil {
-						challenge = auth.Challenge{StatusCode: in.Challenge.Status, Header: http.Header{"Www-Authenticate": {in.Challenge.WWWAuthenticate}}}
+						challenge = auth.Challenge{StatusCode: in.Challenge.Status, Header: http.Header{"Www-Authenticate": {vectorHeader(in.Challenge.WWWAuthenticate)}}}
 					}
 					credential, err = p.Challenge(budget(t), r, challenge)
 				} else {
@@ -466,7 +490,7 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 			case "preemptive":
 				credential, err = p.PreemptiveCredential(budget(t), r)
 			case "challenge":
-				challenge := auth.Challenge{StatusCode: in.Challenge.Status, Header: http.Header{"Www-Authenticate": {in.Challenge.WWWAuthenticate}}}
+				challenge := auth.Challenge{StatusCode: in.Challenge.Status, Header: http.Header{"Www-Authenticate": {vectorHeader(in.Challenge.WWWAuthenticate)}}}
 				if sent != "" {
 					challenge.Attempt = attempted{p, key, sent, requestIdentity(r)}
 				}
@@ -784,8 +808,16 @@ func TestCanonicalCompletions(t *testing.T) {
 				mu.Lock()
 				hostErr = nil
 				mu.Unlock()
-				if _, err := p.Complete(budget(t), r, callback); err != nil {
-					t.Fatalf("login did not complete after the host failure: %v", err)
+				_, err := p.Complete(budget(t), r, callback)
+				switch in.Callback {
+				case "denied":
+					// The pending login now records the consent denial.
+					ended := true
+					vectorError(t, err, string(auth.CodeAccessDenied), nil, &ended)
+				default:
+					if err != nil {
+						t.Fatalf("login did not complete after the host failure: %v", err)
+					}
 				}
 			}
 		})
@@ -808,4 +840,140 @@ func (s *rereadFailingStore) Load(ctx context.Context, key string) (*Record, err
 		return nil, errors.New("store unavailable")
 	}
 	return s.uncertainStore.memoryStore.Load(ctx, key)
+}
+
+type tokenErrorVector struct {
+	ID       string   `json:"id"`
+	Requires []string `json:"requires"`
+	Input    struct {
+		GrantType    string `json:"grant_type"`
+		ClientSource string `json:"client_source"`
+		Error        string `json:"error"`
+	} `json:"input"`
+	Expect struct {
+		Code            string `json:"code"`
+		Reregistrations *int32 `json:"reregistrations"`
+	} `json:"expect"`
+}
+
+// TestCanonicalTokenErrors runs every token_errors vector: a refresh or
+// client-credentials token-endpoint error, classified without scopes.
+func TestCanonicalTokenErrors(t *testing.T) {
+	data, err := os.ReadFile("testdata/sdk-auth-lifecycle.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sections map[string]json.RawMessage
+	if err := json.Unmarshal(data, &sections); err != nil {
+		t.Fatal(err)
+	}
+	var vectors []tokenErrorVector
+	decoder := json.NewDecoder(bytes.NewReader(sections["token_errors"]))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&vectors); err != nil || len(vectors) == 0 {
+		t.Fatalf("token_errors: %v", err)
+	}
+	for _, vector := range vectors {
+		t.Run(vector.ID, func(t *testing.T) {
+			requireFeatures(t, vector.Requires)
+			in, expect := vector.Input, vector.Expect
+			switch in.Error {
+			case "invalid_grant", "invalid_client", "unauthorized_client", "access_denied", "invalid_scope", "server_error", "unreachable", "not_found", "invalid_response":
+			default:
+				t.Fatalf("unknown error %q", in.Error)
+			}
+			s := newVectorServer(t)
+			config := ClientConfig{Issuer: s.server.URL, Resource: s.resource, Scopes: []string{"read"}, RedirectURI: "https://client.example/callback"}
+			source := in.ClientSource
+			switch in.GrantType {
+			case "refresh":
+				config.Flow = pkceFlow
+			case "client_credentials":
+				config.Flow = "client_credentials"
+				if source == sourceCIMD {
+					t.Fatal("cimd applies only to refresh")
+				}
+			default:
+				t.Fatalf("unknown grant type %q", in.GrantType)
+			}
+			switch source {
+			case sourcePreregistered:
+				config.ClientID = "client"
+				if config.Flow != pkceFlow {
+					config.ClientSecret = "vector-secret"
+				}
+			case sourceCIMD:
+				s.cimd = true
+				config.ClientIDMetadataDocument = &MetadataDocument{URL: "https://client.example/client.json", RedirectURIs: []string{config.RedirectURI}}
+			case sourceDCR:
+				config.Registration = &RegistrationPolicy{ClientName: "Vector Adapter"}
+			default:
+				t.Fatalf("unknown client source %q", source)
+			}
+			store := newStore()
+			p, err := New(Options{Namespace: "vectors", Store: store, Secrets: newSecrets(), HTTPClient: s.server.Client(), CheckDestination: func(ctx context.Context, raw string, _ Purpose) error {
+				if !strings.HasPrefix(raw, s.server.URL+"/") {
+					return errors.New("untrusted")
+				}
+				return ctx.Err()
+			}, SelectClient: func(ctx context.Context, _ auth.Request, _ []string, _ string) (ClientConfig, error) {
+				return cloneConfig(config), ctx.Err()
+			}, ValidateToken: func(ctx context.Context, _ ClientConfig, _ *oauth2.Token) error { return ctx.Err() }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := auth.Request{BackendID: "backend", Purpose: auth.Event, Destination: s.resource}
+			// The stored binding records the client source.
+			public := cloneConfig(config)
+			public.ClientSecret, public.source = "", source
+			if source == sourceCIMD {
+				public.ClientID = config.ClientIDMetadataDocument.URL
+			}
+			if ok, err := store.CompareAndSwap(budget(t), p.bindingKey(r), "", &Record{Generation: randomID(), Binding: &BindingMetadata{Config: public, IssuerMetadata: s.metadata(), Source: source}}); !ok || err != nil {
+				t.Fatalf("seed binding: %v", err)
+			}
+			key := p.key(r, mustConfig(t, p, r))
+			switch {
+			case config.Flow == pkceFlow:
+				// An expired grant with refresh material, issued to the client.
+				issued := public.ClientID
+				if source == sourceDCR {
+					issued = "dcr-client"
+				}
+				if ok, err := store.CompareAndSwap(budget(t), key, "", &Record{Generation: randomID(), AccessToken: "seed-access", RefreshToken: "seed-refresh", ExpiresAt: time.Now().Add(-time.Hour), Scopes: []string{"read"}, ClientID: issued}); !ok || err != nil {
+					t.Fatalf("seed grant: %v", err)
+				}
+			case source == sourceDCR:
+				// A usable registration first; then its grant is gone.
+				if _, err := p.Credential(budget(t), r); err != nil {
+					t.Fatalf("register: %v", err)
+				}
+				record, _ := store.Load(budget(t), key)
+				if ok, err := store.CompareAndSwap(budget(t), key, record.Generation, &Record{Generation: randomID()}); !ok || err != nil {
+					t.Fatalf("drop grant: %v", err)
+				}
+			}
+			registrations := s.registrations.Load()
+			s.mu.Lock()
+			s.mode, s.scopes, s.grants = in.Error, nil, nil
+			s.mu.Unlock()
+			_, err = p.Credential(budget(t), r)
+			vectorError(t, err, expect.Code, nil, nil)
+			grantType, _ := s.last()
+			want := map[string]string{pkceFlow: "refresh_token", "client_credentials": "client_credentials"}[config.Flow]
+			if grantType != want {
+				t.Fatalf("token request %q; want %q", grantType, want)
+			}
+			reregistered := s.registrations.Load() - registrations
+			if (expect.Reregistrations != nil) != (in.GrantType == "client_credentials" && source == sourceDCR && in.Error == "invalid_client") {
+				t.Fatal("reregistrations is present exactly for a client-credentials DCR invalid_client")
+			}
+			if expect.Reregistrations != nil && reregistered != *expect.Reregistrations {
+				t.Fatalf("reregistrations = %d; want %d", reregistered, *expect.Reregistrations)
+			}
+			if expect.Reregistrations == nil && reregistered != 0 {
+				t.Fatalf("%d unexpected registrations", reregistered)
+			}
+		})
+	}
 }

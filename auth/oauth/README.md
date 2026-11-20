@@ -328,9 +328,10 @@ never creates pending consent.
 Transient OAuth errors, 5xx, non-OAuth responses and transport failures preserve
 refresh material and return retry advice. Definitive PKCE `invalid_grant` drops
 the stored tokens (unless a newer record replaced them) and becomes
-`interaction_required`; call `Prepare` for consent. Outside `Complete`, other
-refresh and client-credentials token-endpoint errors carry no scopes:
-`unauthorized_client` is `credential_unavailable`, `invalid_client` is
+`refresh_rejected`; call `Prepare` for consent. Outside `Complete`, other
+refresh and client-credentials token-endpoint errors carry no scopes: a
+client-credentials `invalid_grant` and `unauthorized_client` are
+`credential_unavailable`, `invalid_client` is
 `credential_unavailable` for a pre-registered client, `invalid_configuration`
 for CIMD and `interaction_required` for a PKCE DCR client (a client-credentials
 DCR registration is replaced once first), and everything else, including

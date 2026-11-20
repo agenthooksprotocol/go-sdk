@@ -848,12 +848,13 @@ func unsent(err error) bool {
 }
 
 // acquisitionError classifies a failed refresh or client-credentials token
-// request. It never carries scopes and never chooses a scope code:
-// unauthorized_client is credential_unavailable, invalid_client is
-// errInvalidClient (classified by client source by the caller), an
-// endpoint that provably did not process the request is errEndpoint, and
-// everything else (including access_denied and invalid_scope) is
-// provider_failed. A refresh invalid_grant is handled by refresh.
+// request (spec: renewal errors). It never carries scopes and never chooses a
+// scope code: a client-credentials invalid_grant and unauthorized_client are
+// credential_unavailable, invalid_client is errInvalidClient (classified by
+// client source by the caller), an endpoint that provably did not process the
+// request is errEndpoint, and everything else (including access_denied and
+// invalid_scope) is provider_failed. A refresh invalid_grant is handled by
+// refresh (refresh_rejected).
 func acquisitionError(ctx context.Context, err error) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -869,7 +870,7 @@ func acquisitionError(ctx context.Context, err error) error {
 	switch rejected.ErrorCode {
 	case "invalid_client":
 		return errInvalidClient
-	case "unauthorized_client":
+	case "invalid_grant", "unauthorized_client":
 		return fail(auth.CodeCredentialUnavailable)
 	}
 	return fail(auth.CodeProviderFailed)
@@ -891,7 +892,7 @@ func clientError(source string) error {
 
 // refresh never broadens the previous grant and uses the client stored with
 // it. Transient failures keep the record untouched; a definitive invalid_grant
-// (interaction_required), or invalid_client for a registered client, drops it.
+// (refresh_rejected), or invalid_client for a registered client, drops it.
 func (p *Provider) refresh(ctx context.Context, key string, c ClientConfig, m metadata, previous *Record) (*Record, error) {
 	if c.source == sourceDCR {
 		c.ClientID, c.ClientSecret, c.TokenAuthMethod = previous.ClientID, "", "none"
@@ -932,7 +933,7 @@ func (p *Provider) refresh(ctx context.Context, key string, c ClientConfig, m me
 				return nil, clientError(sourceDCR)
 			}
 			// The grant is gone: consent is needed again.
-			return nil, fail(auth.CodeInteractionRequired)
+			return nil, fail(auth.CodeRefreshRejected)
 		}
 		return nil, acquisitionError(ctx, err)
 	}

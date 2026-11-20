@@ -338,15 +338,16 @@ func (s *failingSwapStore) CompareAndSwap(ctx context.Context, key, expected str
 }
 
 // Token-endpoint errors outside Complete never carry scopes or a scope code:
-// a PKCE refresh invalid_grant is interaction_required, unauthorized_client
-// credential_unavailable, a pre-registered client's invalid_client
-// credential_unavailable, and everything else provider_failed.
+// a PKCE refresh invalid_grant is refresh_rejected, a client-credentials
+// invalid_grant and unauthorized_client credential_unavailable, a
+// pre-registered client's invalid_client credential_unavailable, and
+// everything else provider_failed.
 func TestDecideTokenEndpointErrorsOutsideComplete(t *testing.T) {
 	cases := []struct {
 		name, mode, body string
 		pkce, machine    auth.Code
 	}{
-		{"invalid_grant", "", `400 {"error":"invalid_grant"}`, auth.CodeInteractionRequired, auth.CodeProviderFailed},
+		{"invalid_grant", "", `400 {"error":"invalid_grant"}`, auth.CodeRefreshRejected, auth.CodeCredentialUnavailable},
 		{"unauthorized_client", "", `400 {"error":"unauthorized_client"}`, auth.CodeCredentialUnavailable, auth.CodeCredentialUnavailable},
 		{"invalid_client", "", `401 {"error":"invalid_client"}`, auth.CodeCredentialUnavailable, auth.CodeCredentialUnavailable},
 		{"access_denied", "", `400 {"error":"access_denied"}`, auth.CodeProviderFailed, auth.CodeProviderFailed},

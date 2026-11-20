@@ -81,6 +81,12 @@ func parseChallenge(status int, header string) challenge {
 	}
 	var scope string
 	var hasScope bool
+	if bearer != nil && bearer.Token68 != "" {
+		// A Bearer challenge takes auth-params (RFC 6750), never token68:
+		// "Bearer scope" is a bad auth-param.
+		parsed.kind = malformed
+		return parsed
+	}
 	if bearer != nil {
 		scope, hasScope = bearer.Params["scope"]
 		if hasScope && !authutil.ValidScopeList(scope) {
