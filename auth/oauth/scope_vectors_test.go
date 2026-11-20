@@ -103,7 +103,9 @@ type completionVector struct {
 // no pending-login handle (a callback names its login only by state), and
 // Options.ValidateToken validates token-endpoint responses only, not a stored
 // token at use, so Go has no token_validation_callback in the spec's sense.
-var goFeatures = map[string]bool{"token_validation_callback": false, "complete_handle": false}
+// Go's 0.14.0 pending records never held a prepare-time H, so it has no
+// legacy_prepare_time_host_required either.
+var goFeatures = map[string]bool{"token_validation_callback": false, "complete_handle": false, "legacy_prepare_time_host_required": false}
 
 // requireFeatures skips a vector needing an optional feature Go lacks and
 // fails on a feature this runner does not know.
@@ -621,7 +623,9 @@ func TestCanonicalCompletions(t *testing.T) {
 			}
 			config := ClientConfig{Issuer: s.server.URL, Resource: s.resource, Flow: pkceFlow, Scopes: in.Ceiling, AllowedScopes: merge(in.Ceiling, preparedRequired...), RedirectURI: redirect}
 			if in.PrepareTimeHostRequired != nil {
-				config.AllowedScopes = merge(config.AllowedScopes, *in.PrepareTimeHostRequired...)
+				// Only vectors requiring legacy_prepare_time_host_required
+				// define it, and they were skipped.
+				t.Fatal("prepare_time_host_required without its feature")
 			}
 			switch in.ClientSource {
 			case "preregistered":
@@ -676,12 +680,9 @@ func TestCanonicalCompletions(t *testing.T) {
 			}
 			if in.StoredRequired == nil {
 				editPending(func(login *PendingRecord) {
-					login.Required, login.HasRequired, login.HostRequired = nil, false, nil
-					if in.PrepareTimeHostRequired != nil {
-						login.HostRequired = append([]string{}, *in.PrepareTimeHostRequired...)
-					}
+					login.Required, login.HasRequired = nil, false
 				})
-			} else if in.PrepareTimeHostRequired != nil || in.CurrentHostRequired != nil {
+			} else if in.CurrentHostRequired != nil {
 				t.Fatal("host required sets apply only to an older record")
 			}
 			mu.Lock()
