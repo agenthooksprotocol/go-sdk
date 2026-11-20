@@ -585,7 +585,7 @@ func TestLifecycleScopeCeilingWideningKeepsGrant(t *testing.T) {
 		t.Fatalf("widened ceiling orphaned the grant: %v", err)
 	}
 	record, _ := f.store.Load(budget(t), first.Attempt.(attempted).key)
-	if satisfies(record, ClientConfig{AllowedScopes: []string{"admin"}, RequiredScopes: []string{"events"}}) {
+	if d := decide(decisionInput{op: opCredential, config: ClientConfig{Scopes: []string{"admin"}, AllowedScopes: []string{"admin"}, RequiredScopes: []string{"admin"}}, grant: record}); d.outcome == outcomeUse {
 		t.Fatal("stored grant not re-intersected with the current ceiling")
 	}
 }

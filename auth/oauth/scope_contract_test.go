@@ -190,7 +190,9 @@ func TestScopeContract401ScopeIsRequestedNotRequired(t *testing.T) {
 		if err != nil || prepared.Login == nil {
 			t.Fatalf("no sign-in after a rejected refresh: %v", err)
 		}
-		if got := merge(loginScopes(prepared.Login)); !slices.Equal(got, []string{"admin", "events"}) {
+		// A 401 hint is only for a client-credentials acquisition in the
+		// same operation: it is never stored for a later sign-in.
+		if got := merge(loginScopes(prepared.Login)); !slices.Equal(got, []string{"events"}) {
 			t.Fatalf("sign-in requested %v", got)
 		}
 		if record := pendingRecord(t, p, r); record.Required != nil {
@@ -273,7 +275,7 @@ func TestScopeContractCompleteEnforcesStoredRequired(t *testing.T) {
 	}
 	// The server grants events only: R is not covered.
 	_, err = p.Complete(budget(t), r, callback(prepared.Login, "code"))
-	if classified := contractError(t, err, auth.CodeAccessDenied, "admin", "events"); !classified.LoginEnded {
+	if classified := contractError(t, err, auth.CodeAccessDenied, "admin", "events"); classified.LoginEnded == nil || !*classified.LoginEnded {
 		t.Fatal("refused completion did not end the login")
 	}
 	record, _ := f.store.Load(budget(t), p.key(r, mustConfig(t, p, r)))
@@ -332,14 +334,15 @@ func TestPKCEGrantNeverCoveringRequiresConsent(t *testing.T) {
 
 // Rule 11: errors from host callbacks never carry scopes.
 func TestScopeContractHostErrorsCarryNoScopes(t *testing.T) {
-	hostError := &auth.Error{Code: auth.CodeAccessDenied, Scopes: []string{"host-scope"}, LoginEnded: true}
+	ended := true
+	hostError := &auth.Error{Code: auth.CodeAccessDenied, Scopes: []string{"host-scope"}, LoginEnded: &ended}
 	t.Run("SelectClient", func(t *testing.T) {
 		_, p, r := setup(t, "client_credentials")
 		p.options.SelectClient = func(context.Context, auth.Request, []string, string) (ClientConfig, error) {
 			return ClientConfig{}, hostError
 		}
 		_, err := p.Credential(budget(t), r)
-		if contractError(t, err, auth.CodeAccessDenied).LoginEnded {
+		if contractError(t, err, auth.CodeAccessDenied).LoginEnded != nil {
 			t.Fatal("host login state escaped")
 		}
 	})
@@ -363,7 +366,7 @@ func TestScopeContractHostErrorsCarryNoScopes(t *testing.T) {
 		}
 		p.options.ValidateToken = func(context.Context, ClientConfig, *oauth2.Token) error { return hostError }
 		_, err = p.Complete(budget(t), r, callback(prepared.Login, "code"))
-		if !contractError(t, err, auth.CodeAccessDenied).LoginEnded {
+		if ended := contractError(t, err, auth.CodeAccessDenied).LoginEnded; ended == nil || !*ended {
 			t.Fatal("consumed login not reported ended")
 		}
 	})
@@ -382,7 +385,7 @@ func TestScopeContractCompleteLoginEnded(t *testing.T) {
 	ended := func(err error, want bool) {
 		t.Helper()
 		var classified *auth.Error
-		if !errors.As(err, &classified) || classified.LoginEnded != want || !errors.Is(err, auth.ErrCredential) {
+		if !errors.As(err, &classified) || classified.LoginEnded == nil || *classified.LoginEnded != want || !errors.Is(err, auth.ErrCredential) {
 			t.Fatalf("LoginEnded = %v; want %v (%v)", classified, want, err)
 		}
 	}

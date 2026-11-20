@@ -3,6 +3,7 @@ package oauth
 // Native runners for the shared scope_decisions and completions vectors.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -79,7 +80,7 @@ type vectorExpect struct {
 	AcquisitionScopes           []string  `json:"acquisition_scopes"`
 	NetworkCalls                *int32    `json:"network_calls"`
 	AuthorizationServerRequests *int32    `json:"authorization_server_requests"`
-	Retired                     bool      `json:"retired"`
+	Retired                     *bool     `json:"retired"`
 	LoginEnded                  *bool     `json:"login_ended"`
 	GrantPersisted              *bool     `json:"grant_persisted"`
 }
@@ -109,9 +110,18 @@ func readScopeVectors(t *testing.T) scopeVectors {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var vectors scopeVectors
-	if err := json.Unmarshal(data, &vectors); err != nil {
+	var sections map[string]json.RawMessage
+	if err := json.Unmarshal(data, &sections); err != nil {
 		t.Fatal(err)
+	}
+	var vectors scopeVectors
+	// Every field a vector defines is asserted: an unknown field fails.
+	for name, target := range map[string]any{"scope_decisions": &vectors.ScopeDecisions, "completions": &vectors.Completions} {
+		decoder := json.NewDecoder(bytes.NewReader(sections[name]))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(target); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
 	}
 	if len(vectors.ScopeDecisions) == 0 || len(vectors.Completions) == 0 {
 		t.Fatal("fixture has no scope or completion vectors")
@@ -228,7 +238,7 @@ func vectorError(t *testing.T, err error, expect vectorExpect) *auth.Error {
 	if !slices.Equal(classified.Scopes, scopes) || (len(scopes) == 0 && classified.Scopes != nil) {
 		t.Fatalf("scopes = %#v; want %#v", classified.Scopes, scopes)
 	}
-	if expect.LoginEnded != nil && classified.LoginEnded != *expect.LoginEnded {
+	if expect.LoginEnded != nil && (classified.LoginEnded == nil || *classified.LoginEnded != *expect.LoginEnded) {
 		t.Fatalf("LoginEnded = %v; want %v", classified.LoginEnded, *expect.LoginEnded)
 	}
 	return classified
@@ -245,17 +255,29 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 				config.ClientSecret = "vector-secret"
 			}
 			var hostErr error
-			callback := ""
+			callback, refused := "", Purpose("")
 			if in.HostError != nil {
 				hostErr = &auth.Error{Code: auth.Code(in.HostError.Code), Scopes: in.HostError.Scopes}
 				callback = in.HostError.Callback
-				if in.HostError.Target == "registration_endpoint" {
-					config.ClientID, config.ClientSecret, config.Registration = "", "", &RegistrationPolicy{ClientName: "Vector Adapter"}
+				switch {
+				case callback == "destination":
+					targets := map[string]Purpose{"registration_endpoint": Registration, "token_endpoint": TokenEndpoint, "authorization_endpoint": Authorization, "metadata": Metadata}
+					var known bool
+					if refused, known = targets[in.HostError.Target]; !known {
+						t.Fatalf("unknown destination target %q", in.HostError.Target)
+					}
+					if refused == Registration {
+						config.ClientID, config.ClientSecret, config.Registration = "", "", &RegistrationPolicy{ClientName: "Vector Adapter"}
+					}
+				case callback != "token_validation" && callback != "client_selection":
+					t.Fatalf("unknown host callback %q", callback)
+				case in.HostError.Target != "":
+					t.Fatalf("target %q on host callback %q", in.HostError.Target, callback)
 				}
 			}
 			store := newStore()
 			p, err := New(Options{Namespace: "vectors", Store: store, Secrets: newSecrets(), HTTPClient: s.server.Client(), CheckDestination: func(ctx context.Context, raw string, purpose Purpose) error {
-				if callback == "destination" && purpose == Registration {
+				if callback == "destination" && purpose == refused {
 					return hostErr
 				}
 				if !strings.HasPrefix(raw, s.server.URL+"/") {
@@ -276,6 +298,8 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			var decided []decision
+			p.trace = func(_ operation, d decision) { decided = append(decided, d) }
 			r := auth.Request{BackendID: "backend", Purpose: auth.Event, Destination: s.resource}
 			if in.Binding == "preset" {
 				r.Binding, _ = json.Marshal(map[string]any{"type": "oauth", "issuer": config.Issuer, "resource": config.Resource, "clientId": config.ClientID, "flow": config.Flow, "scopes": in.PresetScopes})
@@ -339,9 +363,19 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 			if expect.AuthorizationServerRequests != nil && s.authorizationServer.Load() != *expect.AuthorizationServerRequests {
 				t.Fatalf("authorization-server requests = %d; want %d", s.authorizationServer.Load(), *expect.AuthorizationServerRequests)
 			}
-			if expect.Retired {
-				if record, _ := store.Load(budget(t), key); record != nil && record.AccessToken == "seed-access" {
-					t.Fatal("rejected token not retired")
+			if len(decided) == 0 && callback != "client_selection" {
+				// Only a host client-selection failure precedes the decision.
+				t.Fatal("the entry point made no scope decision")
+			}
+			if expect.Required != nil && len(decided) > 0 {
+				if got := decided[len(decided)-1].required; !slices.Equal(got, merge(expect.Required)) || (len(expect.Required) == 0 && got != nil) {
+					t.Fatalf("decided R = %v; want %v", got, expect.Required)
+				}
+			}
+			if expect.Retired != nil {
+				record, _ := store.Load(budget(t), key)
+				if retired := record == nil || record.AccessToken != "seed-access"; retired != *expect.Retired {
+					t.Fatalf("retired = %v; want %v", retired, *expect.Retired)
 				}
 			}
 			if expect.Code == nil {
@@ -468,6 +502,11 @@ func TestCanonicalCompletions(t *testing.T) {
 				}
 			default:
 				t.Fatalf("unknown pending state %q", in.Pending)
+			}
+			switch in.Exchange {
+			case "ok", "invalid_grant", "invalid_client", "token_endpoint_failure", "invalid_response":
+			default:
+				t.Fatalf("unknown exchange %q", in.Exchange)
 			}
 			s.mu.Lock()
 			s.mode, s.granted = in.Exchange, in.Granted

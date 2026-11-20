@@ -172,7 +172,11 @@ type PendingRecord struct {
 	// with. Completion succeeds only when the grant, within the current
 	// ceiling, covers it.
 	Scopes, Ceiling, Required []string
-	ExpiresAt                 time.Time
+	// HasRequired marks a record that stores Required; a record written by
+	// an older release has none, and completion then requires the current
+	// host RequiredScopes.
+	HasRequired bool
+	ExpiresAt   time.Time
 	// ClientID is the client the login completes with, for DCR the client
 	// registered for this login.
 	ClientID string
@@ -242,10 +246,8 @@ type Provider struct {
 	logins Store
 	// prepared counts successful host prepares per endpoint (*atomic.Uint64).
 	prepared sync.Map
-	// hints holds process-local 401 challenge scopes per grant key, requested
-	// by that grant's next acquisition or login. They are never required.
-	hintsMu sync.Mutex
-	hints   map[string][]string
+	// trace, when set by a test, observes every scope decision.
+	trace func(operation, decision)
 }
 
 // PendingLogin describes a pending login. Only the explicit AuthorizationURL

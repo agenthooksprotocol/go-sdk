@@ -121,7 +121,8 @@ func (p *Provider) discover(ctx context.Context, request auth.Request, challenge
 	if !validConfig(config) || config.Resource != resource.Resource || !contains(issuers, config.Issuer) {
 		return ClientConfig{}, fail(auth.CodeInvalidConfiguration)
 	}
-	if explicit && (config.Issuer != preset.Issuer || config.ClientID != preset.ClientID || config.Flow != preset.Flow || !sameScopes(config.Scopes, preset.Scopes)) {
+	if explicit && (config.Issuer != preset.Issuer || config.ClientID != preset.ClientID || config.Flow != preset.Flow) {
+		// Preset scopes are checked by decide.
 		return ClientConfig{}, fail(auth.CodeInvalidConfiguration)
 	}
 	return config, nil

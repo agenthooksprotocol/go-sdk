@@ -72,9 +72,12 @@ The host functions have these contracts:
   (single-SP separators) or the response fails as `provider_failed`. A refresh records the response within the previous grant, so it
   never broadens it, and a narrowed ceiling never shrinks it: each caller's
   ceiling filters the grant only at use; broader requirements need fresh consent or a new
-  client-credentials grant. A grant (exchange, refresh or client credentials)
-  that does not cover the required set fails the operation with
-  `access_denied` carrying that set, after the grant is saved. The host retains responsibility for trusting opaque issuer tokens.
+  client-credentials grant. A PKCE grant is refreshed only when its recorded
+  scopes cover the required set; a refresh or client-credentials grant that
+  then does not cover it fails the operation with `access_denied` carrying
+  that set, after the grant is saved. A PKCE grant that never covered it needs
+  consent: `interaction_required` carrying the set (`Prepare` creates a
+  login). Client-credentials grants are always reissued, never refreshed. The host retains responsibility for trusting opaque issuer tokens.
 - **`Store`** loads detached `Record` snapshots, atomically compares generations,
   and coordinates the complete acquisition/refresh callback for a key across
   host instances/processes. Its methods must honor context cancellation and
@@ -128,12 +131,11 @@ pending logins in the `Store` instead, so another process sharing it can
 complete one; the PKCE verifier then lives only in that pending record.
 
 Each `Prepare` that needs consent creates a new login, requesting any
-previously granted scopes, its requested and required scopes, and any scopes
-remembered from a 401 challenge; its ceiling bounds the grant recorded on
+previously granted scopes and its requested and required scopes; its ceiling bounds the grant recorded on
 completion. The login stores its required set (host `RequiredScopes` at prepare
 time, plus the explicit and challenged scopes it was prepared with):
-`Complete` succeeds only when the grant, within the current ceiling, covers it,
-and otherwise fails with `access_denied` carrying that set. The grant (and any
+`Complete` succeeds only when the grant, within the current ceiling (a nil
+`AllowedScopes` is the current `Scopes`), covers it, and otherwise fails with `access_denied` carrying that set. The grant (and any
 rotated refresh token) is still saved and the login consumed. Several logins may be pending for one grant,
 up to `Options.MaxPendingLogins` (default 5, per Provider or per Store when
 persisted); a new one beyond the cap cancels the oldest, and expired logins are
@@ -147,11 +149,15 @@ or expiry; a callback for an ended login fails with `interaction_required`.
 `Cancel` never erases stored credentials. With `PersistLogins`, a host
 `Prepare` also deletes the grant's expired pending logins and their verifiers.
 
-`Complete` codes: a callback whose `state` names no live login (absent,
-unknown, expired or ended) is `interaction_required`, however malformed. An
-invalid callback for a live login (redirect, `iss`, fragment, userinfo, not
-exactly one of `code` or `error`, a duplicated parameter) is `access_denied`
-and does not consume it. After the claim: consent denial is `access_denied`;
+`Complete` runs in order. It first finds the login named by the callback's
+`state` from stored records, before any host callback: none (absent, unknown,
+expired or ended) is `interaction_required`, however malformed. An invalid
+callback for a live login (redirect, `iss`, fragment, userinfo, not exactly one
+of `code` or `error`, a duplicated parameter, an unparseable URL) is
+`access_denied`. Current host policy then runs: a `SelectClient`, store or
+issuer-metadata failure keeps its code, and a recorded client source that
+policy no longer permits is `invalid_configuration`. Both leave the login
+pending. The login is then claimed atomically. After the claim: consent denial is `access_denied`;
 token-endpoint `invalid_grant` is `interaction_required`; `invalid_client` is
 `credential_unavailable` for a pre-registered client, `invalid_configuration`
 for a CIMD client and `interaction_required` for a DCR client (the next
@@ -162,9 +168,12 @@ Every `Complete` error carries an `*auth.Error` whose `LoginEnded` reports
 whether the pending login named by the callback's `state` no longer exists
 after the call: `true` when it was consumed, had expired or was unknown,
 `false` when it is still pending (for example after a stray or invalid callback
-rejected before the claim) or its state could not be determined. Keep waiting
-for another callback only while it is `false`. Codes and recovery are
-unchanged; `errors.Is` and `errors.As` work as for any SDK error.
+rejected before the claim, or a host failure) or its state could not be
+determined (an uncertain claim is re-read once on a short budget). Keep waiting
+for another callback only while it is `false`. `LoginEnded` is a `*bool`, set
+(and emitted in JSON) only on `Complete` errors; it is nil on every other error
+and never copied from a host error. `errors.Is` and `errors.As` work as for
+any SDK error.
 
 To bind a new loopback port for each login, as MCP clients do, pass it with
 `PrepareWith(ctx, request, oauth.PrepareOptions{RedirectURI: redirect})`;
@@ -289,22 +298,28 @@ fresh or cached binding). Every scoped `access_denied` and
 from host callbacks (`SelectClient`, `ValidateToken`, `CheckDestination`,
 stores) never carry scopes.
 
-A 401's Bearer `scope` is not a requirement: after the token is retired, the
-scopes within the ceiling are requested by the grant's next acquisition or
-login (process-local), and out-of-ceiling ones are simply not requested. A 401
-never yields `access_denied` because of its `scope`.
+Every entry point (`Credential` and delivery, `Prepare`/`PrepareWith`
+including `ForceRegistration`, `Challenge`, `PreemptiveCredential`) runs one
+decision procedure, and one classification step is the only place that sets an
+error's code and scopes. A 401 first retires the rejected generation if it is
+still current, whatever the outcome (a newer generation is left alone). Its
+Bearer `scope` is not a requirement: the scopes within the ceiling are
+requested only by a client-credentials acquisition in the same operation, never
+stored, and a 401 never yields `access_denied` because of its `scope`.
 
 A Bearer 403 with `error="insufficient_scope"` creates a step-up requirement only
 for the challenged operation; it is never stored. PKCE reports
 `interaction_required` carrying R; pass it to `Prepare(ctx, request,
 err.Scopes...)` to request consent. Client credentials reissue
-noninteractively. If the stored grant already records R within the ceiling,
-the server and the record disagree: the challenge fails with `access_denied`
-carrying R, without replaying the token, interaction or a login. If a scope
+noninteractively. If the stored grant already records R within the ceiling
+and its generation is the one rejected (or no token was sent), the server and
+the record disagree: the challenge fails with `access_denied` carrying R,
+without replaying the token, interaction or a login. If a newer generation
+already covers R, it is served. If a scope
 challenge omits `scope`, H ∪ E is the requirement when non-empty; otherwise it
-returns `access_denied` with no scopes. A malformed challenge `scope` (empty,
+returns `access_denied` with no scopes. A malformed challenge `scope` (empty, a tab,
 repeated, leading or trailing spaces, an invalid character, a duplicated
-parameter) or an unparseable challenge fails closed with `access_denied`, no
+parameter), two Bearer challenges or an unparseable challenge fails closed with `access_denied`, no
 scopes and recovery `none`. Other 403 responses are not auth retries. Dispatch
 never creates pending consent.
 

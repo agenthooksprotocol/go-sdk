@@ -99,6 +99,8 @@ type fixture struct {
 	onRefresh     func()
 	tokenBody     atomic.Value
 	bodies        []string
+	// onEvents, when set, answers an events request first (returning true).
+	onEvents func(http.ResponseWriter, *http.Request) bool
 }
 
 func setup(t *testing.T, flow string) (*fixture, *Provider, auth.Request) {
@@ -269,6 +271,9 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(response)
 	case "/events":
 		f.eventCalls.Add(1)
+		if f.onEvents != nil && f.onEvents(w, r) {
+			return
+		}
 		body, _ := io.ReadAll(r.Body)
 		f.grantsMu.Lock()
 		f.bodies = append(f.bodies, string(body))
@@ -481,7 +486,7 @@ func TestManagedResourceBoundRefreshAndStaleRejection(t *testing.T) {
 	}
 	// A rejection of an older token never drops the current one.
 	stale := first.Attempt.(attempted)
-	stale.token = "older-access"
+	stale.generation = "older-generation"
 	recovered, err := p.Challenge(ctx, r, auth.Challenge{StatusCode: 401, Attempt: stale})
 	if err != nil || recovered == nil {
 		t.Fatal(err)
