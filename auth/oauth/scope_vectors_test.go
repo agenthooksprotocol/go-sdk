@@ -59,6 +59,10 @@ type scopeDecisionVector struct {
 		} `json:"challenge"`
 		Prior401Hint []string         `json:"prior_401_hint"`
 		HostError    *vectorHostError `json:"host_error"`
+		TargetError  *struct {
+			Check string `json:"check"`
+			Code  string `json:"code"`
+		} `json:"target_error"`
 	} `json:"input"`
 	Expect struct {
 		Code                        *string   `json:"code"`
@@ -351,7 +355,7 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 				callback = in.HostError.Callback
 				switch {
 				case callback == "destination":
-					targets := map[string]Purpose{"registration_endpoint": Registration, "issuer_metadata": Metadata}
+					targets := map[string]Purpose{"registration_endpoint": Registration, "issuer_metadata": Metadata, "token_endpoint": TokenEndpoint}
 					var known bool
 					if refused, known = targets[in.HostError.Target]; !known {
 						t.Fatalf("unknown destination target %q", in.HostError.Target)
@@ -402,6 +406,19 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 			case "stored", "unbound":
 			default:
 				t.Fatalf("unknown binding %q", in.Binding)
+			}
+			if te := in.TargetError; te != nil {
+				// The request's target fails its check before any decide step.
+				switch te.Check {
+				case "unsupported_binding":
+					// A bearer binding is not served by the OAuth provider.
+					r.Binding = json.RawMessage(`{"type":"bearer","tokenEnv":"AHP_VECTOR_TOKEN"}`)
+				default:
+					t.Fatalf("unknown target check %q", te.Check)
+				}
+				if expect.Code == nil || *expect.Code != te.Code {
+					t.Fatalf("target_error code %q differs from expect.code", te.Code)
+				}
 			}
 			selected := cloneConfig(config)
 			selected.source = sourcePreregistered
@@ -530,7 +547,7 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 				}
 			} else if n := len(decided); callback == "" && n > 0 && !(decided[n-1].outcome == outcomeFail && decided[n-1].early && decided[n-1].required == nil) {
 				t.Fatalf("a decision reached the ceiling step: %+v", decided[n-1])
-			} else if n == 0 && callback != "client_selection" {
+			} else if n == 0 && callback != "client_selection" && in.TargetError == nil {
 				t.Fatal("the entry point made no scope decision")
 			}
 			grantType, wire := s.last()
@@ -639,9 +656,16 @@ func TestCanonicalCompletions(t *testing.T) {
 				t.Fatalf("unknown client source %q", in.ClientSource)
 			}
 			var mu sync.Mutex
-			var hostErr error
+			var hostErr, destinationErr error
+			refused := Purpose("")
 			store := &uncertainStore{memoryStore: newStore()}
-			p, err := New(Options{Namespace: "vectors", Store: store, PersistLogins: true, HTTPClient: s.server.Client(), CheckDestination: func(ctx context.Context, raw string, _ Purpose) error {
+			p, err := New(Options{Namespace: "vectors", Store: store, PersistLogins: true, HTTPClient: s.server.Client(), CheckDestination: func(ctx context.Context, raw string, purpose Purpose) error {
+				mu.Lock()
+				refusal := destinationErr
+				mu.Unlock()
+				if refusal != nil && purpose == refused {
+					return refusal
+				}
 				if !strings.HasPrefix(raw, s.server.URL+"/") {
 					return errors.New("untrusted")
 				}
@@ -657,8 +681,21 @@ func TestCanonicalCompletions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if in.HostError != nil && in.HostError.Callback != "client_selection" {
-				t.Fatalf("unknown host callback %q", in.HostError.Callback)
+			if he := in.HostError; he != nil {
+				switch he.Callback {
+				case "client_selection":
+					if he.Target != "" {
+						t.Fatalf("target %q on client_selection", he.Target)
+					}
+				case "destination":
+					targets := map[string]Purpose{"token_endpoint": TokenEndpoint, "issuer_metadata": Metadata, "registration_endpoint": Registration}
+					var known bool
+					if refused, known = targets[he.Target]; !known {
+						t.Fatalf("unknown destination target %q", he.Target)
+					}
+				default:
+					t.Fatalf("unknown host callback %q", he.Callback)
+				}
 			}
 			r := auth.Request{BackendID: "backend", Purpose: auth.Event, Destination: s.resource}
 			prepared, err := p.PrepareWith(budget(t), r, PrepareOptions{RequiredScopes: preparedRequired})
@@ -705,9 +742,14 @@ func TestCanonicalCompletions(t *testing.T) {
 			default:
 				t.Fatalf("unknown pending state %q", in.Pending)
 			}
-			if in.HostError != nil {
+			if he := in.HostError; he != nil {
+				// The host callback fails from now on, before the claim.
 				mu.Lock()
-				hostErr = &auth.Error{Code: auth.Code(in.HostError.Code), Scopes: in.HostError.Scopes}
+				if he.Callback == "destination" {
+					destinationErr = &auth.Error{Code: auth.Code(he.Code), Scopes: he.Scopes}
+				} else {
+					hostErr = &auth.Error{Code: auth.Code(he.Code), Scopes: he.Scopes}
+				}
 				mu.Unlock()
 			}
 			var claim struct {
@@ -807,7 +849,7 @@ func TestCanonicalCompletions(t *testing.T) {
 			if in.HostError != nil && expect.LoginEnded != nil && !*expect.LoginEnded {
 				// The login stayed pending: once the host recovers it completes.
 				mu.Lock()
-				hostErr = nil
+				hostErr, destinationErr = nil, nil
 				mu.Unlock()
 				_, err := p.Complete(budget(t), r, callback)
 				switch in.Callback {
