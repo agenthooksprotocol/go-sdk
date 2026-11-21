@@ -458,7 +458,7 @@ func (p *Provider) retire(ctx context.Context, key string, current *Record, sent
 // authorization-server request, then fetch issuer metadata and acquire under
 // the grant lock, which decides once more.
 func (p *Provider) operate(ctx context.Context, r auth.Request, q call) (Preparation, error) {
-	config, _, cached, err := p.cachedBinding(ctx, r)
+	config, m, cached, err := p.cachedBinding(ctx, r)
 	if err != nil && err != errStaleBinding && (ctx.Err() != nil || !errors.As(err, new(refusal))) {
 		return Preparation{}, err
 	}
@@ -477,6 +477,11 @@ func (p *Provider) operate(ctx context.Context, r auth.Request, q call) (Prepara
 			return Preparation{}, d.err
 		case d.outcome == outcomeUse && !(q.force && config.Flow != pkceFlow):
 			return Preparation{Credential: p.credential(r, key, grant)}, nil
+		case q.op == opCredential && (d.outcome == outcomeRefresh || d.outcome == outcomeAcquire) && !(config.source == sourceDCR && config.Flow != pkceFlow):
+			// A delivery renewal uses the persisted issuer metadata; challenge
+			// handling, prepare and a client-credentials registration (whose
+			// method depends on current metadata) rebuild it by discovery.
+			return p.renew(ctx, r, config, m, q)
 		}
 	}
 	// An exchange, login or registration needs current metadata: full
@@ -509,7 +514,6 @@ func (p *Provider) operate(ctx context.Context, r auth.Request, q call) (Prepara
 		}
 		return Preparation{}, d.err
 	}
-	m := metadata{}
 	if config, m, err = p.resolveMetadata(ctx, config); err != nil {
 		return Preparation{}, err
 	}
@@ -1528,19 +1532,30 @@ func (p *Provider) preemptive(ctx context.Context, r auth.Request) (*auth.Creden
 		ctx, cancel = context.WithTimeout(ctx, lookupBudget)
 		defer cancel()
 	}
+	result, err := p.renew(ctx, r, config, m, q)
+	return result.Credential, err
+}
+
+// renew refreshes or reissues a stored binding's grant with its persisted
+// issuer metadata. It fetches only the stored issuer's metadata, never
+// protected-resource metadata: when none is persisted (then persisting it),
+// and once more when the token endpoint provably did not process the
+// request (stale metadata).
+func (p *Provider) renew(ctx context.Context, r auth.Request, config ClientConfig, m metadata, q call) (Preparation, error) {
+	persist := false
 	if m.TokenEndpoint == "" {
-		// Only the stored issuer's metadata; never protected-resource discovery.
+		var err error
 		if config, m, err = p.resolveMetadata(ctx, config); err != nil {
-			return nil, err
+			return Preparation{}, err
 		}
+		persist = true
 	}
-	result, err, stale := p.obtain(ctx, r, config, m, false, q)
+	result, err, stale := p.obtain(ctx, r, config, m, persist, q)
 	if stale {
-		// Refetch only the stored issuer's metadata once, persist it and retry.
 		if config, m, err = p.resolveMetadata(ctx, config); err != nil {
-			return nil, err
+			return Preparation{}, err
 		}
 		result, err, _ = p.obtain(ctx, r, config, m, true, q)
 	}
-	return result.Credential, err
+	return result, err
 }

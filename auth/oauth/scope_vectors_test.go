@@ -46,6 +46,7 @@ type scopeDecisionVector struct {
 		Flow         string          `json:"flow"`
 		Path         string          `json:"path"`
 		Binding      string          `json:"binding"`
+		ClientSource string          `json:"client_source"`
 		Requested    []string        `json:"requested"`
 		PresetScopes *[]string       `json:"preset_scopes"`
 		Ceiling      []string        `json:"ceiling"`
@@ -166,6 +167,8 @@ type vectorServer struct {
 	grants  []string
 
 	prm, authorizationServer, registrations atomic.Int32
+	// metadataDown fails authorization-server metadata fetches.
+	metadataDown atomic.Bool
 }
 
 func newVectorServer(t *testing.T) *vectorServer {
@@ -202,6 +205,10 @@ func (s *vectorServer) serve(w http.ResponseWriter, r *http.Request) {
 	s.authorizationServer.Add(1)
 	switch r.URL.Path {
 	case "/.well-known/oauth-authorization-server":
+		if s.metadataDown.Load() {
+			w.WriteHeader(500)
+			return
+		}
 		json.NewEncoder(w).Encode(s.metadata())
 	case "/register":
 		s.registrations.Add(1)
@@ -362,6 +369,19 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 			config := ClientConfig{Issuer: s.server.URL, Resource: s.resource, ClientID: "client", Flow: in.Flow, Scopes: in.Requested, AllowedScopes: in.Ceiling, RequiredScopes: in.HostRequired, RedirectURI: "https://client.example/callback"}
 			if in.Flow == "client_credentials" {
 				config.ClientSecret = "vector-secret"
+			}
+			if (in.ClientSource != "") != (in.Binding == "unbound") {
+				t.Fatal("client_source is present exactly for an unbound target")
+			}
+			switch in.ClientSource {
+			case "", sourcePreregistered:
+			case sourceCIMD:
+				s.cimd = true
+				config.ClientID, config.ClientIDMetadataDocument = "", &MetadataDocument{URL: "https://client.example/client.json", RedirectURIs: []string{config.RedirectURI}}
+			case sourceDCR:
+				config.ClientID, config.ClientSecret, config.Registration = "", "", &RegistrationPolicy{ClientName: "Vector Adapter"}
+			default:
+				t.Fatalf("unknown client source %q", in.ClientSource)
 			}
 			var hostErr error
 			callback, refused := "", Purpose("")
@@ -909,9 +929,10 @@ type tokenErrorVector struct {
 	ID       string   `json:"id"`
 	Requires []string `json:"requires"`
 	Input    struct {
-		GrantType    string `json:"grant_type"`
-		ClientSource string `json:"client_source"`
-		Error        string `json:"error"`
+		GrantType    string          `json:"grant_type"`
+		ClientSource string          `json:"client_source"`
+		Error        string          `json:"error"`
+		Refetch      json.RawMessage `json:"refetch"`
 	} `json:"input"`
 	Expect struct {
 		Code            string `json:"code"`
@@ -973,8 +994,44 @@ func TestCanonicalTokenErrors(t *testing.T) {
 			default:
 				t.Fatalf("unknown client source %q", source)
 			}
+			// The refetch of the stored issuer's metadata: failed, refused by
+			// the host, or (absent) succeeding.
+			var refetchFails bool
+			var refetchRefusal *vectorHostError
+			switch {
+			case len(in.Refetch) == 0:
+			case in.Error != "unreachable" && in.Error != "not_found":
+				t.Fatal("refetch applies only to unreachable and not_found")
+			case string(in.Refetch) == `"failed"`:
+				refetchFails = true
+			default:
+				decoder := json.NewDecoder(bytes.NewReader(in.Refetch))
+				decoder.DisallowUnknownFields()
+				refetchRefusal = &vectorHostError{}
+				if err := decoder.Decode(refetchRefusal); err != nil {
+					t.Fatalf("refetch: %v", err)
+				}
+				if refetchRefusal.Callback != "destination" || refetchRefusal.Target != "issuer_metadata" {
+					t.Fatalf("unknown refetch refusal %+v", refetchRefusal)
+				}
+			}
+			// An unreachable token endpoint is a closed port in the persisted
+			// metadata: the request is provably never processed.
+			persisted := s.metadata()
+			if in.Error == "unreachable" {
+				closed := httptest.NewTLSServer(http.NotFoundHandler())
+				persisted.TokenEndpoint = closed.URL + "/token"
+				closed.Close()
+			}
+			var refusing atomic.Bool
 			store := newStore()
-			p, err := New(Options{Namespace: "vectors", Store: store, Secrets: newSecrets(), HTTPClient: s.server.Client(), CheckDestination: func(ctx context.Context, raw string, _ Purpose) error {
+			p, err := New(Options{Namespace: "vectors", Store: store, Secrets: newSecrets(), HTTPClient: s.server.Client(), CheckDestination: func(ctx context.Context, raw string, purpose Purpose) error {
+				if refusing.Load() && purpose == Metadata && !strings.Contains(raw, "/.well-known/oauth-protected-resource") {
+					return &auth.Error{Code: auth.Code(refetchRefusal.Code), Scopes: refetchRefusal.Scopes}
+				}
+				if raw == persisted.TokenEndpoint {
+					return ctx.Err()
+				}
 				if !strings.HasPrefix(raw, s.server.URL+"/") {
 					return errors.New("untrusted")
 				}
@@ -992,7 +1049,7 @@ func TestCanonicalTokenErrors(t *testing.T) {
 			if source == sourceCIMD {
 				public.ClientID = config.ClientIDMetadataDocument.URL
 			}
-			if ok, err := store.CompareAndSwap(budget(t), p.bindingKey(r), "", &Record{Generation: randomID(), Binding: &BindingMetadata{Config: public, IssuerMetadata: s.metadata(), Source: source}}); !ok || err != nil {
+			if ok, err := store.CompareAndSwap(budget(t), p.bindingKey(r), "", &Record{Generation: randomID(), Binding: &BindingMetadata{Config: public, IssuerMetadata: persisted, Source: source}}); !ok || err != nil {
 				t.Fatalf("seed binding: %v", err)
 			}
 			key := p.key(r, mustConfig(t, p, r))
@@ -1020,12 +1077,22 @@ func TestCanonicalTokenErrors(t *testing.T) {
 			s.mu.Lock()
 			s.mode, s.scopes, s.grants = in.Error, nil, nil
 			s.mu.Unlock()
+			s.metadataDown.Store(refetchFails)
+			refusing.Store(refetchRefusal != nil)
+			metadataBefore := s.authorizationServer.Load()
 			_, err = p.Credential(budget(t), r)
 			vectorError(t, err, expect.Code, nil, nil)
 			grantType, _ := s.last()
 			want := map[string]string{pkceFlow: "refresh_token", "client_credentials": "client_credentials"}[config.Flow]
+			if in.Error == "unreachable" && len(in.Refetch) != 0 {
+				// The renewal never reached a token endpoint.
+				want = ""
+			}
 			if grantType != want {
 				t.Fatalf("token request %q; want %q", grantType, want)
+			}
+			if refetchFails && s.authorizationServer.Load() == metadataBefore {
+				t.Fatal("no refetch of the stored issuer's metadata")
 			}
 			reregistered := s.registrations.Load() - registrations
 			if (expect.Reregistrations != nil) != (in.GrantType == "client_credentials" && source == sourceDCR && in.Error == "invalid_client") {

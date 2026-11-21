@@ -529,3 +529,40 @@ func TestDecidePKCEStepUpIsLocal(t *testing.T) {
 		t.Fatalf("%d network calls for a local step-up decision", n)
 	}
 }
+
+// A delivery renewal uses the persisted issuer metadata, and an up-front
+// lookup that had to fetch it persists it.
+func TestRenewalUsesPersistedIssuerMetadata(t *testing.T) {
+	t.Run("credential", func(t *testing.T) {
+		f, p, r := setup(t, pkceFlow)
+		first := finishLogin(t, p, r)
+		expire(t, f, first)
+		metadataCalls := f.metadataCalls.Load()
+		if _, err := p.Credential(budget(t), r); err != nil {
+			t.Fatal(err)
+		}
+		if f.refreshCalls.Load() != 1 || f.metadataCalls.Load() != metadataCalls {
+			t.Fatalf("refreshes = %d, metadata fetches = %d", f.refreshCalls.Load(), f.metadataCalls.Load()-metadataCalls)
+		}
+	})
+	t.Run("preemptive", func(t *testing.T) {
+		f, p, r := setup(t, "client_credentials")
+		r.Binding = nil
+		learnUnbound(t, f, p, r)
+		expireStored(t, f, p, r)
+		key := p.bindingKey(r)
+		binding, _ := f.store.Load(budget(t), key)
+		stripped := cloneRecord(binding)
+		stripped.Binding.IssuerMetadata, stripped.Generation = metadata{}, randomID()
+		if ok, err := f.store.CompareAndSwap(budget(t), key, binding.Generation, stripped); !ok || err != nil {
+			t.Fatal(err)
+		}
+		if credential, err := p.PreemptiveCredential(budget(t), r); err != nil || credential == nil {
+			t.Fatal(err)
+		}
+		stored, _ := f.store.Load(budget(t), key)
+		if stored.Binding.IssuerMetadata.TokenEndpoint != f.server.URL+"/token" {
+			t.Fatal("fetched issuer metadata not persisted")
+		}
+	})
+}
