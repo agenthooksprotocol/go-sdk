@@ -433,3 +433,77 @@ func TestDecideChallengeRetiresBeforeBudget(t *testing.T) {
 		t.Fatalf("network calls = %d", n)
 	}
 }
+
+// A host CheckDestination refusal of the issuer-metadata URL keeps the
+// host's code without scopes on every path; discovery_failed is only for a
+// failed fetch or invalid metadata.
+func TestIssuerMetadataRefusalKeepsHostCode(t *testing.T) {
+	refusals := map[string]struct {
+		err  error
+		code auth.Code
+	}{
+		"plain":        {errors.New("secret-policy-detail"), auth.CodeUntrustedDestination},
+		"host-code":    {&auth.Error{Code: auth.CodeAccessDenied, Scopes: []string{"host-scope"}}, auth.CodeAccessDenied},
+		"unknown-code": {&auth.Error{Code: "secret-code"}, auth.CodeProviderFailed},
+	}
+	refuse := func(p *Provider, err error) {
+		check := p.options.CheckDestination
+		p.options.CheckDestination = func(ctx context.Context, raw string, purpose Purpose) error {
+			if purpose == Metadata && strings.Contains(raw, "oauth-authorization-server") {
+				return err
+			}
+			return check(ctx, raw, purpose)
+		}
+	}
+	for name, refusal := range refusals {
+		t.Run(name, func(t *testing.T) {
+			t.Run("prepare", func(t *testing.T) {
+				_, p, r := setup(t, "client_credentials")
+				refuse(p, refusal.err)
+				_, err := p.Prepare(budget(t), r)
+				contractError(t, err, refusal.code)
+			})
+			t.Run("credential", func(t *testing.T) {
+				_, p, r := setup(t, "client_credentials")
+				refuse(p, refusal.err)
+				_, err := p.Credential(budget(t), r)
+				contractError(t, err, refusal.code)
+			})
+			t.Run("challenge", func(t *testing.T) {
+				f, p, r := setup(t, "client_credentials")
+				r.Binding = nil
+				refuse(p, refusal.err)
+				_, err := p.Challenge(budget(t), r, auth.Challenge{StatusCode: 401, Header: http.Header{"Www-Authenticate": {`Bearer resource_metadata="` + f.server.URL + `/custom-resource"`}}})
+				contractError(t, err, refusal.code)
+			})
+			t.Run("preemptive", func(t *testing.T) {
+				f, p, r := setup(t, "client_credentials")
+				r.Binding = nil
+				learnUnbound(t, f, p, r)
+				expireStored(t, f, p, r)
+				key := p.bindingKey(r)
+				binding, _ := f.store.Load(budget(t), key)
+				stripped := cloneRecord(binding)
+				stripped.Binding.IssuerMetadata, stripped.Generation = metadata{}, randomID()
+				if ok, err := f.store.CompareAndSwap(budget(t), key, binding.Generation, stripped); !ok || err != nil {
+					t.Fatal(err)
+				}
+				refuse(p, refusal.err)
+				_, err := p.PreemptiveCredential(budget(t), r)
+				contractError(t, err, refusal.code)
+			})
+			t.Run("complete", func(t *testing.T) {
+				_, p, r := setup(t, pkceFlow)
+				prepared, err := p.Prepare(budget(t), r)
+				if err != nil {
+					t.Fatal(err)
+				}
+				refuse(p, refusal.err)
+				_, err = p.Complete(budget(t), r, callback(prepared.Login, "code"))
+				if ended := contractError(t, err, refusal.code).LoginEnded; ended == nil || *ended {
+					t.Fatal("a pre-claim host refusal ended the login")
+				}
+			})
+		})
+	}
+}

@@ -140,7 +140,10 @@ func (p *Provider) resolveMetadata(ctx context.Context, config ClientConfig) (Cl
 		var m metadata
 		ok, err := fetchDiscovery(ctx, &p.client, policy, location, &m)
 		if err != nil {
-			return ClientConfig{}, metadata{}, fail(auth.CodeDiscoveryFailed)
+			// A host destination refusal keeps its code (without scopes), as for
+			// protected-resource metadata; a fetch or validation failure is
+			// discovery_failed.
+			return ClientConfig{}, metadata{}, safe(ctx, err, auth.CodeDiscoveryFailed)
 		}
 		if !ok {
 			continue

@@ -236,7 +236,8 @@ func TestUpFrontClientCredentialsReacquire(t *testing.T) {
 }
 
 // Without persisted issuer metadata the lookup fetches only the stored issuer's
-// metadata, never protected-resource metadata; a failure is discovery_failed.
+// metadata, never protected-resource metadata; a host refusal of that URL
+// keeps the host's code (untrusted_destination for a plain error).
 func TestUpFrontLookupIssuerMetadataOnly(t *testing.T) {
 	for _, fails := range []bool{false, true} {
 		t.Run(map[bool]string{false: "fetch", true: "failure"}[fails], func(t *testing.T) {
@@ -266,7 +267,7 @@ func TestUpFrontLookupIssuerMetadataOnly(t *testing.T) {
 				t.Fatal("lookup ran protected-resource discovery")
 			}
 			if fails {
-				assertCode(t, err, auth.CodeDiscoveryFailed)
+				assertCode(t, err, auth.CodeUntrustedDestination)
 				return
 			}
 			if err != nil || credential == nil || f.metadataCalls.Load() == metadataCalls {

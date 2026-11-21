@@ -40,7 +40,11 @@ The host functions have these contracts:
 - **`CheckDestination(ctx, url, purpose)`** permits each metadata, authorization
   and token URL before use. Purposes are `Metadata`, `Authorization` and
   `TokenEndpoint`. URL checks alone cannot replace connection-level DNS policy.
-  Do not log URLs: an authorization URL contains state and PKCE parameters.
+  Do not log URLs: an authorization URL contains state and PKCE parameters. A
+  refusal keeps its allowlisted `*auth.Error` code (any other error is
+  `untrusted_destination`), never carries scopes, and is the same for every
+  URL it refuses, including protected-resource and issuer metadata;
+  `discovery_failed` is only for a failed fetch or invalid metadata.
 - **`SelectClient(ctx, request, issuers, resource)`** selects a trusted local
   issuer, client and supported flow from untrusted advertisements. Independently
   approve the request destination and event/upload purpose on every call.

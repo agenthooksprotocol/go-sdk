@@ -350,7 +350,7 @@ func TestScopeContractHostErrorsCarryNoScopes(t *testing.T) {
 		_, p, r := setup(t, "client_credentials")
 		p.options.CheckDestination = func(context.Context, string, Purpose) error { return hostError }
 		_, err := p.Credential(budget(t), r)
-		contractError(t, err, auth.CodeDiscoveryFailed)
+		contractError(t, err, auth.CodeAccessDenied)
 	})
 	t.Run("ValidateToken", func(t *testing.T) {
 		_, p, r := setup(t, "client_credentials")
