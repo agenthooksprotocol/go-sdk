@@ -489,14 +489,24 @@ func (p *Provider) operate(ctx context.Context, r auth.Request, q call) (Prepara
 	if config, err = p.discover(ctx, r, header); err != nil {
 		return Preparation{}, err
 	}
-	// The client source of an unrecorded CIMD or DCR client is chosen from
-	// metadata, so its grant is not known yet: only decisions that need no
-	// grant (configuration, challenge form, ceiling) apply here.
+	// Decide again before any authorization-server request. A pre-registered
+	// client's grant key is known, so any failure (including a PKCE outcome
+	// needing consent) is returned without one. The client source of an
+	// unrecorded CIMD or DCR client is chosen from metadata, so its grant is
+	// not known yet: only decisions that need no grant (configuration,
+	// challenge form, ceiling) apply then.
 	_, _, d, err := p.decideStored(ctx, q, r, config)
 	if err != nil {
 		return Preparation{}, err
 	}
-	if d.outcome == outcomeFail && d.early {
+	if d.outcome == outcomeFail && (d.early || config.ClientID != "") {
+		if !d.early {
+			// The selected binding is learned, without issuer metadata, which
+			// a later operation fetches when it needs the authorization server.
+			if err := p.persistBinding(ctx, r, config, metadata{}); err != nil {
+				return Preparation{}, err
+			}
+		}
 		return Preparation{}, d.err
 	}
 	m := metadata{}

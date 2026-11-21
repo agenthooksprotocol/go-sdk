@@ -418,7 +418,7 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 					preset["scopes"] = *in.PresetScopes
 				}
 				r.Binding, _ = json.Marshal(preset)
-			case "stored", "unbound":
+			case "stored", "stored_without_metadata", "unbound":
 			default:
 				t.Fatalf("unknown binding %q", in.Binding)
 			}
@@ -440,10 +440,15 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 			if selected.ClientID == "" {
 				selected.source = sourceDCR
 			}
-			if in.Binding == "stored" || in.Path == "cached" {
+			if in.Binding == "stored" || in.Binding == "stored_without_metadata" || in.Path == "cached" {
 				public := cloneConfig(selected)
 				public.ClientSecret, public.RequiredScopes = "", nil
-				if ok, err := store.CompareAndSwap(budget(t), p.bindingKey(r), "", &Record{Generation: randomID(), Binding: &BindingMetadata{Config: public, IssuerMetadata: s.metadata(), Source: selected.source}}); !ok || err != nil {
+				persisted := s.metadata()
+				if in.Binding == "stored_without_metadata" {
+					// The record lacks persisted authorization-server metadata.
+					persisted = metadata{}
+				}
+				if ok, err := store.CompareAndSwap(budget(t), p.bindingKey(r), "", &Record{Generation: randomID(), Binding: &BindingMetadata{Config: public, IssuerMetadata: persisted, Source: selected.source}}); !ok || err != nil {
 					t.Fatalf("seed binding: %v", err)
 				}
 			}
