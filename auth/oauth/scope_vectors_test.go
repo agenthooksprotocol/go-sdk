@@ -58,23 +58,25 @@ type scopeDecisionVector struct {
 			Status          int    `json:"status"`
 			WWWAuthenticate string `json:"www_authenticate"`
 		} `json:"challenge"`
-		Prior401Hint []string         `json:"prior_401_hint"`
-		HostError    *vectorHostError `json:"host_error"`
-		TargetError  *struct {
+		Prior401Hint      []string         `json:"prior_401_hint"`
+		ForceRegistration bool             `json:"force_registration"`
+		HostError         *vectorHostError `json:"host_error"`
+		TargetError       *struct {
 			Check string `json:"check"`
 			Code  string `json:"code"`
 		} `json:"target_error"`
 	} `json:"input"`
 	Expect struct {
-		Code                        *string   `json:"code"`
-		Scopes                      *[]string `json:"scopes"`
-		Required                    *[]string `json:"required"`
-		Action                      string    `json:"action"`
-		AcquisitionScopes           *[]string `json:"acquisition_scopes"`
-		Retired                     *bool     `json:"retired"`
-		AuthorizationServerRequests *int32    `json:"authorization_server_requests"`
-		NetworkCalls                *int32    `json:"network_calls"`
-		NetworkCallsMax             *int32    `json:"network_calls_max"`
+		Code                           *string   `json:"code"`
+		Scopes                         *[]string `json:"scopes"`
+		Required                       *[]string `json:"required"`
+		Action                         string    `json:"action"`
+		AcquisitionScopes              *[]string `json:"acquisition_scopes"`
+		Retired                        *bool     `json:"retired"`
+		AuthorizationServerRequests    *int32    `json:"authorization_server_requests"`
+		NetworkCalls                   *int32    `json:"network_calls"`
+		NetworkCallsMax                *int32    `json:"network_calls_max"`
+		AuthorizationServerRequestsMin *int32    `json:"authorization_server_requests_min"`
 	} `json:"expect"`
 }
 
@@ -370,8 +372,14 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 			if in.Flow == "client_credentials" {
 				config.ClientSecret = "vector-secret"
 			}
-			if (in.ClientSource != "") != (in.Binding == "unbound") {
-				t.Fatal("client_source is present exactly for an unbound target")
+			if (in.ClientSource != "") != (in.Binding == "unbound" || in.ForceRegistration) {
+				t.Fatal("client_source is present exactly for an unbound target and with force_registration")
+			}
+			if in.ForceRegistration && (in.Path != "prepare" || in.ClientSource != sourceDCR) {
+				t.Fatal("force_registration applies only to a DCR prepare")
+			}
+			if (expect.AuthorizationServerRequestsMin != nil) != in.ForceRegistration {
+				t.Fatal("authorization_server_requests_min is present exactly with force_registration")
 			}
 			switch in.ClientSource {
 			case "", sourcePreregistered:
@@ -424,6 +432,7 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 				}
 				return ctx.Err()
 			}})
+
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -477,6 +486,10 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 			if in.Grant != nil {
 				g := in.Grant
 				seeded = &Record{AccessToken: "seed-access", ExpiresAt: time.Now().Add(time.Hour), Scopes: g.Granted, ClientID: config.ClientID, Generation: vectorGeneration(g.Generation)}
+				if in.ForceRegistration {
+					// Issued to the client the forced re-registration replaces.
+					seeded.ClientID = "replaced-client"
+				}
 				switch g.Token {
 				case "valid":
 				case "expired":
@@ -544,7 +557,7 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 				}
 			case "prepare":
 				var prepared Preparation
-				prepared, err = p.PrepareWith(budget(t), r, PrepareOptions{RequiredScopes: in.Explicit})
+				prepared, err = p.PrepareWith(budget(t), r, PrepareOptions{RequiredScopes: in.Explicit, ForceRegistration: in.ForceRegistration})
 				credential, login = prepared.Credential, prepared.Login
 			case "preemptive":
 				credential, err = p.PreemptiveCredential(budget(t), r)
@@ -566,6 +579,9 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 			}
 			if expect.NetworkCalls != nil && s.network() != *expect.NetworkCalls {
 				t.Fatalf("network calls = %d; want %d", s.network(), *expect.NetworkCalls)
+			}
+			if min := expect.AuthorizationServerRequestsMin; min != nil && s.authorizationServer.Load() < *min {
+				t.Fatalf("authorization-server requests = %d; want at least %d", s.authorizationServer.Load(), *min)
 			}
 			if expect.NetworkCallsMax != nil && s.network() > *expect.NetworkCallsMax {
 				t.Fatalf("network calls = %d; want at most %d", s.network(), *expect.NetworkCallsMax)
