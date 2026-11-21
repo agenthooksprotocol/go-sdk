@@ -332,6 +332,21 @@ func vectorHeader(header string) string {
 	return strings.ReplaceAll(header, "https://api.example", vectorHost.url)
 }
 
+// refusedURL reports whether a destination host error's target names this
+// URL: both metadata targets share the Metadata purpose and differ by URL.
+func refusedURL(target string, refused Purpose, raw string, purpose Purpose) bool {
+	if purpose != refused {
+		return false
+	}
+	switch target {
+	case "protected_resource_metadata":
+		return strings.Contains(raw, "/.well-known/oauth-protected-resource")
+	case "issuer_metadata":
+		return !strings.Contains(raw, "/.well-known/oauth-protected-resource")
+	}
+	return true
+}
+
 func vectorGeneration(n int) string { return fmt.Sprintf("generation-%d", n) }
 
 func TestCanonicalScopeDecisions(t *testing.T) {
@@ -355,7 +370,7 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 				callback = in.HostError.Callback
 				switch {
 				case callback == "destination":
-					targets := map[string]Purpose{"registration_endpoint": Registration, "issuer_metadata": Metadata, "token_endpoint": TokenEndpoint}
+					targets := map[string]Purpose{"registration_endpoint": Registration, "issuer_metadata": Metadata, "protected_resource_metadata": Metadata, "token_endpoint": TokenEndpoint}
 					var known bool
 					if refused, known = targets[in.HostError.Target]; !known {
 						t.Fatalf("unknown destination target %q", in.HostError.Target)
@@ -371,7 +386,7 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 			}
 			store := &writesStore{memoryStore: newStore()}
 			p, err := New(Options{Namespace: "vectors", Store: store, Secrets: newSecrets(), HTTPClient: s.server.Client(), CheckDestination: func(ctx context.Context, raw string, purpose Purpose) error {
-				if callback == "destination" && purpose == refused {
+				if callback == "destination" && refusedURL(in.HostError.Target, refused, raw, purpose) {
 					return hostErr
 				}
 				if !strings.HasPrefix(raw, s.server.URL+"/") {
@@ -663,7 +678,7 @@ func TestCanonicalCompletions(t *testing.T) {
 				mu.Lock()
 				refusal := destinationErr
 				mu.Unlock()
-				if refusal != nil && purpose == refused {
+				if refusal != nil && refusedURL(in.HostError.Target, refused, raw, purpose) {
 					return refusal
 				}
 				if !strings.HasPrefix(raw, s.server.URL+"/") {
@@ -688,7 +703,7 @@ func TestCanonicalCompletions(t *testing.T) {
 						t.Fatalf("target %q on client_selection", he.Target)
 					}
 				case "destination":
-					targets := map[string]Purpose{"token_endpoint": TokenEndpoint, "issuer_metadata": Metadata, "registration_endpoint": Registration}
+					targets := map[string]Purpose{"token_endpoint": TokenEndpoint, "issuer_metadata": Metadata, "protected_resource_metadata": Metadata, "registration_endpoint": Registration}
 					var known bool
 					if refused, known = targets[he.Target]; !known {
 						t.Fatalf("unknown destination target %q", he.Target)

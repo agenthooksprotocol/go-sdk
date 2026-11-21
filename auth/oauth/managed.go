@@ -471,7 +471,10 @@ func (p *Provider) operate(ctx context.Context, r auth.Request, q call) (Prepara
 			p.sweep(ctx, key)
 		}
 		switch {
-		case d.outcome == outcomeFail:
+		case d.outcome == outcomeFail && (q.op != opChallenge || d.early || d.disagrees):
+			// Challenge handling runs full discovery before any outcome that
+			// is not decided locally (configuration, challenge form, ceiling,
+			// server disagreement); other operations fail here.
 			return Preparation{}, d.err
 		case d.outcome == outcomeUse && !(q.force && config.Flow != pkceFlow):
 			return Preparation{Credential: p.credential(r, key, grant)}, nil

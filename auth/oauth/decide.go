@@ -168,8 +168,10 @@ type decision struct {
 	// retire asks the caller to retire the rejected (sent) generation.
 	retire bool
 	// early marks a failure decided without the grant (steps 1, 2 and 4).
-	early   bool
-	ceiling []string
+	early bool
+	// disagrees marks the step 5 refusal: the stored grant already records R.
+	disagrees bool
+	ceiling   []string
 }
 
 // decide runs the scope decision procedure; the first matching step wins.
@@ -223,7 +225,7 @@ func decide(in decisionInput) decision {
 	// 5. The server disagrees with our record.
 	if covers && (ch.kind == insufficient || ch.kind == insufficientBare) {
 		if in.sent == "" || grant.Generation == in.sent {
-			d.outcome, d.err = outcomeFail, refuse(auth.CodeAccessDenied, R...)
+			d.outcome, d.err, d.disagrees = outcomeFail, refuse(auth.CodeAccessDenied, R...), true
 			return d
 		}
 		if usable(grant) {
