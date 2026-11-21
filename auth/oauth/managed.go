@@ -452,6 +452,13 @@ func (p *Provider) retire(ctx context.Context, key string, current *Record, sent
 	return p.save(ctx, key, current.Generation, next)
 }
 
+// forcedRegistration reports a ForceRegistration that replaces the client:
+// only a client-credentials DCR client is re-registered, so for any other
+// client a usable token is still served.
+func forcedRegistration(q call, c ClientConfig) bool {
+	return q.force && c.source == sourceDCR && c.Flow != pkceFlow
+}
+
 // operate serves Credential, Challenge and Prepare: decide on the stored
 // binding without network; otherwise select the client (an unbound target
 // may fetch protected-resource metadata first), decide again before any
@@ -475,7 +482,7 @@ func (p *Provider) operate(ctx context.Context, r auth.Request, q call) (Prepara
 			// An outcome that needs no authorization-server request (including
 			// a PKCE step-up needing consent) is returned without one.
 			return Preparation{}, d.err
-		case d.outcome == outcomeUse && !(q.force && config.Flow != pkceFlow):
+		case d.outcome == outcomeUse && !forcedRegistration(q, config):
 			return Preparation{Credential: p.credential(r, key, grant)}, nil
 		case q.op == opCredential && (d.outcome == outcomeRefresh || d.outcome == outcomeAcquire) && !(config.source == sourceDCR && config.Flow != pkceFlow):
 			// A delivery renewal uses the persisted issuer metadata; challenge
@@ -504,7 +511,7 @@ func (p *Provider) operate(ctx context.Context, r auth.Request, q call) (Prepara
 	if err != nil {
 		return Preparation{}, err
 	}
-	if d.outcome == outcomeUse && config.ClientID != "" && !(q.force && config.Flow != pkceFlow) {
+	if d.outcome == outcomeUse && config.ClientID != "" && !forcedRegistration(q, config) {
 		// A usable grant (a shared partition or a lost binding record) is
 		// served without an authorization-server request; the binding is
 		// learned without issuer metadata.

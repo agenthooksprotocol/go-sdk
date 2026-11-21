@@ -375,11 +375,13 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 			if (in.ClientSource != "") != (in.Binding == "unbound" || in.ForceRegistration) {
 				t.Fatal("client_source is present exactly for an unbound target and with force_registration")
 			}
-			if in.ForceRegistration && (in.Path != "prepare" || in.ClientSource != sourceDCR) {
-				t.Fatal("force_registration applies only to a DCR prepare")
+			if in.ForceRegistration && in.Path != "prepare" {
+				t.Fatal("force_registration applies only to prepare")
 			}
-			if (expect.AuthorizationServerRequestsMin != nil) != in.ForceRegistration {
-				t.Fatal("authorization_server_requests_min is present exactly with force_registration")
+			// Only a client-credentials DCR client is re-registered.
+			replaced := in.ForceRegistration && in.ClientSource == sourceDCR && in.Flow == "client_credentials"
+			if (expect.AuthorizationServerRequestsMin != nil) != replaced {
+				t.Fatal("authorization_server_requests_min is present exactly with a forced client-credentials DCR re-registration")
 			}
 			switch in.ClientSource {
 			case "", sourcePreregistered:
@@ -486,7 +488,7 @@ func TestCanonicalScopeDecisions(t *testing.T) {
 			if in.Grant != nil {
 				g := in.Grant
 				seeded = &Record{AccessToken: "seed-access", ExpiresAt: time.Now().Add(time.Hour), Scopes: g.Granted, ClientID: config.ClientID, Generation: vectorGeneration(g.Generation)}
-				if in.ForceRegistration {
+				if replaced {
 					// Issued to the client the forced re-registration replaces.
 					seeded.ClientID = "replaced-client"
 				}
