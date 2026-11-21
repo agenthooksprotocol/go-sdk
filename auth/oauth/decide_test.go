@@ -507,3 +507,25 @@ func TestIssuerMetadataRefusalKeepsHostCode(t *testing.T) {
 		})
 	}
 }
+
+// A PKCE 403 step-up needing consent ends at decide step 9 on the stored
+// binding: interaction_required carrying R, with no network request, even
+// when the host would refuse issuer metadata.
+func TestDecidePKCEStepUpIsLocal(t *testing.T) {
+	f, p, r := setup(t, pkceFlow)
+	allowAdmin(p)
+	first := finishLogin(t, p, r)
+	check := p.options.CheckDestination
+	p.options.CheckDestination = func(ctx context.Context, raw string, purpose Purpose) error {
+		if purpose == Metadata {
+			return &auth.Error{Code: auth.CodeUntrustedDestination}
+		}
+		return check(ctx, raw, purpose)
+	}
+	before := network(f)
+	_, err := p.Challenge(budget(t), r, stepUp("admin", first.Attempt))
+	contractError(t, err, auth.CodeInteractionRequired, "admin")
+	if n := network(f) - before; n != 0 {
+		t.Fatalf("%d network calls for a local step-up decision", n)
+	}
+}
