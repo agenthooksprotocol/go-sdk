@@ -500,9 +500,18 @@ func (p *Provider) operate(ctx context.Context, r auth.Request, q call) (Prepara
 	// unrecorded CIMD or DCR client is chosen from metadata, so its grant is
 	// not known yet: only decisions that need no grant (configuration,
 	// challenge form, ceiling) apply then.
-	_, _, d, err := p.decideStored(ctx, q, r, config)
+	key, grant, d, err := p.decideStored(ctx, q, r, config)
 	if err != nil {
 		return Preparation{}, err
+	}
+	if d.outcome == outcomeUse && config.ClientID != "" && !(q.force && config.Flow != pkceFlow) {
+		// A usable grant (a shared partition or a lost binding record) is
+		// served without an authorization-server request; the binding is
+		// learned without issuer metadata.
+		if err := p.persistBinding(ctx, r, config, metadata{}); err != nil {
+			return Preparation{}, err
+		}
+		return Preparation{Credential: p.credential(r, key, grant)}, nil
 	}
 	if d.outcome == outcomeFail && (d.early || config.ClientID != "") {
 		if !d.early {
@@ -626,6 +635,12 @@ func (p *Provider) acquireLocked(ctx context.Context, r auth.Request, key string
 		return safe(ctx, err, auth.CodeProviderFailed)
 	}
 	record = cloneRecord(record)
+	if q.force && config.source == sourceDCR && config.Flow != pkceFlow && record != nil && record.ClientID != config.ClientID {
+		// A forced re-registration replaced the client: the token issued to
+		// the old one is not usable for this operation, so acquire with the
+		// new client (still requesting the previous grant).
+		record.AccessToken = ""
+	}
 	*d = p.decide(q, r, config, record)
 	if d.retire {
 		if err := p.retire(ctx, key, record, q.sent); err != nil {

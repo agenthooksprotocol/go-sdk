@@ -566,3 +566,54 @@ func TestRenewalUsesPersistedIssuerMetadata(t *testing.T) {
 		}
 	})
 }
+
+// A pre-registered client's usable grant found without a stored binding (a
+// shared grant partition, or a lost binding record) is served with no
+// authorization-server request, and the binding is learned.
+func TestFreshUseWithoutAuthorizationServer(t *testing.T) {
+	t.Run("lost binding record", func(t *testing.T) {
+		f, p, r := setup(t, pkceFlow)
+		first := finishLogin(t, p, r)
+		if ok, err := f.store.CompareAndSwap(budget(t), p.bindingKey(r), generationOf(t, f, p.bindingKey(r)), nil); !ok || err != nil {
+			t.Fatalf("drop binding: %v", err)
+		}
+		before := network(f)
+		credential, err := p.Credential(budget(t), r)
+		if err != nil || credential.Token != first.Token || network(f) != before {
+			t.Fatalf("usable grant not served locally: %v (%d calls)", err, network(f)-before)
+		}
+		if stored, _ := f.store.Load(budget(t), p.bindingKey(r)); stored == nil || stored.Binding == nil {
+			t.Fatal("binding not learned")
+		}
+	})
+	t.Run("shared grant partition", func(t *testing.T) {
+		f, p, r := setup(t, "client_credentials")
+		configure(p, func(c *ClientConfig) { c.GrantPartition = "shared" })
+		first, err := p.Credential(budget(t), r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		other := r
+		other.BackendID, other.Binding = "other-backend", nil
+		metadataCalls, tokenCalls := f.metadataCalls.Load()-f.resourceCalls.Load(), f.tokenCalls.Load()
+		credential, err := p.Challenge(budget(t), other, auth.Challenge{StatusCode: 401, Header: http.Header{}})
+		if err != nil || credential == nil || credential.Token != first.Token {
+			t.Fatalf("shared grant not served: %v", err)
+		}
+		if f.metadataCalls.Load()-f.resourceCalls.Load() != metadataCalls || f.tokenCalls.Load() != tokenCalls {
+			t.Fatal("served a usable shared grant through the authorization server")
+		}
+		if stored, _ := f.store.Load(budget(t), p.bindingKey(other)); stored == nil || stored.Binding == nil {
+			t.Fatal("binding not learned")
+		}
+	})
+}
+
+func generationOf(t *testing.T, f *fixture, key string) string {
+	t.Helper()
+	record, err := f.store.Load(budget(t), key)
+	if err != nil || record == nil {
+		t.Fatalf("load %s: %v", key, err)
+	}
+	return record.Generation
+}
