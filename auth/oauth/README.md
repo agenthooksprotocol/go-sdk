@@ -40,17 +40,25 @@ The host functions have these contracts:
 - **`CheckDestination(ctx, url, purpose)`** permits each metadata, authorization
   and token URL before use. Purposes are `Metadata`, `Authorization` and
   `TokenEndpoint`. URL checks alone cannot replace connection-level DNS policy.
-  Do not log URLs: an authorization URL contains state and PKCE parameters.
+  Do not log URLs: an authorization URL contains state and PKCE parameters. A
+  refusal keeps its allowlisted `*auth.Error` code (any other error is
+  `untrusted_destination`), never carries scopes, and is the same for every
+  URL it refuses, including protected-resource and issuer metadata;
+  `discovery_failed` is only for a failed fetch or invalid metadata.
 - **`SelectClient(ctx, request, issuers, resource)`** selects a trusted local
   issuer, client and supported flow from untrusted advertisements. Independently
   approve the request destination and event/upload purpose on every call.
-  `Scopes` requests consent; `AllowedScopes` is the local ceiling (defaults to
-  `Scopes` when nil). The ceiling governs what the adapter requests and records,
-  not what an issued token can do; enforce that in `ValidateToken`.
-  `RequiredScopes` names scopes needed by this operation. Return `ClientConfig`, including the registered redirect URI
+  `Scopes` are requested, never required; `AllowedScopes` is the local ceiling
+  (defaults to `Scopes` when nil). A requested scope outside the ceiling is
+  `invalid_configuration`; it is never dropped silently. The ceiling governs
+  what the adapter requests and records, not what an issued token can do;
+  enforce that in `ValidateToken`. `RequiredScopes` (H) names scopes this
+  operation requires. Return `ClientConfig`, including the registered redirect URI
   for PKCE and a runtime client secret for client credentials. Resolve any
   `clientSecretRef` through host secrets here. Explicit registration presets
   constrain issuer, resource, client, flow and scopes; they cannot be replaced.
+  A preset's `scopes` are requested scopes, never required: a grant that lacks
+  them still serves an operation whose required set is covered.
   `TokenAuthMethod` may select `none`, `client_secret_basic` or
   `client_secret_post`; discovery verifies issuer support. When omitted, the
   adapter selects a supported method without automatic credential-style probing.
@@ -59,7 +67,7 @@ The host functions have these contracts:
   An absent expiry remains usable until rejection; an explicit expired lifetime
   does not; `expires_in` must be a positive integer (or digit string). An
   acquisition (consent or client credentials) requests any previously granted
-  scopes plus the ceiling-filtered request, and records the response scopes
+  scopes plus the requested and required scopes, and records the response scopes
   within the previous grant plus the acquisition ceiling (the pending login's,
   or the client-credentials caller's); extra scopes are ignored. A response
   `scope` that is absent, `null` or blank (only SP, HTAB, CR, LF; including a
@@ -68,8 +76,12 @@ The host functions have these contracts:
   (single-SP separators) or the response fails as `provider_failed`. A refresh records the response within the previous grant, so it
   never broadens it, and a narrowed ceiling never shrinks it: each caller's
   ceiling filters the grant only at use; broader requirements need fresh consent or a new
-  client-credentials grant. A missing required scope fails the operation with
-  `access_denied` after the grant is saved. The host retains responsibility for trusting opaque issuer tokens.
+  client-credentials grant. A PKCE grant is refreshed only when its recorded
+  scopes cover the required set; a refresh or client-credentials grant that
+  then does not cover it fails the operation with `access_denied` carrying
+  that set, after the grant is saved. A PKCE grant that never covered it needs
+  consent: `interaction_required` carrying the set (`Prepare` creates a
+  login). Client-credentials grants are always reissued, never refreshed. The host retains responsibility for trusting opaque issuer tokens.
 - **`Store`** loads detached `Record` snapshots, atomically compares generations,
   and coordinates the complete acquisition/refresh callback for a key across
   host instances/processes. Its methods must honor context cancellation and
@@ -123,8 +135,12 @@ pending logins in the `Store` instead, so another process sharing it can
 complete one; the PKCE verifier then lives only in that pending record.
 
 Each `Prepare` that needs consent creates a new login, requesting any
-previously granted scopes plus its ceiling-filtered request; its ceiling bounds
-the grant recorded on completion. Several logins may be pending for one grant,
+previously granted scopes and its requested and required scopes; its ceiling bounds the grant recorded on
+completion. The login stores its required set (host `RequiredScopes` at prepare
+time, plus the explicit and challenged scopes it was prepared with):
+`Complete` succeeds only when the grant, within the current ceiling (a nil
+`AllowedScopes` is the current `Scopes`), covers it, and otherwise fails with `access_denied` carrying that set. The grant (and any
+rotated refresh token) is still saved and the login consumed. Several logins may be pending for one grant,
 up to `Options.MaxPendingLogins` (default 5, per Provider or per Store when
 persisted); a new one beyond the cap cancels the oldest, and expired logins are
 deleted. Completion validates state, the login's exact redirect (including a
@@ -137,11 +153,39 @@ or expiry; a callback for an ended login fails with `interaction_required`.
 `Cancel` never erases stored credentials. With `PersistLogins`, a host
 `Prepare` also deletes the grant's expired pending logins and their verifiers.
 
+`Complete` runs in order. It first finds the login named by the callback's
+`state` from stored records, before any host callback: none (absent, unknown,
+expired or ended) is `interaction_required`, however malformed. An invalid
+callback for a live login (redirect, `iss`, fragment, userinfo, not exactly one
+of `code` or `error`, a duplicated parameter, an unparseable URL) is
+`access_denied`. Current host policy then runs: a `SelectClient`, store or
+issuer-metadata failure keeps its code, and a recorded client source that
+policy no longer permits is `invalid_configuration`. Both leave the login
+pending. The login is then claimed atomically. After the claim: consent denial is `access_denied`;
+token-endpoint `invalid_grant` is `interaction_required`; `invalid_client` is
+`credential_unavailable` for a pre-registered client, `invalid_configuration`
+for a CIMD client and `interaction_required` for a DCR client (the next
+`Prepare` registers again); any other token-endpoint failure or invalid token
+response is `provider_failed`. These carry no scopes.
+
+Every `Complete` error carries an `*auth.Error` whose `LoginEnded` reports
+whether the pending login named by the callback's `state` no longer exists
+after the call: `true` when it was consumed, had expired or was unknown,
+`false` when it is still pending (for example after a stray or invalid callback
+rejected before the claim, or a host failure) or its state could not be
+determined (an uncertain claim is re-read once on a short budget). Keep waiting
+for another callback only while it is `false`. `LoginEnded` is a `*bool`, set
+(and emitted in JSON) only on `Complete` errors; it is nil on every other error
+and never copied from a host error. `errors.Is` and `errors.As` work as for
+any SDK error.
+
 To bind a new loopback port for each login, as MCP clients do, pass it with
 `PrepareWith(ctx, request, oauth.PrepareOptions{RedirectURI: redirect})`;
 `SelectClient` then need not return a `RedirectURI`. A redirect is required
 only when a login is created; lookup, refresh and `Complete` never need one.
-Redirects are HTTPS or HTTP to a literal loopback IP (`127.0.0.1`, `[::1]`);
+Redirects are HTTPS or HTTP to a literal loopback IP (`127.0.0.1`, `[::1]`),
+optionally with a query, which a callback must repeat exactly (parameters the
+authorization server adds, such as `session_state`, are allowed);
 `localhost` is `invalid_configuration` (RFC 8252 section 8.3), checked before
 client selection, registration or any login.
 
@@ -226,8 +270,8 @@ unchanged and retries once; a changed issuer or failed refetch returns
 exchange or login they rerun full discovery (honouring a challenge's
 `resource_metadata`), while a usable cached token is served without network. Ambiguous failures (timeouts,
 resets, 5xx, redirects, non-OAuth bodies) return `provider_failed` with no
-refetch or immediate retry, so a spent refresh token is never replayed. A 401 marks the rejected token stale even
-before its expiry, so it is renewed rather than resent.
+refetch or immediate retry, so a spent refresh token is never replayed. A 401 retires the rejected token
+before any other decision, even before its expiry, so it is renewed rather than resent.
 A challenge on a notification or upload is not replayed but still runs challenge
 handling, so the next operation sends a credential. Local policy still runs before using a stored
 grant. Explicit presets skip protected
@@ -235,8 +279,7 @@ resource discovery and validate the selected issuer metadata instead. On a real 
 adapter honors the Bearer challenge's `resource_metadata`, otherwise tries the
 endpoint-path and origin-root RFC 9728 locations in order. It validates the exact RFC 9728 retrieval-source resource identifier in addition
 to resource coverage, and discovers the exact selected issuer using OAuth/OIDC well-known
-locations. Server-required scopes must already be permitted locally;
-`scopes_supported` never grants consent.
+locations. `scopes_supported` never grants consent.
 
 Tokens and refresh requests carry the validated RFC 8707 resource. Default grant
 partitions isolate every namespace, backend, exact destination and event/upload
@@ -250,21 +293,53 @@ token, so it is never resent (a stale 401 leaves a newer token alone); a 403
 `insufficient_scope` keeps it. The provider never replays a delivery itself; `auth.Do` replays only intercept,
 configuration and capabilities requests, once. Explicit Authorization headers bypass the entire auth path.
 
-A Bearer 403 with `error="insufficient_scope"` can request step-up only within the
-local allowed ceiling and only for the challenged operation; it is never stored.
-PKCE reports `interaction_required` carrying the required `Scopes`; pass them to
-`Prepare(ctx, request, err.Scopes...)` to request consent. `Prepare` denies
-required scopes outside the ceiling; `access_denied` may report them for
-diagnostics only. Client credentials
-reissue noninteractively.
-If a scope challenge omits `scope`, only an explicit host requirement can
-identify a permitted step-up; otherwise it returns `access_denied`. Other 403
-responses are not auth retries. Dispatch never creates pending consent.
+An operation's required set R is the host `RequiredScopes` (H), the explicit
+scopes passed to `Prepare` (E) and the validated scopes of a Bearer 403
+`insufficient_scope` challenge (Ch). Only R is mandatory. If R contains a scope
+outside the ceiling, the operation fails with `access_denied` carrying R; the
+decision is local, before any issuer metadata, token or registration request,
+on every path (`Prepare`, `Credential`, `Challenge` and `PreemptiveCredential`,
+fresh or cached binding). Every scoped `access_denied` and
+`interaction_required` carries the full R, deduplicated and byte-sorted. Errors
+from host callbacks (`SelectClient`, `ValidateToken`, `CheckDestination`,
+stores) never carry scopes.
+
+Every entry point (`Credential` and delivery, `Prepare`/`PrepareWith`
+including `ForceRegistration`, `Challenge`, `PreemptiveCredential`) runs one
+decision procedure, and one classification step is the only place that sets an
+error's code and scopes. A 401 first retires the rejected generation if it is
+still current, whatever the outcome (a newer generation is left alone). Its
+Bearer `scope` is not a requirement: the scopes within the ceiling are
+requested only by a client-credentials acquisition in the same operation, never
+stored, and a 401 never yields `access_denied` because of its `scope`.
+
+A Bearer 403 with `error="insufficient_scope"` creates a step-up requirement only
+for the challenged operation; it is never stored. PKCE reports
+`interaction_required` carrying R; pass it to `Prepare(ctx, request,
+err.Scopes...)` to request consent. Client credentials reissue
+noninteractively. If the stored grant already records R within the ceiling
+and its generation is the one rejected (or no token was sent), the server and
+the record disagree: the challenge fails with `access_denied` carrying R,
+without replaying the token, interaction or a login. If a newer generation
+already covers R, it is served. If a scope
+challenge omits `scope`, H ∪ E is the requirement when non-empty; otherwise it
+returns `access_denied` with no scopes. A malformed challenge `scope` (empty, a tab,
+repeated, leading or trailing spaces, an invalid character, a duplicated
+parameter), two Bearer challenges or an unparseable challenge fails closed with `access_denied`, no
+scopes and recovery `none`. Other 403 responses are not auth retries. Dispatch
+never creates pending consent.
 
 Transient OAuth errors, 5xx, non-OAuth responses and transport failures preserve
 refresh material and return retry advice. Definitive PKCE `invalid_grant` drops
 the stored tokens (unless a newer record replaced them) and becomes
-`refresh_rejected`; call `Prepare` for consent. An invalid token response is
+`refresh_rejected`; call `Prepare` for consent. Outside `Complete`, other
+refresh and client-credentials token-endpoint errors carry no scopes: a
+client-credentials `invalid_grant` and `unauthorized_client` are
+`credential_unavailable`, `invalid_client` is
+`credential_unavailable` for a pre-registered client, `invalid_configuration`
+for CIMD and `interaction_required` for a PKCE DCR client (a client-credentials
+DCR registration is replaced once first), and everything else, including
+`access_denied` and `invalid_scope`, is `provider_failed`. An invalid token response is
 never dispatched and returns `provider_failed`: an initial exchange persists
 nothing, a refresh keeps only a valid rotated refresh token. No in-flight marker
 is stored, so a subsequent attempt may retry the retained refresh token. An external rotating

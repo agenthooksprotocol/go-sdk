@@ -123,7 +123,9 @@ func TestDeliveryDiagnosticCarriesTypedAuthError(t *testing.T) {
 		err  error
 		want *auth.Error
 	}{
-		{"interaction-required", errors.Join(errors.New(secret), &auth.Error{Code: auth.CodeInteractionRequired, Scopes: []string{"events", "bad scope"}}), &auth.Error{Code: auth.CodeInteractionRequired, Scopes: []string{"events"}}},
+		// A scope set with any invalid token is dropped whole, never filtered.
+		{"interaction-required", errors.Join(errors.New(secret), &auth.Error{Code: auth.CodeInteractionRequired, Scopes: []string{"events", "bad scope"}}), &auth.Error{Code: auth.CodeInteractionRequired}},
+		{"interaction-required-sorted", errors.Join(errors.New(secret), &auth.Error{Code: auth.CodeInteractionRequired, Scopes: []string{"write", "events", "write"}}), &auth.Error{Code: auth.CodeInteractionRequired, Scopes: []string{"events", "write"}}},
 		{"unclassified", errors.New(secret), &auth.Error{Code: auth.CodeProviderFailed}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

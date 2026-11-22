@@ -225,11 +225,14 @@ func TestPendingLoginKeepsCreatingCeiling(t *testing.T) {
 		t.Fatalf("narrower caller's login: %v", err)
 	}
 	f.mode.Store("admin-scope")
-	credential, err := p.Complete(budget(t), r, callback(broad.Login, "code"))
-	if err != nil {
-		t.Fatal(err)
+	// The broad login's required admin is outside the current ceiling: the
+	// completion is refused with its stored required set, the grant still saved.
+	_, err = p.Complete(budget(t), r, callback(broad.Login, "code"))
+	assertCode(t, err, auth.CodeAccessDenied)
+	if got := errorScopes(t, err); !slices.Equal(got, []string{"admin"}) {
+		t.Fatalf("completion refusal scopes = %v", got)
 	}
-	record, _ := f.store.Load(budget(t), credential.Attempt.(attempted).key)
+	record, _ := f.store.Load(budget(t), p.key(r, mustConfig(t, p, r)))
 	if !sameScopes(record.Scopes, []string{"events", "admin"}) {
 		t.Fatalf("completion not bounded by the creating ceiling: %v", record.Scopes)
 	}
@@ -385,6 +388,37 @@ func TestPersistedExpiredLoginsSweptOnPrepare(t *testing.T) {
 	cached, err := p.Prepare(budget(t), r)
 	if err != nil || cached.Credential == nil {
 		t.Fatal(err)
+	}
+	for key, record := range f.dumpStore(t, "") {
+		if strings.Contains(record, verifier) {
+			t.Fatalf("expired verifier kept at %q", key)
+		}
+	}
+}
+
+// A host Prepare that serves a usable grant without a stored binding (the
+// early use, before issuer metadata) also sweeps the grant's expired logins.
+func TestPersistedExpiredLoginsSweptOnFreshPrepare(t *testing.T) {
+	f, p, r := setup(t, "authorization_code_pkce")
+	allowAdmin(p)
+	p.options.PersistLogins, p.logins = true, f.store
+	finishLogin(t, p, r)
+	p.options.LoginLifetime = 50 * time.Millisecond
+	stepUp, err := p.Prepare(budget(t), r, "admin")
+	if err != nil || stepUp.Login == nil {
+		t.Fatal(err)
+	}
+	verifier := pendingRecord(t, p, r).Verifier
+	time.Sleep(100 * time.Millisecond)
+	// The binding record is lost: Prepare takes the early use.
+	binding, _ := f.store.Load(budget(t), p.bindingKey(r))
+	if ok, err := f.store.CompareAndSwap(budget(t), p.bindingKey(r), binding.Generation, nil); !ok || err != nil {
+		t.Fatal(err)
+	}
+	before := f.metadataCalls.Load() + f.tokenCalls.Load()
+	cached, err := p.Prepare(budget(t), r)
+	if err != nil || cached.Credential == nil || f.metadataCalls.Load()+f.tokenCalls.Load() != before {
+		t.Fatalf("early use: %v", err)
 	}
 	for key, record := range f.dumpStore(t, "") {
 		if strings.Contains(record, verifier) {

@@ -680,8 +680,10 @@ shape and HTTPS issuer/resource URLs, **not** issuer trust, permissions or netwo
 policy. The router creates no credential cache, shared registry or worker.
 
 Registration-aware failures support `errors.As(err, &authError)` for `*auth.Error`
-and its stable `Code` (plus validated required `Scopes`: on `interaction_required`
-to pass back to `Prepare`, on `access_denied` for diagnostics); a provider error that is not an `*auth.Error` becomes
+and its stable `Code` (plus the operation's required `Scopes`, deduplicated and
+byte-sorted, only from the SDK's own scope decision: on `interaction_required`
+to pass back to `Prepare`, on `access_denied` the refused required set; and,
+on `Complete` errors only, `LoginEnded`); a provider error that is not an `*auth.Error` becomes
 `provider_failed`; `errors.Is` still matches the existing auth sentinels and
 native cancellation/deadline identities. Provider messages, raw causes, callback
 URLs and response bodies are discarded. Low-level scoped token transports retain

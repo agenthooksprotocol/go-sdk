@@ -517,9 +517,14 @@ func TestForceRegistrationReplacesRegistration(t *testing.T) {
 	if f.registerCalls.Load() != 1 {
 		t.Fatal("a policy change replaced a usable registration")
 	}
-	expireGrant(t, f, credential)
+	// The current grant is still usable, but the forced re-registration
+	// replaced its client: the operation acquires with the new client.
+	tokens := len(f.tokenClients)
 	result, err := p.PrepareWith(budget(t), r, PrepareOptions{ForceRegistration: true})
 	mustToken(t, result.Credential, err, "access-dcr-2")
+	if len(f.tokenClients) != tokens+1 || f.lastTokenClient() != "dcr-2" {
+		t.Fatalf("no token request with the new client: %v", f.tokenClients[tokens:])
+	}
 	body := f.registrations[1].Body
 	if f.registerCalls.Load() != 2 || body["client_name"] != "Renamed" || body["software_id"] != "adapter" || body["scope"] != "events" || !slices.Equal(f.secrets.deleted, []string{first}) || f.secrets.count() != 1 {
 		t.Fatalf("forced re-registration %v deleted=%v", body, f.secrets.deleted)

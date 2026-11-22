@@ -6,6 +6,8 @@ import "strings"
 type Challenge struct {
 	Scheme string
 	Params map[string]string
+	// Token68 is a token68 credential in place of auth-params, if any.
+	Token68 string
 }
 
 // ParseWWWAuthenticate accepts RFC 9110 auth-params and token68 credentials.
@@ -56,8 +58,9 @@ func ParseWWWAuthenticate(header string) ([]Challenge, bool) {
 		for end < len(header) && header[end] != ',' {
 			end++
 		}
-		if ValidBearer(strings.Trim(header[i:end], " \t")) {
+		if token := strings.Trim(header[i:end], " \t"); ValidBearer(token) {
 			i = end
+			challenge.Token68 = token
 			out = append(out, challenge)
 			continue
 		}

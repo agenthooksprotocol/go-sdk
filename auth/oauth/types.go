@@ -22,10 +22,12 @@ const (
 )
 
 // ClientConfig is selected by local policy, never by an advertisement alone.
-// Scopes are requested scopes. AllowedScopes, the ceiling, defaults to Scopes;
-// it governs what the SDK requests and records, not what an issued token can
-// do (enforce that in ValidateToken). RequiredScopes are explicit operation
-// requirements. ClientSecret is a
+// Scopes are requested scopes, never required; they must lie within
+// AllowedScopes or the configuration is invalid (invalid_configuration).
+// AllowedScopes, the ceiling, defaults to Scopes; it governs what the SDK
+// requests and records, not what an issued token can do (enforce that in
+// ValidateToken). RequiredScopes are host-required operation scopes; one
+// outside the ceiling refuses the operation with access_denied. ClientSecret is a
 // runtime secret, not registration data. Its formatting is always redacted.
 //
 // A non-empty ClientID is a pre-registered client and always wins. With an
@@ -165,8 +167,16 @@ type BindingMetadata struct {
 type PendingRecord struct {
 	State, Verifier, RedirectURI string
 	// Scopes are requested; Ceiling bounds the grant recorded on completion.
-	Scopes, Ceiling []string
-	ExpiresAt       time.Time
+	// Required is the login's required set: the host RequiredScopes at
+	// prepare time plus the explicit and challenged scopes it was prepared
+	// with. Completion succeeds only when the grant, within the current
+	// ceiling, covers it.
+	Scopes, Ceiling, Required []string
+	// HasRequired marks a record that stores Required. A record without it,
+	// written by an older release, is completed against the current host
+	// RequiredScopes.
+	HasRequired bool
+	ExpiresAt   time.Time
 	// ClientID is the client the login completes with, for DCR the client
 	// registered for this login.
 	ClientID string
@@ -236,6 +246,8 @@ type Provider struct {
 	logins Store
 	// prepared counts successful host prepares per endpoint (*atomic.Uint64).
 	prepared sync.Map
+	// trace, when set by a test, observes every scope decision.
+	trace func(operation, decision)
 }
 
 // PendingLogin describes a pending login. Only the explicit AuthorizationURL

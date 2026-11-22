@@ -100,13 +100,20 @@ func TestManagedDiscoveryFallbackAndExactIssuer(t *testing.T) {
 		})
 	}
 }
+
+// A 401 scope outside the ceiling is simply not requested: it is never consent
+// and never a requirement.
 func TestManagedChallengeScopesAreNotConsent(t *testing.T) {
 	f, p, r := setup(t, "client_credentials")
 	r.Binding = nil
-	_, err := p.Challenge(budget(t), r, auth.Challenge{StatusCode: 401, Header: http.Header{"Www-Authenticate": {`Bearer scope="admin", resource_metadata="` + f.server.URL + `/custom-resource"`}}})
-	assertCode(t, err, auth.CodeAccessDenied)
-	if f.tokenCalls.Load() != 0 {
-		t.Fatal("server-selected scope reached token exchange")
+	credential, err := p.Challenge(budget(t), r, auth.Challenge{StatusCode: 401, Header: http.Header{"Www-Authenticate": {`Bearer scope="admin", resource_metadata="` + f.server.URL + `/custom-resource"`}}})
+	if err != nil || credential == nil {
+		t.Fatalf("401 scope outside the ceiling refused renewal: %v", err)
+	}
+	f.grantsMu.Lock()
+	defer f.grantsMu.Unlock()
+	if len(f.grants) != 1 || f.grants[0].Get("scope") != "events" {
+		t.Fatalf("server-selected scope reached token exchange: %v", f.grants)
 	}
 }
 func TestResourceCoverageAndChallengeParsing(t *testing.T) {

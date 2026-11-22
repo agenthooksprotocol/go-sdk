@@ -288,10 +288,11 @@ func TestLifecycleRefreshUsesPreviousGrant(t *testing.T) {
 			if mode == "refresh-omitted-scope" {
 				return
 			}
-			// The ignored broadening is not usable for an admin-requiring operation.
+			// The ignored broadening is not usable for an admin-requiring
+			// operation: the grant never covered admin, so it needs consent.
 			required = true
 			_, err = p.Credential(budget(t), r)
-			assertCode(t, err, auth.CodeAccessDenied)
+			assertCode(t, err, auth.CodeInteractionRequired)
 			required = false
 			recreated, err := New(p.options)
 			if err != nil {
@@ -319,10 +320,9 @@ func TestLifecycleAcquisitionErrorsAreFlowSpecific(t *testing.T) {
 			f, p, r := setup(t, "client_credentials")
 			f.mode.Store(mode)
 			_, err := p.Credential(budget(t), r)
+			// Token-endpoint errors carry no scope code: invalid_grant and a
+			// pre-registered client's invalid_client are credential_unavailable.
 			want := auth.CodeCredentialUnavailable
-			if mode == "invalid-client" {
-				want = auth.CodeInvalidConfiguration
-			}
 			assertCode(t, err, want)
 			if anyPending(p) {
 				t.Fatal("machine failure allocated interactive consent")
@@ -584,7 +584,7 @@ func TestLifecycleScopeCeilingWideningKeepsGrant(t *testing.T) {
 		t.Fatalf("widened ceiling orphaned the grant: %v", err)
 	}
 	record, _ := f.store.Load(budget(t), first.Attempt.(attempted).key)
-	if satisfies(record, ClientConfig{AllowedScopes: []string{"admin"}, RequiredScopes: []string{"events"}}) {
+	if d := decide(decisionInput{op: opCredential, config: ClientConfig{Scopes: []string{"admin"}, AllowedScopes: []string{"admin"}, RequiredScopes: []string{"admin"}}, grant: record}); d.outcome == outcomeUse {
 		t.Fatal("stored grant not re-intersected with the current ceiling")
 	}
 }
@@ -651,9 +651,12 @@ func TestLifecycleStepUpKeepsPreviousGrant(t *testing.T) {
 	original := p.options.SelectClient
 	p.options.SelectClient = func(ctx context.Context, r auth.Request, issuers []string, resource string) (ClientConfig, error) {
 		c, err := original(ctx, r, issuers, resource)
-		c.AllowedScopes = []string{"admin"}
+		// Requested scopes stay within the ceiling (invalid_configuration otherwise).
+		c.Scopes, c.AllowedScopes = []string{"admin"}, []string{"admin"}
 		return c, err
 	}
+	// The preset names events, so the narrowed caller uses the learned binding.
+	r.Binding = nil
 	prepared, err := p.Prepare(budget(t), r, "admin")
 	if err != nil || prepared.Login == nil || !slices.Equal(merge(loginScopes(prepared.Login)), []string{"admin", "events"}) {
 		t.Fatalf("step-up consent dropped the previous grant: %v", err)

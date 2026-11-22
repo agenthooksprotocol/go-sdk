@@ -3,6 +3,7 @@ package auth
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 
 	"github.com/agenthooksprotocol/go-sdk/internal/authutil"
 )
@@ -46,31 +47,44 @@ func (e *Error) Recovery() Recovery {
 	}
 }
 
-// SDK-returned Error carries only an allowlisted code and validated required
-// scopes: on interaction_required for a host to pass back to an explicit
-// prepare, on access_denied for diagnostics only. Formatting, recovery and JSON also
-// allowlist host-constructed values. It has no raw cause, endpoint, response
-// body, callback URL or credential fields. Use errors.As to inspect it and
-// errors.Is for the existing auth sentinels. Cancellation is joined separately,
-// without retaining the provider's error chain.
+// SDK-returned Error carries only an allowlisted code and, on
+// interaction_required and access_denied from the SDK's own scope decision,
+// the operation's required scopes: deduplicated, sorted in ascending byte
+// order. A host passes the scopes of interaction_required back to an explicit
+// prepare; access_denied names the required scopes that were refused.
+// LoginEnded is set only on errors from a login completion
+// (oauth.Provider.Complete): true when the pending login named by the
+// callback's state no longer exists after the call (consumed, expired or
+// unknown), false when it is still pending, for example after a stray or
+// invalid callback rejected before the login was claimed. It is nil on every
+// other error. Formatting, recovery and JSON also allowlist host-constructed
+// values. It has no raw cause, endpoint, response body, callback URL or
+// credential fields. Use errors.As to inspect it and errors.Is for the
+// existing auth sentinels. Cancellation is joined separately, without
+// retaining the provider's error chain.
 type Error struct {
-	Code   Code
-	Scopes []string
+	Code       Code
+	Scopes     []string
+	LoginEnded *bool
 }
 
-// MarshalJSON redacts unknown codes and scopes. A value receiver protects both
+// MarshalJSON redacts unknown codes and scopes. LoginEnded is emitted, true
+// or false, only when set (a Complete error). A value receiver protects both
 // Error values and pointers supplied by hosts.
 func (e Error) MarshalJSON() ([]byte, error) {
 	safe := Classify(&e)
 	return json.Marshal(struct {
-		Code   Code
-		Scopes []string `json:",omitempty"`
-	}{safe.Code, safe.Scopes})
+		Code       Code
+		Scopes     []string `json:",omitempty"`
+		LoginEnded *bool    `json:",omitempty"`
+	}{safe.Code, safe.Scopes, e.LoginEnded})
 }
 
 // Classify copies the first *Error in err's chain without the chain itself,
-// keeping only an allowlisted code and, where that code permits, grammatically
-// valid scopes. It returns nil when err contains no *Error.
+// keeping only an allowlisted code and, where that code permits, its scopes
+// deduplicated and byte-sorted; a set with any invalid scope token is dropped
+// whole. It never copies LoginEnded. It returns nil when err contains no
+// *Error.
 func Classify(err error) *Error {
 	var classified *Error
 	if !errors.As(err, &classified) || classified == nil {
@@ -79,9 +93,14 @@ func Classify(err error) *Error {
 	result := &Error{Code: safeCode(classified.Code)}
 	if result.Code == CodeInteractionRequired || result.Code == CodeAccessDenied {
 		for _, scope := range classified.Scopes {
-			if authutil.ValidScope(scope) {
-				result.Scopes = append(result.Scopes, scope)
+			if !authutil.ValidScope(scope) {
+				return result
 			}
+		}
+		if len(classified.Scopes) > 0 {
+			result.Scopes = append([]string(nil), classified.Scopes...)
+			slices.Sort(result.Scopes)
+			result.Scopes = slices.Compact(result.Scopes)
 		}
 	}
 	return result
