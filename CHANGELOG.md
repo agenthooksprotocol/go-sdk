@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.15.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.14.0...v0.15.0) (2026-11-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* **oauth:** SDK scope handling follows the spec decide/complete/classify procedure. Only host-required, explicit and 403-challenged scopes are required; a 401 scope is a hint only; scoped errors carry the full required set, sorted, and host errors carry none; outcomes that need no authorization-server request make none; client credentials always reissue; renewal and complete() error codes follow the spec mapping; complete() validates the callback and runs host policy before claiming the login; forced re-registration applies only to a client-credentials DCR client. auth.Error gains LoginEnded, breaking unkeyed literals; requested scopes outside AllowedScopes fail invalid_configuration.
+
+### Bug Fixes
+
+* **oauth:** route every scope outcome through decide and classify ([#58](https://github.com/agenthooksprotocol/go-sdk/issues/58)) ([e11e8b5](https://github.com/agenthooksprotocol/go-sdk/commit/e11e8b5688409de6b8723d4e9bc303963b724afe))
+
 ## [0.14.0](https://github.com/agenthooksprotocol/go-sdk/compare/v0.13.1...v0.14.0) (2026-11-19)
 
 
