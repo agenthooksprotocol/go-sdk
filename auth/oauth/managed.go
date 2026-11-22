@@ -511,6 +511,11 @@ func (p *Provider) operate(ctx context.Context, r auth.Request, q call) (Prepara
 	if err != nil {
 		return Preparation{}, err
 	}
+	if q.op == opPrepare && config.ClientID != "" && (d.outcome == outcomeUse || (d.outcome == outcomeFail && !d.early)) {
+		// A host prepare returning here, as on the stored binding, deletes the
+		// grant's expired persisted pending logins.
+		p.sweep(ctx, key)
+	}
 	if d.outcome == outcomeUse && config.ClientID != "" && !forcedRegistration(q, config) {
 		// A usable grant (a shared partition or a lost binding record) is
 		// served without an authorization-server request; the binding is
